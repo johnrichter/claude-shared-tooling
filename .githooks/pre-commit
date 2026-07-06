@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Local privacy guardrail (Layer 1 — convenience, bypassable with --no-verify).
+# Enable once per clone:  git config core.hooksPath .githooks
+# The authority is the CI required check (.gitlab-ci.yml).
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+python3 "$ROOT/scripts/check_privacy.py" --root "$ROOT"
