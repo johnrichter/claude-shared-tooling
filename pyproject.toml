@@ -4,10 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-shared-lib-public"
-version = "0.1.0"
-description = "Public, dependency-free shared tools and schemas for AI-agent workspaces (git commit re-signing, sitemap parsing, article-metadata extraction)."
+version = "0.2.0"
+description = "Public shared tools and schemas for AI-agent workspaces (git commit re-signing, sitemap parsing, article-metadata extraction). Stdlib-preferred for portability; justified third-party deps permitted when vendored."
 readme = "README.md"
 requires-python = ">=3.10"
+# Dependency policy: stdlib-preferred for portability. A third-party dependency is
+# acceptable when justified (avoids reinventing the wheel / is the best way to get the
+# functionality) and vendored via the standard mechanism, subject to OSS-license clearance.
+# Stdlib-only in fact today — no runtime dependency yet.
 dependencies = []
 # License: TODO — pick per the org OSS-licensing policy before any external publish.
 
