@@ -108,15 +108,21 @@ def compute_base(unsigned: list[str], *, cwd: str) -> str | None:
     commits (each is a descendant of its parent, which is >= base) and nothing unsigned sits
     at or below base (any such commit would itself be detected and pull the base lower).
     Correct for chained unsigned commits (u1 is ancestor of u2) and for unsigned commits on
-    parallel branches that both merge into the tip. Returns None only when an unsigned commit
-    is a root commit (no parents) -- the caller then rewrites from the root.
+    parallel branches that both merge into the tip. Returns None as soon as ANY unsigned
+    commit is a root commit (no parents), not only when no unsigned commit has parents --
+    a root's parentless status can otherwise be masked by it also being another unsigned
+    commit's parent, which would put it in `all_parents` and wrongly become the boundary
+    itself (excluding it from the rewrite). The caller then rewrites from the root.
 
     May over-approximate the range (rewrite some already-signed commits); that is harmless
     because re-signing reuses each tree exactly, so those commits stay byte-identical.
     """
     all_parents: set[str] = set()
     for u in unsigned:
-        all_parents.update(parents(u, cwd=cwd))
+        ps = parents(u, cwd=cwd)
+        if not ps:
+            return None  # an unsigned commit is a root -> rewrite the whole ref from the root
+        all_parents.update(ps)
     if not all_parents:
         return None
     plist = sorted(all_parents)

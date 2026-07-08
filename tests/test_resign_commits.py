@@ -385,6 +385,34 @@ class TestUnsignedRoot(SigningTestCase):
         self.assertTrue(all(results.values()), msg=str(results))
 
 
+class TestUnsignedRootWithUnsignedChild(SigningTestCase):
+    """Regression for the masked-root bug: an unsigned ROOT that is ALSO the parent of
+    another unsigned commit. The old code put the root into `all_parents` (because it IS
+    the child's parent) and, since that was the only parent, returned the root itself as
+    `base` -- but `rebuild` treats `base..tip` as EXCLUSIVE, so the root was silently never
+    re-signed. The fix returns None as soon as ANY unsigned commit has no parents, checked
+    before the parent-union logic can mask it."""
+
+    def test_unsigned_root_with_unsigned_child_resigns_root_too(self):
+        r = self.repo
+        root = r.commit("f", "0\n", "root (UNSIGNED)", sign=False)
+        child = r.commit("f", "1\n", "child of root (UNSIGNED)", sign=False)
+        tip = child
+
+        unsigned = resign_commits.find_unsigned("main", cwd=self.cwd)
+        self.assertEqual(set(unsigned), {root, child})  # find_unsigned lists newest-first
+
+        base = resign_commits.compute_base(unsigned, cwd=self.cwd)
+        self.assertIsNone(base)  # must rewrite the WHOLE history, root included
+
+        new_tip, mapping = resign_commits.rebuild(base, tip, cwd=self.cwd)
+        self.assertEqual(len(mapping), 2)  # both root and child rewritten
+        self.assertIn(root, mapping)  # the root itself was NOT skipped
+        self.assertNotIn("N", r.flags(new_tip))  # end-to-end: nothing unsigned remains
+        results = self._verify_map(tip, new_tip, base, mapping)
+        self.assertTrue(all(results.values()), msg=str(results))
+
+
 class TestMessageFidelity(SigningTestCase):
     """Commit messages with unicode, multiple paragraphs, and trailing whitespace must
     survive rebuild byte-for-byte -- including the edge case of a message stored with no
