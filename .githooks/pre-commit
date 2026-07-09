@@ -5,3 +5,4 @@
 set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 python3 "$ROOT/scripts/check_privacy.py" --root "$ROOT"
+python3 "$ROOT/scripts/check_no_raw_binary.py" --staged --root "$ROOT"
