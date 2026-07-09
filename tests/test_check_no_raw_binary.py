@@ -39,6 +39,10 @@ def _init_repo(root: Path) -> None:
     _run_git(root, "init", "-q")
     _run_git(root, "config", "user.email", "test@example.com")
     _run_git(root, "config", "user.name", "Test")
+    # Hermetic against ambient signing config (e.g. global commit.gpgsign=true
+    # with an SSH-agent-backed signer): the throwaway repo must commit
+    # regardless of host signing setup or agent availability.
+    _run_git(root, "config", "commit.gpgsign", "false")
 
 
 class NoRawBinaryTests(unittest.TestCase):
