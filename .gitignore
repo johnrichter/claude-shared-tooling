@@ -37,12 +37,14 @@ id_ed25519_*
 .env
 .env.*
 *.env
+.envrc
 !.env.example
 !.env.sample
 !.env.template
 !*.env.example
 !*.env.sample
 !*.env.template
+!.envrc.example
 
 # Cloud provider credentials
 .aws/
