@@ -1,15 +1,182 @@
-# Build / packaging artifacts
-*.egg-info/
-dist/
-build/
+###############################################################################
+# SECRETS — never commit
+###############################################################################
 
-# Virtual environments
+# SSH private keys — base names + per-variant <variant>_* + generic forms; .pub kept trackable
+id_rsa
+id_rsa_*
+id_dsa
+id_dsa_*
+id_ecdsa
+id_ecdsa_*
+id_ed25519
+id_ed25519_*
+*_rsa
+*_dsa
+*_ecdsa
+*_ed25519
+*.ppk
+!*.pub
+
+# Other private-key / cert file types
+*.pem
+*.key
+
+# TLS / PKCS / keystore key material
+*.p12
+*.pfx
+*.p8
+*.keystore
+*.jks
+
+# Apple signing material
+*.mobileprovision
+*.certSigningRequest
+
+# Environment files — but keep committed examples/templates
+.env
+.env.*
+*.env
+!.env.example
+!.env.sample
+!.env.template
+!*.env.example
+!*.env.sample
+!*.env.template
+
+# Cloud provider credentials
+.aws/
+.gcloud/
+gcloud-*.json
+*-service-account*.json
+.azure/
+
+# Generic credential / secret files
+.netrc
+.git-credentials
+credentials
+credentials.json
+secrets.*
+*.secret
+.npmrc
+.pypirc
+
+###############################################################################
+# OS cruft
+###############################################################################
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.Trashes
+.DocumentRevisions-V100
+.fseventsd
+.VolumeIcon.icns
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+.directory
+.Trash-*
+
+###############################################################################
+# Editor / IDE — modern tools only (legacy Eclipse/Emacs/NotepadPP/Sublime
+# collage lives in the machine-global gitignore, not repeated here)
+###############################################################################
+
+# JetBrains (IntelliJ, PyCharm, GoLand, etc.)
+.idea/
+
+# VS Code
+.vscode/
+
+# Vim
+*.swp
+*.swo
+*.swn
+Session.vim
+.netrwhist
+
+# Generic editor backup
+*~
+
+###############################################################################
+# Universal caches / logs / temp
+###############################################################################
+
+*.log
+*.tmp
+*.bak
+.cache/
+tmp/
+*.pid
+
+###############################################################################
+# Claude Code
+###############################################################################
+
+# Local settings are machine-specific — never shared
+**/.claude/settings.local.json
+
+###############################################################################
+# Language / build-output — repo-specific
+###############################################################################
+
+# Python
 .venv/
 venv/
-
-# Python bytecode / caches
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+dist/
+build/
+
+# Go
+*.test
+*.out
+
+# Node / TypeScript
+node_modules/
+.next/
+*.tsbuildinfo
+.turbo/
+
+# Rust
+target/
+
+# .NET
+obj/
+
+# Mobile — iOS/Xcode
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcarchive
+Pods/
+.swiftpm/
+
+# Mobile — Android/Gradle
+.gradle/
+local.properties
+.cxx/
+captures/
+
+# Mobile — Flutter
+.dart_tool/
+.flutter-plugins*
