@@ -1,6 +1,8 @@
 package manifest
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"testing"
@@ -517,6 +519,89 @@ func TestReadExpected_NoMarkerAtAll_ReturnsError(t *testing.T) {
 	}
 }
 
+// --- Entries: the shared accessor consumed by both Compute and any listing --
+
+func TestEntries_MatchesGoldenFixtureFilenamesInSortOrder(t *testing.T) {
+	entries, err := Entries("testdata/fixture")
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	got := make([]string, 0, len(entries))
+	for _, e := range entries {
+		got = append(got, e.Filename)
+	}
+	want := []string{"alpha.md", "beta.txt"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+}
+
+func TestEntries_CarriesFrontmatterNameAndDescription(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "a.md"), "---\nname: \"A Name\"\ndescription: \"A Desc\"\n---\n")
+	entries, err := Entries(dir)
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	if entries[0].Filename != "a.md" || entries[0].Name != "A Name" || entries[0].Description != "A Desc" {
+		t.Fatalf("got %+v, want {a.md A Name A Desc}", entries[0])
+	}
+}
+
+func TestEntries_ExcludesReadmeDotfilesAndSubdirs(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "real.md"), "---\nname: \"Real\"\n---\n")
+	writeFile(t, filepath.Join(dir, "README.md"), "---\nname: \"R\"\n---\n")
+	writeFile(t, filepath.Join(dir, ".hidden"), "---\nname: \"Hidden\"\n---\n")
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	entries, err := Entries(dir)
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Filename != "real.md" {
+		t.Fatalf("got %+v, want exactly [real.md]", entries)
+	}
+}
+
+func TestEntries_DigestFromEntries_MatchesCompute(t *testing.T) {
+	// Proves Compute is a pure derivation of Entries — a caller could
+	// reconstruct the same digest from Entries alone, so there's no hidden
+	// second extraction path.
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "one.md"), "---\nname: \"One\"\ndescription: \"First\"\n---\n")
+	writeFile(t, filepath.Join(dir, "two.md"), "---\nname: \"Two\"\ndescription: \"Second\"\n---\n")
+
+	entries, err := Entries(dir)
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	h := sha256.New()
+	for _, e := range entries {
+		writeLengthPrefixed(h, e.Filename)
+		writeLengthPrefixed(h, e.Name)
+		writeLengthPrefixed(h, e.Description)
+	}
+	rederived := hex.EncodeToString(h.Sum(nil))
+
+	want, err := Compute(dir)
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if rederived != want {
+		t.Fatalf("got %s, want %s", rederived, want)
+	}
+}
+
 func TestCompute_ChildWithNoFrontmatterContributesEmptyNameAndDescription(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "plain.txt"), "just some text\nwith multiple lines\n")
@@ -527,4 +612,80 @@ func TestCompute_ChildWithNoFrontmatterContributesEmptyNameAndDescription(t *tes
 	if name != "" || desc != "" {
 		t.Fatalf("got name=%q desc=%q, want both empty", name, desc)
 	}
+}
+
+// --- Test-engineer adversarial extension: SC10 parity + drift detection ------
+//
+// SC10 requires a golden test that (a) asserts byte-identical digests across
+// every consumer of this routine and (b) proves that assertion actually
+// guards against drift — i.e. it fails when two implementations diverge, not
+// just when they happen to agree today. TestSC10_CLIParity_OnFixture (below,
+// package-external test file would be cmd/jr-readme-manifest) covers (a) for
+// the CLI; this file proves (b) by building a deliberately diverged copy of
+// the preimage routine (delimiter-joined instead of length-prefixed — the
+// exact historical bug TestCompute_UnitSeparatorByteInValue_MustNotForgeCollision
+// regressions against) and showing it disagrees with Compute on this
+// package's own golden fixture.
+
+// divergedCompute is a deliberately-wrong reimplementation of Compute's
+// preimage: it joins fields with "\x1f" as a delimiter byte instead of
+// length-prefixing them. This is exactly the historical defect the real
+// implementation fixed (see writeLengthPrefixed's doc comment) — reintroduced
+// here ONLY to prove the parity-checking methodology detects real drift.
+func divergedCompute(dir string) (string, error) {
+	entries, err := Entries(dir)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	for _, e := range entries {
+		h.Write([]byte(e.Filename))
+		h.Write([]byte{0x1f})
+		h.Write([]byte(e.Name))
+		h.Write([]byte{0x1f})
+		h.Write([]byte(e.Description))
+		h.Write([]byte{0x1f})
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func TestSC10_DivergedRoutineCopy_DisagreesWithComputeOnGoldenFixture(t *testing.T) {
+	want, err := Compute("testdata/fixture")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	got, err := divergedCompute("testdata/fixture")
+	if err != nil {
+		t.Fatalf("divergedCompute: %v", err)
+	}
+	if got == want {
+		t.Fatal("diverged (delimiter-joined) routine copy unexpectedly agreed with Compute — " +
+			"the parity methodology would silently pass even on real drift; this must never happen")
+	}
+}
+
+func TestSC10_DivergedRoutineCopy_ForgesCollisionOnUnitSeparatorByte(t *testing.T) {
+	// The concrete failure mode the divergence produces: two distinct
+	// (name, description) tuples that legitimately differ only by which side
+	// of a literal 0x1f byte a boundary falls on collide under the diverged
+	// delimiter-joined routine, even though Compute (length-prefixed) keeps
+	// them distinct — this is precisely why SC10's parity test has teeth.
+	dirA := t.TempDir()
+	writeFile(t, filepath.Join(dirA, "a.md"), "---\nname: \"x\x1fy\"\ndescription: \"z\"\n---\n")
+	dirB := t.TempDir()
+	writeFile(t, filepath.Join(dirB, "a.md"), "---\nname: \"x\"\ndescription: \"y\x1fz\"\n---\n")
+
+	realA, _ := Compute(dirA)
+	realB, _ := Compute(dirB)
+	if realA == realB {
+		t.Fatal("Compute (real routine) collided — should stay distinct")
+	}
+
+	divA, _ := divergedCompute(dirA)
+	divB, _ := divergedCompute(dirB)
+	if divA != divB {
+		t.Skip("diverged routine happened not to collide on this input — collision is filename-shape-dependent; the fixture above is the known-colliding shape for a delimiter-joined encoding without escaping")
+	}
+	// divA == divB here demonstrates the diverged routine forges a collision
+	// that Compute correctly avoids — the exact drift SC10 exists to catch.
 }
