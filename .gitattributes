@@ -1,22 +1,224 @@
-# Root LFS safety net — routes common binary extensions to LFS by default so a
-# binary lands as a pointer, not a raw blob, even before a per-directory
-# .gitattributes exists for it.
-# Extensionless or unlisted-extension binaries are still caught by
-# scripts/check_no_raw_binary.py (content-based, not name-based).
+#
+# Self-contained git attributes for this repo — mirrors the machine-global set
+# so nothing here depends on any given machine's global gitattributes. Text is
+# normalized to LF; every binary class routes through Git LFS (never a raw blob),
+# and scripts/check_no_raw_binary.py is the content-based backstop for binaries
+# an extension glob misses (extensionless or unlisted).
+#
+# NOTE: git does NOT support inline/trailing comments in .gitattributes — a `#`
+# mid-line corrupts the rule. Every comment is on its own line, above its rule.
+#
+
+#
+# Repo-local — extensionless prebuilt binaries under .bin/, matched by name
+# glob since they carry no extension for the class rules below to catch.
+#
+# Knowledge-agent `ka` binaries (one per OS/arch)
 .bin/ka-* filter=lfs diff=lfs merge=lfs -text
+# README-manifest CLI binaries (one per OS/arch)
 .bin/jr-readme-manifest-* filter=lfs diff=lfs merge=lfs -text
-*.bin filter=lfs diff=lfs merge=lfs -text
-*.safetensors filter=lfs diff=lfs merge=lfs -text
-*.onnx filter=lfs diff=lfs merge=lfs -text
-*.gguf filter=lfs diff=lfs merge=lfs -text
-*.pt filter=lfs diff=lfs merge=lfs -text
-*.pth filter=lfs diff=lfs merge=lfs -text
-*.tar.gz filter=lfs diff=lfs merge=lfs -text
-*.tgz filter=lfs diff=lfs merge=lfs -text
+
+#
+# Line endings — auto-detect text vs binary, normalize text to LF; a few
+# Windows script types are pinned to CRLF, and patch/diff bytes are preserved.
+#
+# Default: content-detect text, store + check out text as LF
+* text=auto eol=lf
+# Windows batch script — must stay CRLF
+*.bat text eol=crlf
+# Windows command script — must stay CRLF
+*.cmd text eol=crlf
+# PowerShell script — must stay CRLF
+*.ps1 text eol=crlf
+# Patch file — keep exact bytes; never eol-normalize (would corrupt the patch)
+*.patch -text
+# Diff file — keep exact bytes; never eol-normalize
+*.diff -text
+
+#
+# Images — raster photos/graphics, plus vector and editor project files.
+#
+# Portable Network Graphics
+*.png filter=lfs diff=lfs merge=lfs -text
+# JPEG image
+*.jpg filter=lfs diff=lfs merge=lfs -text
+# JPEG image
+*.jpeg filter=lfs diff=lfs merge=lfs -text
+# Graphics Interchange Format image
+*.gif filter=lfs diff=lfs merge=lfs -text
+# Windows bitmap image
+*.bmp filter=lfs diff=lfs merge=lfs -text
+# Tagged Image File Format image
+*.tiff filter=lfs diff=lfs merge=lfs -text
+# Icon image
+*.ico filter=lfs diff=lfs merge=lfs -text
+# WebP image
+*.webp filter=lfs diff=lfs merge=lfs -text
+# AV1 Image File Format
+*.avif filter=lfs diff=lfs merge=lfs -text
+# High Efficiency Image Container (Apple)
+*.heic filter=lfs diff=lfs merge=lfs -text
+# Adobe Photoshop document
+*.psd filter=lfs diff=lfs merge=lfs -text
+# Adobe Illustrator document
+*.ai filter=lfs diff=lfs merge=lfs -text
+# Encapsulated PostScript vector image
+*.eps filter=lfs diff=lfs merge=lfs -text
+
+#
+# Video / audio — container and codec media files, always binary.
+#
+# MPEG-4 video
+*.mp4 filter=lfs diff=lfs merge=lfs -text
+# QuickTime video
+*.mov filter=lfs diff=lfs merge=lfs -text
+# WebM video
+*.webm filter=lfs diff=lfs merge=lfs -text
+# Audio Video Interleave video
+*.avi filter=lfs diff=lfs merge=lfs -text
+# Matroska video
+*.mkv filter=lfs diff=lfs merge=lfs -text
+# MPEG audio
+*.mp3 filter=lfs diff=lfs merge=lfs -text
+# Waveform audio
+*.wav filter=lfs diff=lfs merge=lfs -text
+# Free Lossless Audio Codec
+*.flac filter=lfs diff=lfs merge=lfs -text
+# Ogg Vorbis audio
+*.ogg filter=lfs diff=lfs merge=lfs -text
+# MPEG-4 audio
+*.m4a filter=lfs diff=lfs merge=lfs -text
+
+#
+# Fonts — compiled/packaged font files, binary.
+#
+# Web Open Font Format
+*.woff filter=lfs diff=lfs merge=lfs -text
+# Web Open Font Format 2
+*.woff2 filter=lfs diff=lfs merge=lfs -text
+# TrueType font
+*.ttf filter=lfs diff=lfs merge=lfs -text
+# OpenType font
+*.otf filter=lfs diff=lfs merge=lfs -text
+# Embedded OpenType font
+*.eot filter=lfs diff=lfs merge=lfs -text
+
+#
+# Archives / disk images — compressed bundles and mountable images.
+#
+# ZIP archive
 *.zip filter=lfs diff=lfs merge=lfs -text
+# gzip-compressed file
 *.gz filter=lfs diff=lfs merge=lfs -text
-*.dylib filter=lfs diff=lfs merge=lfs -text
-*.so filter=lfs diff=lfs merge=lfs -text
-*.a filter=lfs diff=lfs merge=lfs -text
-*.xlsx filter=lfs diff=lfs merge=lfs -text
+# gzip-compressed tarball
+*.tar.gz filter=lfs diff=lfs merge=lfs -text
+# gzip-compressed tarball (short form)
+*.tgz filter=lfs diff=lfs merge=lfs -text
+# xz-compressed tarball
+*.tar.xz filter=lfs diff=lfs merge=lfs -text
+# Tape archive
+*.tar filter=lfs diff=lfs merge=lfs -text
+# bzip2-compressed file
+*.bz2 filter=lfs diff=lfs merge=lfs -text
+# xz-compressed file
+*.xz filter=lfs diff=lfs merge=lfs -text
+# Zstandard-compressed file
+*.zst filter=lfs diff=lfs merge=lfs -text
+# 7-Zip archive
+*.7z filter=lfs diff=lfs merge=lfs -text
+# RAR archive
+*.rar filter=lfs diff=lfs merge=lfs -text
+# StuffIt archive
+*.sit filter=lfs diff=lfs merge=lfs -text
+# Apple disk image
+*.dmg filter=lfs diff=lfs merge=lfs -text
+# Optical disc image
+*.iso filter=lfs diff=lfs merge=lfs -text
+
+#
+# ML / data — model weights, tensors, and columnar/scientific data formats.
+#
+# Generic binary data (weights, caches)
+*.bin filter=lfs diff=lfs merge=lfs -text
+# Safetensors model weights
+*.safetensors filter=lfs diff=lfs merge=lfs -text
+# ONNX model
+*.onnx filter=lfs diff=lfs merge=lfs -text
+# GGUF model (llama.cpp)
+*.gguf filter=lfs diff=lfs merge=lfs -text
+# PyTorch serialized tensor/model
+*.pt filter=lfs diff=lfs merge=lfs -text
+# PyTorch checkpoint
+*.pth filter=lfs diff=lfs merge=lfs -text
+# NumPy array
+*.npy filter=lfs diff=lfs merge=lfs -text
+# NumPy zipped arrays
+*.npz filter=lfs diff=lfs merge=lfs -text
+# Apache Parquet columnar data
+*.parquet filter=lfs diff=lfs merge=lfs -text
+# Protocol Buffers / TensorFlow frozen graph
+*.pb filter=lfs diff=lfs merge=lfs -text
+# TensorFlow Lite model
+*.tflite filter=lfs diff=lfs merge=lfs -text
+# HDF5 / Keras model
+*.h5 filter=lfs diff=lfs merge=lfs -text
+
+#
+# Office documents — Microsoft Office + OpenDocument, stored as zip containers.
+#
+# Microsoft Word (legacy)
+*.doc filter=lfs diff=lfs merge=lfs -text
+# Microsoft Word
+*.docx filter=lfs diff=lfs merge=lfs -text
+# Microsoft Excel (legacy)
 *.xls filter=lfs diff=lfs merge=lfs -text
+# Microsoft Excel
+*.xlsx filter=lfs diff=lfs merge=lfs -text
+# Microsoft PowerPoint (legacy)
+*.ppt filter=lfs diff=lfs merge=lfs -text
+# Microsoft PowerPoint
+*.pptx filter=lfs diff=lfs merge=lfs -text
+# OpenDocument Text
+*.odt filter=lfs diff=lfs merge=lfs -text
+
+#
+# Executables / objects / libraries — compiled machine code and link artifacts.
+#
+# Windows executable
+*.exe filter=lfs diff=lfs merge=lfs -text
+# Windows dynamic-link library
+*.dll filter=lfs diff=lfs merge=lfs -text
+# Shared object (Linux/Unix library)
+*.so filter=lfs diff=lfs merge=lfs -text
+# macOS dynamic library
+*.dylib filter=lfs diff=lfs merge=lfs -text
+# Static library archive
+*.a filter=lfs diff=lfs merge=lfs -text
+# Compiled object file
+*.o filter=lfs diff=lfs merge=lfs -text
+# Compiled Java class
+*.class filter=lfs diff=lfs merge=lfs -text
+# WebAssembly binary
+*.wasm filter=lfs diff=lfs merge=lfs -text
+# Native Node.js addon
+*.node filter=lfs diff=lfs merge=lfs -text
+
+#
+# Databases — on-disk database files.
+#
+# SQLite database
+*.sqlite filter=lfs diff=lfs merge=lfs -text
+# Generic database file
+*.db filter=lfs diff=lfs merge=lfs -text
+
+#
+# Other binary — remaining single-purpose binary formats.
+#
+# Packet capture
+*.pcap filter=lfs diff=lfs merge=lfs -text
+# Portable Document Format
+*.pdf filter=lfs diff=lfs merge=lfs -text
+# Java archive
+*.jar filter=lfs diff=lfs merge=lfs -text
+# Adobe AIR package
+*.air filter=lfs diff=lfs merge=lfs -text
