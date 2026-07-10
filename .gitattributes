@@ -204,10 +204,111 @@
 *.node filter=lfs diff=lfs merge=lfs -text
 
 #
+# Language & compiler build artifacts — compiled/packaged toolchain outputs.
+# Source and manifest files stay text; only binary artifacts are listed here.
+# Go/Rust/Zig native binaries carry no extension and are caught by content via
+# scripts/check_no_raw_binary.py, not by an extension rule.
+#
+# Python compiled bytecode
+*.pyc filter=lfs diff=lfs merge=lfs -text
+# Python optimized bytecode
+*.pyo filter=lfs diff=lfs merge=lfs -text
+# Python C-extension module (Windows)
+*.pyd filter=lfs diff=lfs merge=lfs -text
+# Python pickle
+*.pkl filter=lfs diff=lfs merge=lfs -text
+# Python pickle
+*.pickle filter=lfs diff=lfs merge=lfs -text
+# Python wheel (binary zip)
+*.whl filter=lfs diff=lfs merge=lfs -text
+# Python egg (binary zip)
+*.egg filter=lfs diff=lfs merge=lfs -text
+# Rust compiled library
+*.rlib filter=lfs diff=lfs merge=lfs -text
+# Rust crate metadata
+*.rmeta filter=lfs diff=lfs merge=lfs -text
+# Erlang/Elixir BEAM bytecode
+*.beam filter=lfs diff=lfs merge=lfs -text
+# Erlang release archive
+*.ez filter=lfs diff=lfs merge=lfs -text
+# C/C++ object (Windows)
+*.obj filter=lfs diff=lfs merge=lfs -text
+# C/C++ static library (Windows)
+*.lib filter=lfs diff=lfs merge=lfs -text
+# C/C++ debug symbols (Windows PDB)
+*.pdb filter=lfs diff=lfs merge=lfs -text
+# C/C++ precompiled header (MSVC)
+*.pch filter=lfs diff=lfs merge=lfs -text
+# C/C++ precompiled header (GCC)
+*.gch filter=lfs diff=lfs merge=lfs -text
+# Ruby gem package
+*.gem filter=lfs diff=lfs merge=lfs -text
+# Java web application archive
+*.war filter=lfs diff=lfs merge=lfs -text
+# Java enterprise application archive
+*.ear filter=lfs diff=lfs merge=lfs -text
+# Java linkable module (jlink)
+*.jmod filter=lfs diff=lfs merge=lfs -text
+# .NET NuGet package (binary zip)
+*.nupkg filter=lfs diff=lfs merge=lfs -text
+# .NET NuGet symbol package
+*.snupkg filter=lfs diff=lfs merge=lfs -text
+# .NET strong-name signing key
+*.snk filter=lfs diff=lfs merge=lfs -text
+# PHP archive (Phar)
+*.phar filter=lfs diff=lfs merge=lfs -text
+# Swift compiled module
+*.swiftmodule filter=lfs diff=lfs merge=lfs -text
+# Swift compiled module documentation
+*.swiftdoc filter=lfs diff=lfs merge=lfs -text
+# Kotlin/Native library
+*.klib filter=lfs diff=lfs merge=lfs -text
+# Dart kernel (compiled)
+*.dill filter=lfs diff=lfs merge=lfs -text
+# Binary .mod file — overloaded extension: an Amiga/ProTracker music module
+# or a 3D-model format (the binary meanings this rule targets).
+*.mod filter=lfs diff=lfs merge=lfs -text
+# Go's go.mod is a text manifest — override the *.mod rule above so it is never
+# LFS-routed (normal text diff/merge, at any directory depth).
+go.mod text=auto eol=lf diff merge -filter
+
+#
+# Mobile & app packages — built application bundles/packages (binary).
+#
+# iOS application archive
+*.ipa filter=lfs diff=lfs merge=lfs -text
+# Android application package
+*.apk filter=lfs diff=lfs merge=lfs -text
+# Android App Bundle
+*.aab filter=lfs diff=lfs merge=lfs -text
+# Android library archive
+*.aar filter=lfs diff=lfs merge=lfs -text
+# Dalvik executable
+*.dex filter=lfs diff=lfs merge=lfs -text
+# Unity package
+*.unitypackage filter=lfs diff=lfs merge=lfs -text
+# Unity asset bundle
+*.unity3d filter=lfs diff=lfs merge=lfs -text
+# macOS Installer / Roku signed package
+*.pkg filter=lfs diff=lfs merge=lfs -text
+
+#
+# Signing keys / keystores — binary key material. NOTE: these are secrets and
+# are ALSO gitignored so they are never committed; this LFS route is only a
+# belt-and-suspenders guard for a force-add, not the primary protection.
+#
+# Java keystore
+*.jks filter=lfs diff=lfs merge=lfs -text
+# Java / Android keystore
+*.keystore filter=lfs diff=lfs merge=lfs -text
+
+#
 # Databases — on-disk database files.
 #
 # SQLite database
 *.sqlite filter=lfs diff=lfs merge=lfs -text
+# SQLite database (alternative extension)
+*.sqlite3 filter=lfs diff=lfs merge=lfs -text
 # Generic database file
 *.db filter=lfs diff=lfs merge=lfs -text
 
