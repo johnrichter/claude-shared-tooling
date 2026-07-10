@@ -1,6 +1,8 @@
 package manifest
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"testing"
@@ -514,6 +516,89 @@ func TestReadExpected_NoMarkerAtAll_ReturnsError(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "README.md"), "# Just a plain README, no marker\n")
 	if _, err := ReadExpected(dir); err == nil {
 		t.Fatal("want error for missing marker, got nil")
+	}
+}
+
+// --- Entries: the shared accessor consumed by both Compute and any listing --
+
+func TestEntries_MatchesGoldenFixtureFilenamesInSortOrder(t *testing.T) {
+	entries, err := Entries("testdata/fixture")
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	got := make([]string, 0, len(entries))
+	for _, e := range entries {
+		got = append(got, e.Filename)
+	}
+	want := []string{"alpha.md", "beta.txt"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+}
+
+func TestEntries_CarriesFrontmatterNameAndDescription(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "a.md"), "---\nname: \"A Name\"\ndescription: \"A Desc\"\n---\n")
+	entries, err := Entries(dir)
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	if entries[0].Filename != "a.md" || entries[0].Name != "A Name" || entries[0].Description != "A Desc" {
+		t.Fatalf("got %+v, want {a.md A Name A Desc}", entries[0])
+	}
+}
+
+func TestEntries_ExcludesReadmeDotfilesAndSubdirs(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "real.md"), "---\nname: \"Real\"\n---\n")
+	writeFile(t, filepath.Join(dir, "README.md"), "---\nname: \"R\"\n---\n")
+	writeFile(t, filepath.Join(dir, ".hidden"), "---\nname: \"Hidden\"\n---\n")
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	entries, err := Entries(dir)
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Filename != "real.md" {
+		t.Fatalf("got %+v, want exactly [real.md]", entries)
+	}
+}
+
+func TestEntries_DigestFromEntries_MatchesCompute(t *testing.T) {
+	// Proves Compute is a pure derivation of Entries — a caller could
+	// reconstruct the same digest from Entries alone, so there's no hidden
+	// second extraction path.
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "one.md"), "---\nname: \"One\"\ndescription: \"First\"\n---\n")
+	writeFile(t, filepath.Join(dir, "two.md"), "---\nname: \"Two\"\ndescription: \"Second\"\n---\n")
+
+	entries, err := Entries(dir)
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	h := sha256.New()
+	for _, e := range entries {
+		writeLengthPrefixed(h, e.Filename)
+		writeLengthPrefixed(h, e.Name)
+		writeLengthPrefixed(h, e.Description)
+	}
+	rederived := hex.EncodeToString(h.Sum(nil))
+
+	want, err := Compute(dir)
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if rederived != want {
+		t.Fatalf("got %s, want %s", rederived, want)
 	}
 }
 

@@ -33,18 +33,30 @@ func writeLengthPrefixed(h hash.Hash, s string) {
 	h.Write([]byte(s))
 }
 
-// Compute returns the lowercase-hex sha256 manifest digest for dir's
-// canonically-sorted source-input set (see package doc / contract). The
-// returned string is the bare hex digest — callers that need the
-// "sha256:<hex>" presentation format it themselves (see FormatDigest).
-func Compute(dir string) (string, error) {
-	entries, err := os.ReadDir(dir)
+// Entry is one direct-child source file of a folder's manifest input set —
+// its filename plus its frontmatter name/description, exactly as fed into
+// the digest preimage. Both the digest (Compute) and any listing rendered
+// from the same input set (e.g. the navigator README generator) are built
+// from this one accessor, so there is exactly one frontmatter-extraction +
+// sort implementation to drift out of sync with the contract.
+type Entry struct {
+	Filename    string
+	Name        string
+	Description string
+}
+
+// Entries returns dir's canonically-sorted source-input set (see package doc
+// / contract): every direct-child file, excluding the folder's own
+// README.md, dotfiles, and subdirectories, sorted by filename in byte order,
+// each carrying its extracted frontmatter name/description.
+func Entries(dir string) ([]Entry, error) {
+	dirEntries, err := os.ReadDir(dir)
 	if err != nil {
-		return "", fmt.Errorf("manifest: read dir %s: %w", dir, err)
+		return nil, fmt.Errorf("manifest: read dir %s: %w", dir, err)
 	}
 
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
+	names := make([]string, 0, len(dirEntries))
+	for _, e := range dirEntries {
 		if e.IsDir() {
 			continue
 		}
@@ -59,20 +71,37 @@ func Compute(dir string) (string, error) {
 	}
 	sort.Strings(names) // byte-order sort — Go string comparison is byte-wise
 
-	h := sha256.New()
+	out := make([]Entry, 0, len(names))
 	for _, name := range names {
 		fmName, fmDescription, err := extractFrontmatter(filepath.Join(dir, name))
 		if err != nil {
-			return "", fmt.Errorf("manifest: %s: %w", name, err)
+			return nil, fmt.Errorf("manifest: %s: %w", name, err)
 		}
+		out = append(out, Entry{Filename: name, Name: fmName, Description: fmDescription})
+	}
+	return out, nil
+}
+
+// Compute returns the lowercase-hex sha256 manifest digest for dir's
+// canonically-sorted source-input set (see package doc / contract). The
+// returned string is the bare hex digest — callers that need the
+// "sha256:<hex>" presentation format it themselves (see FormatDigest).
+func Compute(dir string) (string, error) {
+	entries, err := Entries(dir)
+	if err != nil {
+		return "", err
+	}
+
+	h := sha256.New()
+	for _, e := range entries {
 		// Each entry is three length-prefixed fields back-to-back: filename,
 		// then frontmatter name, then frontmatter description. No delimiter
 		// byte between fields or between entries — the lengths alone make
 		// the whole preimage unambiguously decodable, so it's injective over
 		// arbitrary byte content in any field (see writeLengthPrefixed).
-		writeLengthPrefixed(h, name)
-		writeLengthPrefixed(h, fmName)
-		writeLengthPrefixed(h, fmDescription)
+		writeLengthPrefixed(h, e.Filename)
+		writeLengthPrefixed(h, e.Name)
+		writeLengthPrefixed(h, e.Description)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
