@@ -31,25 +31,27 @@
 //!   see its doc comment for the future emoji→name extension point (option
 //!   (c), not implemented here).
 //!
-//! ## Known Unicode limitations (both tokenizers, accepted for v1)
-//! - **Normalization-sensitive.** Input is NOT Unicode-normalized, so NFC
-//!   (precomposed `é`) and NFD (`e` + combining acute) forms of the same
-//!   visual string tokenize to DIFFERENT tokens — content and query must use
-//!   the same normalization form to match. Normalize to one form (e.g. NFC)
-//!   on both paths before calling.
-//! - **Combining-mark coverage is best-effort.** `is_combining_mark`
-//!   (module-private) is a fixed 5-range table, not the full Unicode Mark
-//!   category; a mark outside those ranges (and not already
-//!   `char::is_alphanumeric`) is treated as a boundary — it splits its base
-//!   letter's token and is dropped.
+//! # M1.P3.T3 — NFC normalization + full Unicode Mark coverage
+//! Operator-approved dependency `unicode-normalization` closes the two
+//! Unicode gaps M1.P3.T2 accepted:
+//! - **Normalization.** Both tokenizers NFC-normalize `text` as the FIRST
+//!   step, before any char scan/classification (`text.nfc().collect()`).
+//!   NFC (precomposed `é`) and NFD (`e` + combining acute) forms of the same
+//!   visual string now converge to the SAME token sequence.
+//! - **Combining marks.** `is_combining_mark` (module-private, formerly a
+//!   fixed 5-range table) now delegates to
+//!   `unicode_normalization::char::is_combining_mark`, the full Unicode
+//!   `General_Category=Mark` (Mn/Mc/Me) set — every combining mark, not just
+//!   the common decomposed-Latin/Greek/Cyrillic diacritic blocks.
 //!
-//!   Fuller fix (assessed, NOT implemented — operator decision): adding the
-//!   `unicode-normalization` crate and NFC-normalizing input at the tokenizer
-//!   entry would make NFC/NFD converge (closing the first limitation) and
-//!   precompose most Latin/Greek/Cyrillic marks into single alphanumerics
-//!   (shrinking reliance on the table). Marks with no precomposed form (many
-//!   Indic/Arabic/Hebrew marks) would still need explicit Mark-category
-//!   classification. Not added here to avoid a new dependency without sign-off.
+//! ## Known Unicode limitation (both tokenizers, accepted for v1)
+//! - **CJK/Thai segmentation.** NFC normalization does not segment
+//!   caseless, space-less scripts (CJK, Thai, and similar) — a contiguous
+//!   run still becomes one long token with no internal segmentation. Proper
+//!   segmentation needs a dictionary or ML model; out of scope for this
+//!   crate. See each tokenizer's own doc comment for detail.
+
+use unicode_normalization::UnicodeNormalization;
 
 /// Per-char classification shared by both tokenizers below — the seam a
 /// future emoji→name mode (decided-against-for-now option (c)) slots into
@@ -87,10 +89,11 @@ enum CharClass {
 }
 
 /// Classifies one char per `CharClass`'s rules. Built only from
-/// `char::is_alphanumeric` (Unicode-table-based, not locale-based) and a
-/// fixed table of combining-mark code-point ranges — so classification is
-/// identical on every platform, thread, and run; no locale, timezone, or
-/// environment dependency.
+/// `char::is_alphanumeric` (Unicode-table-based, not locale-based) and
+/// `is_combining_mark` (full Unicode `General_Category=Mark`, via
+/// `unicode-normalization`) — so classification is identical on every
+/// platform, thread, and run; no locale, timezone, or environment
+/// dependency.
 fn classify_char(c: char) -> CharClass {
     if c == '_' {
         CharClass::Connector
@@ -109,30 +112,16 @@ fn classify_char(c: char) -> CharClass {
 /// `No` for the common combining-diacritic blocks (they modify an alphabetic
 /// base char but aren't themselves alphabetic under that property).
 ///
-/// Rather than pull in a Unicode-general-category crate for this one
-/// property, this checks a fixed table of five code-point ranges (below).
-/// Coverage is BEST-EFFORT, NOT the full Unicode Mark (`Mn`/`Mc`/`Me`)
-/// category: the table holds the general combining-diacritic blocks
-/// (decomposed Latin/Greek/Cyrillic accents, combining marks for symbols,
-/// half marks) that cover the common accented-Latin-script case. A combining
-/// mark OUTSIDE these ranges that is ALSO not `char::is_alphanumeric` —
-/// e.g. Devanagari stress sign UDATTA (U+0951), Ethiopic combining
-/// gemination (U+135D), and other script-specific marks — falls through as a
-/// `CharClass::Boundary`: it splits its base letter's token in two and is
-/// itself dropped from the output (it does not stay attached as an accent).
-/// Many script marks are still handled correctly, but by `char::is_alphanumeric`
-/// returning true via Unicode's `Other_Alphabetic` property, NOT by this
-/// table. Fixed ranges, not a derived lookup that could grow with a Unicode
-/// version bump — deterministic and dependency-free. See the module-level
-/// note on the `unicode-normalization` option for the fuller fix.
+/// M1.P3.T3: delegates to `unicode_normalization::char::is_combining_mark`,
+/// the crate's full `General_Category=Mark` (Mn/Mc/Me) check — every
+/// combining mark in Unicode, not a fixed subset. This closes the coverage
+/// gap the earlier hand-rolled 5-range table left open (Devanagari stress
+/// sign UDATTA U+0951, Ethiopic combining gemination U+135D, and other
+/// script-specific marks with no precomposed form all now classify as
+/// `CharClass::AlphanumericContent` and stay attached to their base letter,
+/// instead of falling through as a `CharClass::Boundary`).
 fn is_combining_mark(c: char) -> bool {
-    matches!(c as u32,
-        0x0300..=0x036F   // Combining Diacritical Marks
-        | 0x1AB0..=0x1AFF // Combining Diacritical Marks Extended
-        | 0x1DC0..=0x1DFF // Combining Diacritical Marks Supplement
-        | 0x20D0..=0x20FF // Combining Diacritical Marks for Symbols
-        | 0xFE20..=0xFE2F // Combining Half Marks
-    )
+    unicode_normalization::char::is_combining_mark(c)
 }
 
 /// Decision (E): a token made ENTIRELY of Unicode digits (`char::is_numeric`)
@@ -153,10 +142,18 @@ fn is_pure_digit_token(token: &str) -> bool {
 /// `CharClass::Connector`, which this tokenizer folds into the token same
 /// as content.
 ///
-/// # Unicode (M1.P3.T2 — decided)
+/// # Normalization (M1.P3.T3 — decided)
+/// `text` is NFC-normalized FIRST, before any char scan/classification
+/// (`text.nfc().collect()`). NFC (precomposed `é`) and NFD (`e` + combining
+/// acute) forms of the same visual string now converge to the SAME token
+/// sequence — content indexed in one form matches a query typed in the
+/// other.
+///
+/// # Unicode (M1.P3.T2 — decided; mark coverage widened in M1.P3.T3)
 /// Token content is Unicode alphanumeric (`char::is_alphanumeric`, covering
-/// every script's letters and digits) plus combining marks — not an
-/// ASCII-only character class. Lowercasing is Unicode case-folding
+/// every script's letters and digits) plus combining marks (full Unicode
+/// `General_Category=Mark`, via `is_combining_mark`) — not an ASCII-only
+/// character class. Lowercasing is Unicode case-folding
 /// (`str::to_lowercase`, which is 1-input-char-to-N-output-char safe, e.g.
 /// `İ` → `i̇`). So `José` → `["josé"]` (previously ASCII-only behavior
 /// dropped `é`, yielding `["jos"]`) and Greek/Cyrillic identifiers lowercase
@@ -164,32 +161,18 @@ fn is_pure_digit_token(token: &str) -> bool {
 /// non-alphanumeric code point is a `CharClass::Boundary` — exactly like
 /// ASCII punctuation, it ends the current token and is never itself
 /// emitted: `hello📈world` → `["hello", "world"]`, a standalone emoji →
-/// `[]`.
+/// `[]`. Every combining mark now stays attached to its base letter — e.g.
+/// Devanagari stress sign UDATTA (U+0951) and Ethiopic combining gemination
+/// (U+135D) no longer fracture their surrounding word.
 ///
 /// Known v1 limitation (accepted, not solved here): caseless, space-less
 /// scripts (CJK, Thai, and similar) have no punctuation/whitespace word
 /// boundaries and no case to detect — see [`tokenize_all_case_split`] for
 /// where that matters — but even here, a contiguous run of such a script's
 /// characters becomes one long token with no internal segmentation, since
-/// there's no boundary signal at all in this mode either. Proper
-/// segmentation of those scripts needs a dictionary or ML model; out of
-/// scope for this crate.
-///
-/// Known v1 limitation (Unicode normalization — accepted, not solved here):
-/// input is NOT Unicode-normalized before tokenizing, so NFC (precomposed
-/// `é`, one code point) and NFD (`e` + combining acute, two code points)
-/// forms of the same visual string produce DIFFERENT tokens — content
-/// indexed in one form will not match a query typed in the other. Callers
-/// indexing accented content should normalize to one form (e.g. NFC) on both
-/// the index and query paths before calling.
-///
-/// Known v1 limitation (combining-mark coverage — accepted, not solved
-/// here): combining marks are recognized best-effort over the ranges in
-/// `is_combining_mark` (module-private), NOT the full Unicode Mark category.
-/// A mark outside those ranges (e.g. Devanagari, Ethiopic, and other
-/// script-specific marks not also covered by `char::is_alphanumeric`) is
-/// treated as a boundary — it splits its base letter's token and is dropped
-/// from output. See that fn's doc for exactly what is / is not covered.
+/// there's no boundary signal at all in this mode either (NFC normalization
+/// does not segment these scripts). Proper segmentation of those scripts
+/// needs a dictionary or ML model; out of scope for this crate.
 ///
 /// # Digit handling (M1.P3.T2 — decided, decision E)
 /// A token made entirely of digits is dropped post-split — `12345` → `[]`.
@@ -197,17 +180,18 @@ fn is_pure_digit_token(token: &str) -> bool {
 ///
 /// Deterministic and pure: same `text` always yields the same `Vec<String>`,
 /// in left-to-right order, with no locale-, thread-, or platform-dependent
-/// behavior — `char::is_alphanumeric`/`to_lowercase` and this module's
-/// combining-mark table are all Unicode-table-based, not locale-sensitive.
+/// behavior — `char::is_alphanumeric`/`to_lowercase`, NFC normalization, and
+/// `is_combining_mark` are all Unicode-table-based, not locale-sensitive.
 ///
 /// Returns an empty vector for empty, all-boundary, or all-digit input —
 /// never panics.
 #[must_use]
 pub fn tokenize_whole_identifier(text: &str) -> Vec<String> {
+    let normalized: String = text.nfc().collect();
     let mut tokens = Vec::new();
     let mut current = String::new();
 
-    for c in text.chars() {
+    for c in normalized.chars() {
         match classify_char(c) {
             CharClass::AlphanumericContent | CharClass::Connector => {
                 for lc in c.to_lowercase() {
@@ -321,21 +305,22 @@ pub fn tokenize_whole_identifier(text: &str) -> Vec<String> {
 /// This is a recall gap for CJK/Thai-heavy content, not a correctness bug —
 /// no character is lost or duplicated, the run is just under-segmented.
 ///
-/// Known v1 limitations (accepted, not solved here) — the SAME two as
-/// [`tokenize_whole_identifier`] apply verbatim to this tokenizer:
-/// - **Unicode normalization**: input is not normalized, so NFC and NFD
-///   forms of the same visual string tokenize to different tokens; normalize
-///   to one form on both index and query paths before calling.
-/// - **Combining-mark coverage**: marks are recognized best-effort over the
-///   `is_combining_mark` ranges, not the full Unicode Mark category; a mark
-///   outside them splits its base letter's token and is dropped.
+/// # Normalization (M1.P3.T3 — decided; supersedes the earlier
+/// normalization-sensitivity limitation)
+/// `text` is NFC-normalized FIRST, before any char scan (`text.nfc().collect()`)
+/// — the SAME normalization [`tokenize_whole_identifier`] applies, so NFC and
+/// NFD forms of the same visual string now converge to the same tokens here
+/// too. Combining marks now also use the full Unicode Mark category (via
+/// `is_combining_mark`), not a fixed table, so a mark with no precomposed
+/// form (e.g. Devanagari, Ethiopic) stays attached to its base letter
+/// instead of splitting its token.
 ///
 /// Deterministic and pure: same `text` always yields the same `Vec<String>`
 /// in left-to-right order; no I/O, clock, or locale dependency —
-/// `char::is_alphanumeric`/`is_uppercase`/`is_lowercase`/`to_lowercase` and
-/// this module's combining-mark table are all fixed Unicode-table lookups.
-/// Returns an empty vector for empty, all-boundary, or all-digit input —
-/// never panics.
+/// `char::is_alphanumeric`/`is_uppercase`/`is_lowercase`/`to_lowercase`, NFC
+/// normalization, and `is_combining_mark` are all fixed Unicode-table
+/// lookups. Returns an empty vector for empty, all-boundary, or all-digit
+/// input — never panics.
 ///
 /// # M1.P2.T3 (landed)
 /// Same signature as [`tokenize_whole_identifier`] — `fn(&str) -> Vec<String>`
@@ -345,7 +330,8 @@ pub fn tokenize_whole_identifier(text: &str) -> Vec<String> {
 /// mode it got.
 #[must_use]
 pub fn tokenize_all_case_split(text: &str) -> Vec<String> {
-    let chars: Vec<char> = text.chars().collect();
+    let normalized: String = text.nfc().collect();
+    let chars: Vec<char> = normalized.chars().collect();
     let mut tokens = Vec::new();
     let mut current = String::new();
 
@@ -690,10 +676,12 @@ mod all_case_split_tests {
     #[test]
     fn combining_mark_stays_attached_to_its_base_letter() {
         let decomposed = "e\u{0301}cole"; // "e" + combining acute accent + "cole"
-                                          // Already all-lowercase input, no case boundary in it -- one token,
-                                          // the combining mark preserved (not dropped as a boundary) and
-                                          // still attached to the "e" it modifies.
-        assert_eq!(tokenize_all_case_split(decomposed), vec![decomposed]);
+                                          // M1.P3.T3: NFC-normalization at the tokenizer entry precomposes
+                                          // "e" + combining acute into single-char "\u{e9}" ("\u{e9}cole")
+                                          // before the scan even runs -- the combining mark stays attached to
+                                          // its base letter (one token, not fractured), now via precomposition
+                                          // rather than via `is_combining_mark` classification.
+        assert_eq!(tokenize_all_case_split(decomposed), vec!["école"]);
     }
 
     /// Emoji is a boundary: ends the current token, never emitted itself.
@@ -1087,112 +1075,84 @@ mod sdet_adversarial_tests {
         assert_eq!(tokenize_all_case_split("2v"), vec!["2v"]);
     }
 
-    // -- Combining-mark table completeness --
+    // -- Combining-mark full Unicode Mark coverage (M1.P3.T3 fix) --
 
-    /// The SE's 5-range table covers the common decomposed-Latin/Greek/
-    /// Cyrillic diacritic blocks, but real Unicode combining marks (general
-    /// category Mn/Mc/Me) extend far beyond those ranges. Devanagari,
-    /// Arabic, and Hebrew vowel/diacritic marks are covered NOT by the
-    /// table but by `char::is_alphabetic` already returning true for them
-    /// (Unicode's `Other_Alphabetic` property) — so those scripts work by
-    /// accident of `is_alphanumeric`, not because of the table. But marks
-    /// that are Mn and NOT `Other_Alphabetic`, and outside the table's
-    /// ranges, fall through as boundaries. Two concrete examples:
-    /// Devanagari stress sign UDATTA (U+0951) and Ethiopic combining
-    /// gemination mark (U+135D) — both `is_alphanumeric() == false` and
-    /// outside all 5 ranges.
+    /// M1.P3.T3 closes the old 5-range table's gap: `is_combining_mark` now
+    /// delegates to `unicode_normalization::char::is_combining_mark`, the
+    /// full `General_Category=Mark` set. Devanagari stress sign UDATTA
+    /// (U+0951) and Ethiopic combining gemination mark (U+135D) — both
+    /// `is_alphanumeric() == false` and previously outside the old table's 5
+    /// ranges — now classify as `AlphanumericContent` and stay attached to
+    /// their base letter instead of fracturing it.
     #[test]
-    fn marks_outside_the_five_ranges_and_outside_other_alphabetic_are_misclassified_as_boundary() {
-        assert_eq!(classify_char('\u{0951}'), CharClass::Boundary); // Devanagari UDATTA
-        assert_eq!(classify_char('\u{135D}'), CharClass::Boundary); // Ethiopic gemination
-                                                                    // Net effect on a real tokenizer input: the mark splits its base
-                                                                    // letter's token in two instead of staying attached — the exact
-                                                                    // failure mode decision (F)'s doc comment says combining marks
-                                                                    // should NOT trigger.
-        let input = "अ\u{0951}आ"; // Devanagari अ + UDATTA + आ, all one visual unit run
-                                  // If the table were complete this would be one token. Instead the
-                                  // mark's Boundary classification acts exactly like a space or
-                                  // punctuation char sitting between the two base letters: it
-                                  // flushes the first letter as its own token and starts a new one —
-                                  // fracturing what should be one token into two.
-        assert_eq!(tokenize_whole_identifier(input), vec!["अ", "आ"]);
-    }
-
-    /// A demonstration where the gap DOES visibly fracture a token: a
-    /// boundary-classified mark sitting between an accepted content char and
-    /// a subsequent boundary means the mark itself is silently dropped from
-    /// the token text (not just misclassified) — i.e. it disappears from
-    /// output entirely, which is the sourced defect regardless of whether it
-    /// also fractures which run it belongs to.
-    #[test]
-    fn out_of_table_mark_is_silently_dropped_from_token_text() {
-        let input = "test\u{135D}"; // "test" + Ethiopic gemination mark, no trailing content
-                                    // The mark is classified Boundary, so it's dropped and never
-                                    // emitted -- the mark itself vanishes from the token entirely
-                                    // (not preserved as an accent on "test").
-        assert_eq!(tokenize_whole_identifier(input), vec!["test"]);
-    }
-
-    /// In-table marks (the SE's claimed common case) DO stay attached, for
-    /// contrast with the two failures above.
-    #[test]
-    fn in_table_mark_stays_attached() {
-        assert!(is_combining_mark('\u{0301}')); // combining acute, in range
-        let input = "e\u{0301}cole";
+    fn marks_formerly_outside_the_table_now_classify_as_content_and_stay_attached() {
+        assert_eq!(classify_char('\u{0951}'), CharClass::AlphanumericContent); // Devanagari UDATTA
+        assert_eq!(classify_char('\u{135D}'), CharClass::AlphanumericContent); // Ethiopic gemination
+        let input = "अ\u{0951}आ"; // Devanagari अ + UDATTA + आ, one visual unit run
+                                  // Full Mark coverage: the run is now ONE token, the mark preserved
+                                  // and attached to its base letter (no fracture, no drop).
         assert_eq!(tokenize_whole_identifier(input), vec![input]);
     }
 
-    // -- NFC vs NFD normalization --
-
-    /// The SAME visual string ("café") tokenizes to a DIFFERENT token when
-    /// spelled with a precomposed é (NFC, U+00E9, one char) vs a decomposed
-    /// e + combining acute (NFD, two chars, "e\u{0301}"). Both are valid
-    /// content runs under `classify_char` (é is alphanumeric; e and the
-    /// combining mark are both content), so neither is dropped or
-    /// misclassified — but the resulting `String`s are byte-for-byte
-    /// different. A document indexed in one normalization and a query typed
-    /// in the other will NOT match on this term. This is a real
-    /// search-correctness gap, undocumented in the module's doc comments —
-    /// not a hard test failure of the stated contract (nothing in the
-    /// contract promises normalization-insensitivity), but a materially
-    /// relevant omission for a search library. Severity: MEDIUM — affects
-    /// any accented-identifier content sourced from an NFD-normalized
-    /// pipeline (e.g. some macOS filesystem APIs, some XML/HTML tooling)
-    /// against NFC-typed queries (the common case for hand-typed queries).
+    /// The fix closes both symptoms of the old gap at once: not just the
+    /// fracture into two tokens (above), but the mark's own disappearance
+    /// from the output — it is now preserved as part of the single token.
     #[test]
-    fn nfc_and_nfd_forms_of_the_same_visual_string_tokenize_differently() {
+    fn mark_formerly_dropped_from_token_text_is_now_preserved() {
+        let input = "test\u{135D}"; // "test" + Ethiopic gemination mark, no trailing content
+        assert_eq!(tokenize_whole_identifier(input), vec![input]);
+    }
+
+    /// In-table marks (the pre-M1.P3.T3 common case) still stay attached —
+    /// unaffected by the mark-coverage widening, but NFC now precomposes
+    /// this specific decomposed form ("e" + combining acute) into a single
+    /// precomposed "é" before the scan even runs, so the mark itself no
+    /// longer survives as a separate combining char in the output — see the
+    /// NFC/NFD convergence tests below for that behavior explicitly.
+    #[test]
+    fn in_table_mark_stays_attached() {
+        assert!(is_combining_mark('\u{0301}')); // combining acute, in the full Mark category
+        let input = "e\u{0301}cole";
+        assert_eq!(tokenize_whole_identifier(input), vec!["école"]);
+    }
+
+    // -- NFC vs NFD normalization (M1.P3.T3 fix: now converges) --
+
+    /// Before M1.P3.T3: the SAME visual string ("café") tokenized to a
+    /// DIFFERENT token depending on whether it was spelled with a
+    /// precomposed é (NFC, U+00E9, one char) or a decomposed e + combining
+    /// acute (NFD, two chars) — a real search-correctness gap. M1.P3.T3
+    /// closes it: both tokenizers NFC-normalize `text` before scanning, so
+    /// NFC and NFD forms of the same visual string now converge to the SAME
+    /// token sequence, in both tokenizer modes.
+    #[test]
+    fn nfc_and_nfd_forms_of_the_same_visual_string_now_tokenize_identically() {
         let nfc = "café"; // precomposed é, U+00E9
         let nfd = "cafe\u{0301}"; // e + combining acute, U+0065 U+0301
-        let precomposed_result = tokenize_whole_identifier(nfc);
-        let decomposed_result = tokenize_whole_identifier(nfd);
-        assert_eq!(precomposed_result, vec!["café"]);
-        assert_eq!(decomposed_result, vec!["cafe\u{0301}"]);
-        // The two outputs are NOT equal as strings -- this assertion
-        // documents the gap; it is expected to hold (pass), demonstrating
-        // the normalization-sensitivity defect exists.
-        assert_ne!(
-            precomposed_result, decomposed_result,
-            "NFC and NFD forms of the same visual word produced different \
-             tokens -- normalization-sensitivity gap confirmed"
+        assert_eq!(tokenize_whole_identifier(nfc), vec!["café"]);
+        assert_eq!(tokenize_whole_identifier(nfd), vec!["café"]);
+        assert_eq!(
+            tokenize_whole_identifier(nfc),
+            tokenize_whole_identifier(nfd),
+            "NFC and NFD forms of the same visual word must now converge"
         );
-        // Same gap in the case-split tokenizer.
-        assert_ne!(
+        // Same convergence in the case-split tokenizer.
+        assert_eq!(
             tokenize_all_case_split(nfc),
             tokenize_all_case_split(nfd),
-            "case-split tokenizer has the same NFC/NFD gap"
+            "case-split tokenizer must converge on NFC/NFD too"
         );
     }
 
-    /// `José`, the task's required example, in NFD form -- confirm it
-    /// lowercases and tokenizes without panicking, and note (again) that its
-    /// output differs from the NFC form used in the SE's own tests.
+    /// `José`, the task's required example, in NFD form now converges with
+    /// its NFC form under NFC-normalization at the tokenizer entry.
     #[test]
-    fn jose_nfd_form_tokenizes_without_panic_but_differs_from_nfc() {
+    fn jose_nfd_form_now_converges_with_nfc() {
         let nfc = "José"; // precomposed é
         let nfd = "Jose\u{0301}"; // e + combining acute
         assert_eq!(tokenize_whole_identifier(nfc), vec!["josé"]);
-        assert_eq!(tokenize_whole_identifier(nfd), vec!["jose\u{0301}"]);
-        assert_ne!(
+        assert_eq!(tokenize_whole_identifier(nfd), vec!["josé"]);
+        assert_eq!(
             tokenize_whole_identifier(nfc),
             tokenize_whole_identifier(nfd)
         );
@@ -1324,5 +1284,155 @@ mod sdet_adversarial_tests {
         let b2 = tokenize_all_case_split(input);
         assert_eq!(a1, a2);
         assert_eq!(b1, b2);
+    }
+
+    // -- M1.P3.T3 verification: marks with NO precomposed form --
+    //
+    // NFC normalization can only collapse a base+mark PAIR that has a
+    // precomposed codepoint (e.g. "e"+acute -> "é"). Arabic diacritics and
+    // Hebrew points have no precomposed form at all -- NFC is a no-op on
+    // them, so if these stayed attached it could ONLY be because
+    // `is_combining_mark` (the library's full Unicode Mark check) classifies
+    // them as content, not because NFC folded anything away. These tests
+    // isolate that seam: NFC changes nothing here, so a pass proves the mark
+    // check itself, independent of the normalization fix.
+
+    // NOTE on codepoint choice: `classify_char` accepts a char as content if
+    // EITHER `char::is_alphanumeric()` OR `is_combining_mark()` is true.
+    // Several commonly-cited "diacritic" codepoints (Arabic FATHA U+064E,
+    // Hebrew HIRIQ U+05B4, Devanagari vowel sign I U+0940, anusvara U+0902)
+    // are already `is_alphanumeric() == true` under Rust's own Unicode
+    // tables (`Other_Alphabetic`), so a test built on them would pass
+    // identically on the OLD hand-rolled table too -- it would not
+    // distinguish the fix from its absence. The three tests below instead
+    // use codepoints independently confirmed (via a throwaway probe over
+    // each block) to have `is_alphanumeric() == false` AND
+    // `is_combining_mark() == true` -- so a pass here is attributable ONLY
+    // to the library's full Mark-category check, not to `is_alphanumeric`
+    // already covering them.
+
+    #[test]
+    fn arabic_diacritic_with_no_precomposed_form_stays_attached_to_base() {
+        // Arabic mark noon ghunna (U+0658): `is_alphanumeric() == false`,
+        // has no precomposed pairing with any base letter, so NFC cannot
+        // collapse this -- base+mark surviving as one token is entirely
+        // attributable to the full Mark-category `is_combining_mark` check.
+        assert!(!'\u{0658}'.is_alphanumeric());
+        let input = "\u{0643}\u{0658}\u{062A}\u{0658}\u{0628}"; // ka+mark+ta+mark+ba
+        assert_eq!(classify_char('\u{0658}'), CharClass::AlphanumericContent);
+        assert_eq!(tokenize_whole_identifier(input), vec![input]);
+        assert_eq!(tokenize_all_case_split(input), vec![input]);
+        // NFC is a documented no-op here: normalizing changes nothing.
+        let renormalized: String = input.nfc().collect();
+        assert_eq!(renormalized, input);
+    }
+
+    #[test]
+    fn hebrew_point_with_no_precomposed_form_stays_attached_to_base() {
+        // Hebrew accent ETNAHTA (U+0591), a cantillation mark:
+        // `is_alphanumeric() == false`, no precomposed form.
+        assert!(!'\u{0591}'.is_alphanumeric());
+        let input = "\u{05D1}\u{0591}\u{05D9}\u{05EA}"; // bet+ETNAHTA+yod+tav
+        assert_eq!(classify_char('\u{0591}'), CharClass::AlphanumericContent);
+        assert_eq!(tokenize_whole_identifier(input), vec![input]);
+        assert_eq!(tokenize_all_case_split(input), vec![input]);
+        let renormalized: String = input.nfc().collect();
+        assert_eq!(renormalized, input);
+    }
+
+    #[test]
+    fn stacked_devanagari_marks_with_no_precomposed_form_stay_one_token() {
+        // A base consonant with TWO stacked marks that have no single
+        // precomposed codepoint together: क + nukta (U+093C) + virama
+        // (U+094D), both `is_alphanumeric() == false`. NFC cannot fuse
+        // three codepoints like this into one; the run staying whole is the
+        // full Mark-category check doing the work, not normalization.
+        assert!(!'\u{093C}'.is_alphanumeric());
+        assert!(!'\u{094D}'.is_alphanumeric());
+        let input = "\u{0915}\u{093C}\u{094D}"; // ka + nukta + virama
+        assert_eq!(classify_char('\u{093C}'), CharClass::AlphanumericContent);
+        assert_eq!(classify_char('\u{094D}'), CharClass::AlphanumericContent);
+        assert_eq!(tokenize_whole_identifier(input), vec![input]);
+        assert_eq!(tokenize_all_case_split(input), vec![input]);
+        let renormalized: String = input.nfc().collect();
+        assert_eq!(renormalized, input);
+    }
+
+    // -- Mixed NFC+NFD within the SAME string --
+
+    #[test]
+    fn mixed_nfc_and_nfd_segments_in_one_string_tokenize_consistently() {
+        // One word already precomposed ("café", NFC) concatenated with
+        // another spelled decomposed ("José" as J+o+s+e+combining-acute,
+        // NFD), separated by a space. Both segments must land on the same
+        // normal form post-tokenization, so the SAME word appearing in
+        // either spelling anywhere in a larger string always produces the
+        // same token.
+        let mixed = "café Jose\u{0301}"; // NFC "café" + " " + NFD "José"
+        let all_nfc = "café José"; // both segments NFC
+        assert_eq!(
+            tokenize_whole_identifier(mixed),
+            tokenize_whole_identifier(all_nfc)
+        );
+        assert_eq!(tokenize_whole_identifier(mixed), vec!["café", "josé"]);
+        assert_eq!(
+            tokenize_all_case_split(mixed),
+            tokenize_all_case_split(all_nfc)
+        );
+    }
+
+    #[test]
+    fn mixed_nfc_and_nfd_of_the_same_word_repeated_in_one_string_converge() {
+        // The identical visual word appears twice in one string, once NFC
+        // and once NFD -- both occurrences must tokenize to the same token
+        // text (proves per-occurrence normalization, not just whole-string
+        // normalization luck).
+        let input = "café_cafe\u{0301}"; // NFC "café" + "_" + NFD "café"
+        assert_eq!(tokenize_whole_identifier(input), vec!["café_café"]);
+        assert_eq!(tokenize_all_case_split(input), vec!["café", "café"]);
+    }
+
+    // -- Mark at token start / lone mark / mark after a boundary --
+
+    #[test]
+    fn leading_combining_mark_with_no_base_letter_does_not_panic() {
+        // A combining mark as the very FIRST char of the input, with no
+        // preceding base letter to attach to. Not a realistic well-formed
+        // Unicode string, but the tokenizer must still produce defined
+        // output, not panic: the mark is AlphanumericContent, so it starts
+        // (and stays in) the current token same as any other content char.
+        let input = "\u{0301}cole"; // combining acute alone, then "cole"
+        let result = tokenize_whole_identifier(input);
+        assert_eq!(result, vec!["\u{0301}cole"]);
+        let result2 = tokenize_all_case_split(input);
+        assert_eq!(result2, vec!["\u{0301}cole"]);
+    }
+
+    #[test]
+    fn lone_combining_mark_with_no_base_letter_at_all_yields_one_token() {
+        // A single combining mark and nothing else. AlphanumericContent, so
+        // it forms a one-char token on its own -- defined, not dropped, not
+        // a panic. (It is not a pure-digit token since `is_numeric` is
+        // false for it, so `is_pure_digit_token` does not drop it either.)
+        let input = "\u{0301}";
+        assert_eq!(tokenize_whole_identifier(input), vec![input]);
+        assert_eq!(tokenize_all_case_split(input), vec![input]);
+    }
+
+    #[test]
+    fn combining_mark_immediately_after_a_boundary_starts_a_fresh_token() {
+        // A mark right after a boundary char (no base letter directly
+        // before it in the surviving content stream) still classifies as
+        // content and starts a new token cleanly -- no panic, no fusion
+        // across the boundary into the PRECEDING word.
+        let input = "hello \u{0301}world"; // "hello", space (boundary), mark+"world"
+        assert_eq!(
+            tokenize_whole_identifier(input),
+            vec!["hello", "\u{0301}world"]
+        );
+        assert_eq!(
+            tokenize_all_case_split(input),
+            vec!["hello", "\u{0301}world"]
+        );
     }
 }

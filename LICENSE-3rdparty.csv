@@ -1,0 +1,4 @@
+Component,Origin,License,Copyright
+unicode-normalization,https://github.com/unicode-rs/unicode-normalization,MIT OR Apache-2.0,kwantam <kwantam@gmail.com> and Manish Goregaokar <manishsmail@gmail.com>
+tinyvec,https://github.com/Lokathor/tinyvec,Zlib OR Apache-2.0 OR MIT,Lokathor <zefria@gmail.com>
+tinyvec_macros,https://github.com/Soveu/tinyvec_macros,MIT OR Apache-2.0 OR Zlib,Soveu <marx.tomasz@gmail.com>
