@@ -5,12 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ai-shared-lib-public"
 version = "0.2.1"
-description = "Public shared tools and schemas for AI-agent workspaces (git commit re-signing, sitemap parsing, article-metadata extraction). Stdlib-preferred for portability; justified third-party deps permitted when vendored."
+description = "Public shared tools and schemas for AI-agent workspaces (git commit re-signing, sitemap parsing, article-metadata extraction). Stdlib covers what it does well; prefer a trusted, actively-maintained library over hand-rolling any non-trivial common capability, vetted/licensed/pinned before adoption."
 readme = "README.md"
 requires-python = ">=3.10"
-# Dependency policy: stdlib-preferred for portability. A third-party dependency is
-# acceptable when justified (avoids reinventing the wheel / is the best way to get the
-# functionality) and vendored via the standard mechanism, subject to OSS-license clearance.
+# Dependency policy: stdlib is fine for what it does well (a one-line string op, a
+# built-in already fit for purpose). For a non-trivial common capability (CLI/YAML/
+# JSON/regex/glob/math, etc.) prefer a trusted, actively-maintained library over
+# hand-rolling it — fewer dependencies is not a goal, robustness/correctness are. Vet
+# robustness-first (maintenance, adoption, security-advisory history), clear the
+# license per the org OSS-licensing policy, pin the exact version, and record it in
+# LICENSE-3rdparty.csv. Hand-roll only when no trusted library fits — flag it, state
+# why, and get sign-off.
 # Stdlib-only in fact today — no runtime dependency yet.
 dependencies = []
 # License: TODO — pick per the org OSS-licensing policy before any external publish.

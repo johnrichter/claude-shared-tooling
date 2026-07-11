@@ -18,10 +18,18 @@ separate build/test/lint lifecycle. Holds only deterministic, no-ML machinery.
 
 ## Dependency policy
 
-Pure Rust only — no CGO, no C dependency, no non-first-party heavy dependency — so every member
-crate stays buildable as a static `musl` binary later (a binary-target concern; kept true of the
-library now so it is never retrofitted). A justified third-party dependency is acceptable subject
-to OSS-license clearance per the org policy, same as the Go module and Python package.
+For a non-trivial common capability (parsing, serialization, regex, and the like), **prefer a
+well-maintained, robust, trusted crate over hand-rolling it** — same posture as the Go module and
+Python package: robustness and correctness over minimizing dependency count. Vet every material
+crate choice robustness-first (maintenance cadence, adoption, security-advisory history), clear
+its license per the org policy, and pin the exact version.
+
+That preference is layered under the build constraint, not replaced by it: every member crate must
+stay **pure Rust** — no CGO, no C dependency — so it stays buildable as a static `musl` binary
+later (a binary-target concern; kept true of the library now so it is never retrofitted). A
+candidate crate that pulls in a C dependency fails the build-fit check regardless of how well it
+vets otherwise. Hand-roll only when no crate clears vetting, license, and the pure-Rust constraint
+together — flag it, state why, and get sign-off.
 
 ## Lints
 

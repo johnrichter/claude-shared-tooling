@@ -32,7 +32,13 @@ Requires Python ≥ 3.10. Stdlib-only in fact today — no install of third-part
 
 ## Dependency policy
 
-Stdlib is **preferred** for portability (no network install to import or run), but it is a preference, not a hard bar. A third-party dependency is acceptable when it is **justified** — it avoids reinventing the wheel or is the best way to get the functionality — and **vendored via the standard mechanism** (Python venv), subject to **OSS-license clearance** per the org policy. Every module here is stdlib-only in fact today; `dependencies` stays empty until a justified dependency actually lands.
+Stdlib stays correct for what it covers well — a one-line string op, a built-in already fit for purpose. For a **non-trivial common capability** (CLI/argument parsing, YAML, JSON, regex, globbing, math, HTTP, date/time, and the like), **prefer a well-maintained, robust, trusted library over hand-rolling it** — never reinvent the wheel when a trusted, actively-maintained library exists. This reverses the earlier stdlib-preferred posture: fewer dependencies is not a goal in itself, robustness and correctness are.
+
+Every material dependency choice runs a **robustness-first vetting** (maintenance cadence, adoption, security-advisory history, license fit) before adoption, clears **OSS-license** per the org policy, is **pinned** to an exact version, and is **recorded in `LICENSE-3rdparty.csv`** in the same change. Among viable candidates, prefer **official / first-party / actively-maintained** libraries; flag supply-chain risk and get sign-off before introducing untrusted code.
+
+Hand-rolling a common capability is the narrow exception — only when no trusted library fits (vetting bar, license, or a hard build-fit constraint) — and requires flagging the rejected candidates, stating the rationale, and getting sign-off.
+
+Every module here is stdlib-only in fact today; `dependencies` stays empty until a vetted dependency actually lands.
 
 ## Privacy guardrail
 
@@ -47,5 +53,6 @@ Semver git tags (`vX.Y.Z`); consumers pin a tag. Bump on every release so update
 
 ### Changelog
 
+- **Unreleased** — Dependency policy reversed from stdlib-preferred to prefer-a-trusted-library-for-non-trivial-common-capabilities (CLI/YAML/JSON/regex/glob/math, etc.), vetted robustness-first, license-cleared, pinned, and recorded in `LICENSE-3rdparty.csv`. Docs-only: no code change, `dependencies` stays empty, every module remains stdlib-only in fact.
 - **v0.2.0** — Dependency policy reframed from "dependency-free / Tier 0" to **stdlib-preferred** (justified vendored deps permitted, subject to OSS-license clearance). No code change: `dependencies` stays empty, every module remains stdlib-only in fact. Docs-only contract clarification.
 - **v0.1.0** — Initial release: `resign_commits`, `sitemap_parser`, `article_meta` tools + schema home + privacy guardrail.
