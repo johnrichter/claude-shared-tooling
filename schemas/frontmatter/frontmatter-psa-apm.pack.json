@@ -48,9 +48,9 @@
     "required_namespaces": ["source", "period"],
     "period": {
       "namespace": "period",
-      "regex": "^\\d{4}-\\d{2}-\\d{2}\\.\\.\\d{4}-\\d{2}-\\d{2}$"
+      "regex": "^[0-9]{4}-[0-9]{2}-[0-9]{2}\\.\\.[0-9]{4}-[0-9]{2}-[0-9]{2}$"
     },
-    "notes": "`cadence` defaults to on-demand when unspecified and is NOT required; `audience` is optional. Matches schema.py REPORT_REQUIRED_NAMESPACES = (source, period) (schema.py:86-88) and PERIOD_RE (schema.py:91).",
+    "notes": "`cadence` defaults to on-demand when unspecified and is NOT required; `audience` is optional. Matches schema.py REPORT_REQUIRED_NAMESPACES = (source, period) (schema.py:86-88) and PERIOD_RE (schema.py:91), byte-identical on the real corpus (all ASCII dates). DELIBERATE DIVERGENCE (M2.P2.T1b finalization): uses explicit ASCII `[0-9]` rather than `\\d`, because the Rust validator compiles this string with the `regex` crate, whose `\\d` matches any Unicode decimal digit by default — `[0-9]` is ASCII-only regardless of that flag, reproducing this crate's prior (and Python's actual-corpus) ASCII-only behavior and rejecting e.g. Arabic-Indic digits that Python's un-flagged `\\d` would otherwise accept.",
     "source": "schema.py:83-91 + is_report:122-128 + tag_rule_violations:180-191"
   },
   "exempt": {

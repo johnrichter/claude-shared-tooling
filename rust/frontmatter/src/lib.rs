@@ -37,11 +37,17 @@
 //! - (this file) -- [`ParsedFrontmatter`] and the crate's public
 //!   re-exports.
 //!
-//! `M2.P2.T1b` adds a sibling `validate` module (`pub mod validate;` here)
-//! that takes a `&ParsedFrontmatter` (specifically its `raw_fields`) and
-//! produces the schema-checked `FrontmatterEntry` shape -- it needs nothing
-//! from `parse` beyond the already-public [`ParsedFrontmatter`] type, so it
-//! slots in as a new sibling module with no change to this task's code.
+//! `M2.P2.T1b` adds two sibling modules:
+//! - `profile` -- [`Profile`], the deserialized declarative schema (core
+//!   profile + extension pack) `validate` interprets. Embeds the core
+//!   profile and the psa-apm pack at compile time (`include_str!`); also
+//!   accepts an external pack's JSON text, for a foreign repo's own
+//!   vocabulary.
+//! - `validate` -- [`validate::validate`], taking a `&ParsedFrontmatter`
+//!   (specifically its `raw_fields`) and a [`Profile`], producing the
+//!   schema-checked [`validate::FrontmatterEntry`] shape. It needs nothing
+//!   from `parse` beyond the already-public [`ParsedFrontmatter`] type, so
+//!   it slots in as a new sibling module with no change to this task's code.
 //!
 //! # Determinism
 //! [`parse::parse`] is a pure function of its `&str` input: identical input
@@ -54,10 +60,14 @@
 
 mod error;
 mod parse;
+mod profile;
+pub mod validate;
 mod value;
 
 pub use error::FrontmatterParseError;
 pub use parse::parse;
+pub use profile::{Profile, ProfileError};
+pub use validate::{validate, CoverageRollup, FrontmatterEntry, ScanOutcome, Violation};
 pub use value::{FrontmatterValue, RawFields};
 
 /// The result of parsing one `.md` file's leading YAML frontmatter and
