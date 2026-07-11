@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Capture the live Python frontmatter-gate verdicts into the frozen golden.
+
+M2.P2.T2's one-time cutover no-regression gate compares the Rust validator
+against the CURRENT Python gate. This script produces the golden that
+comparison reads (`expected_verdicts.json`) -- it is never run by `cargo
+test`; the Rust test fails loudly if the golden is absent rather than
+regenerating it itself.
+
+Oracle reconciliation: the build plan says "capture check_rules.py
+verdicts," but check_rules.py is a coarse rule-authoring meta-lint that
+emits only flat "filename: message" strings, not a per-file {code, field}
+verdict. The actual per-file oracle is
+`audit_helper.frontmatter.validate(rel_path, text) -> ValidationResult`
+(`.violations` are `Violation(code, field, message)` NamedTuples). This
+script calls that function directly, once per fixture, rather than going
+through the package CLI (which also walks scope/refs/metrics -- concerns
+outside this differential's scope).
+
+Environment: point PYTHONPATH (or edit AUDIT_HELPER_DIR below) at the
+audit-helper package directory, and run with that package's own venv --
+e.g.:
+
+    <audit-helper>/.venv/bin/python tests/cutover/capture_python_verdicts.py
+
+Regeneration: re-run this script whenever a fixture or the manifest
+changes; it always overwrites `expected_verdicts.json` from scratch. At the
+M2.P2.T3 cutover, repoint `CORPUS_ROOT`/`MANIFEST_PATH` below at the live
+psa-apm workspace and its full file corpus to run the real no-regression
+check, rather than this frozen fixture set.
+
+Exempt-path caveat for the T3 full-corpus repoint: `frontmatter.validate`
+does NOT apply the exempt taxonomy -- exemption lives in
+`schema.is_doc_exempt` and the real gate applies it at the scan layer
+(exempt files are skipped, never validated). The Rust `validate()` mirrors
+the real gate by short-circuiting exempt paths internally. So a full-corpus
+run MUST filter exempt paths (call `schema.is_doc_exempt` here, or drop them
+from the manifest) before capturing; otherwise every exempt file becomes a
+false divergence -- the per-function oracle emits violations the real gate
+never surfaces. The frozen fixture set contains no exempt paths, so this
+does not affect the committed golden.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+# Adjust if the audit-helper package moves; matches the path recorded in
+# this task's ground-truth notes.
+AUDIT_HELPER_DIR = Path(
+    "/Users/john.richter/Development/workspaces/psa-platform/marketplace-public/"
+    "plugins/rule-tooling/skills/workspace-audit/audit-helper"
+)
+
+TESTS_DIR = Path(__file__).resolve().parent
+MANIFEST_PATH = TESTS_DIR / "manifest.json"
+FIXTURES_DIR = TESTS_DIR / "fixtures"
+GOLDEN_PATH = TESTS_DIR / "expected_verdicts.json"
+
+sys.path.insert(0, str(AUDIT_HELPER_DIR))
+from audit_helper import frontmatter  # noqa: E402  (path insert must precede this import)
+
+
+def capture_one(rel_path: str, fixture_path: Path) -> dict:
+    text = fixture_path.read_text()
+    result = frontmatter.validate(rel_path, text)
+    return {
+        "file_class": result.file_class.value,
+        "is_valid": result.is_valid,
+        "violations": [
+            {"code": v.code, "field": v.field, "message": v.message} for v in result.violations
+        ],
+    }
+
+
+def main() -> None:
+    manifest = json.loads(MANIFEST_PATH.read_text())
+    golden: dict[str, dict] = {}
+    for entry in manifest:
+        fixture_path = FIXTURES_DIR / entry["fixture"]
+        golden[entry["rel_path"]] = capture_one(entry["rel_path"], fixture_path)
+
+    GOLDEN_PATH.write_text(json.dumps(golden, indent=2, sort_keys=True) + "\n")
+    print(f"wrote {len(golden)} entries to {GOLDEN_PATH}")
+
+
+if __name__ == "__main__":
+    main()

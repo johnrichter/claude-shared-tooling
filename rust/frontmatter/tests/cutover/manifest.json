@@ -1,0 +1,104 @@
+[
+  {
+    "fixture": "valid_context.md",
+    "rel_path": "knowledge-base/tooling/valid-context.md",
+    "group": "well_formed",
+    "triggers": "no violations (fully conformant, including owner:)"
+  },
+  {
+    "fixture": "missing_required_field.md",
+    "rel_path": "knowledge-base/tooling/missing-required-field.md",
+    "group": "well_formed",
+    "triggers": "MISSING_REQUIRED_FIELD (links)"
+  },
+  {
+    "fixture": "multiple_single_value_tags.md",
+    "rel_path": "knowledge-base/tooling/multiple-status.md",
+    "group": "well_formed",
+    "triggers": "MULTIPLE_SINGLE_VALUE_TAGS (status)"
+  },
+  {
+    "fixture": "missing_required_tag.md",
+    "rel_path": "knowledge-base/tooling/missing-type-tag.md",
+    "group": "well_formed",
+    "triggers": "MISSING_REQUIRED_TAG (type)"
+  },
+  {
+    "fixture": "orphan_namespace_tag.md",
+    "rel_path": "knowledge-base/tooling/orphan-feature.md",
+    "group": "well_formed",
+    "triggers": "ORPHAN_NAMESPACE_TAG (feature, twice: missing product + missing suite)"
+  },
+  {
+    "fixture": "namespace_misuse_source.md",
+    "rel_path": "knowledge-base/tooling/namespace-misuse-source.md",
+    "group": "well_formed",
+    "triggers": "REPORT_ONLY_TAG_MISUSED (source)"
+  },
+  {
+    "fixture": "invalid_period_format.md",
+    "rel_path": "the-work/reporting/bad-period.md",
+    "group": "well_formed",
+    "triggers": "INVALID_PERIOD_FORMAT (period)"
+  },
+  {
+    "fixture": "valid_report.md",
+    "rel_path": "the-work/reporting/valid-report.md",
+    "group": "well_formed",
+    "triggers": "no violations (valid type:report doc)"
+  },
+  {
+    "fixture": "description_over_cap_context.md",
+    "rel_path": "knowledge-base/tooling/over-cap-context.md",
+    "group": "well_formed",
+    "triggers": "DESCRIPTION_OVER_CAP (context cap, 350)"
+  },
+  {
+    "fixture": "description_over_cap_skill.md",
+    "rel_path": ".claude/skills/description-over-cap-skill/SKILL.md",
+    "group": "well_formed",
+    "triggers": "DESCRIPTION_OVER_CAP (skill cap, 500)"
+  },
+  {
+    "fixture": "description_over_cap_agent.md",
+    "rel_path": ".claude/agents/description-over-cap-agent.md",
+    "group": "well_formed",
+    "triggers": "DESCRIPTION_OVER_CAP (agent cap, 750)"
+  },
+  {
+    "fixture": "description_not_top_level.md",
+    "rel_path": "knowledge-base/tooling/description-nested.md",
+    "group": "well_formed",
+    "triggers": "DESCRIPTION_NOT_TOP_LEVEL (description nested under workspace:)"
+  },
+  {
+    "fixture": "tags_not_a_list.md",
+    "rel_path": "knowledge-base/tooling/tags-scalar.md",
+    "group": "well_formed",
+    "triggers": "TAGS_NOT_A_LIST (tags is a bare scalar)"
+  },
+  {
+    "fixture": "multi_violation.md",
+    "rel_path": "some/report.md",
+    "group": "well_formed",
+    "triggers": "multiple simultaneous violations -- the strongest ordered-parity check (mirrors validate.rs's multi_violation_report_doc)"
+  },
+  {
+    "fixture": "description_cap_and_tag_cascade.md",
+    "rel_path": "knowledge-base/tooling/description-cap-and-tag-cascade.md",
+    "group": "well_formed",
+    "triggers": "DESCRIPTION_OVER_CAP + MISSING_REQUIRED_TAG (type) together -- proves the independent-checks ordering (description block before tags block) holds under a real fixture, not just validate.rs's synthetic unit test"
+  },
+  {
+    "fixture": "malformed_yaml.md",
+    "rel_path": "knowledge-base/tooling/malformed-yaml.md",
+    "group": "parse_error",
+    "triggers": "unclosed YAML flow sequence -- Python: MALFORMED_FRONTMATTER violation; Rust: parse() returns Err(MalformedYaml)"
+  },
+  {
+    "fixture": "no_frontmatter.md",
+    "rel_path": "knowledge-base/tooling/no-frontmatter.md",
+    "group": "parse_error",
+    "triggers": "no leading --- fence -- Python: MISSING_FRONTMATTER violation; Rust: parse() returns Ok(body_only)"
+  }
+]
