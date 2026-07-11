@@ -7,8 +7,10 @@ license = "MIT"
 publish = false
 
 [dependencies]
-# M1.P1.T2 / M1.P2.*: BM25 scoring + tokenization land here. Pure-Rust deps
-# only (no CGO/C) so the crate stays musl-static-buildable.
+# Pure-Rust deps only (no CGO/C) so the crate stays musl-static-buildable.
+# regex: whole-identifier tokenizer (M1.P1.T2); reused by the case-splitting
+# tokenizer mode (M1.P2.T2).
+regex = "1"
 
 [dev-dependencies]
 

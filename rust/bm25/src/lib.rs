@@ -1,44 +1,52 @@
 //! `bm25` — general-purpose, call-time-customizable BM25 ranking library.
 //!
-//! Scope: pure ranking math over caller-supplied term statistics. No ML, no
-//! embeddings, no network I/O, no filesystem access — every call is a
-//! deterministic function of its inputs, so identical inputs always produce
-//! identical outputs (bit-for-bit) regardless of platform, thread count, or
-//! call order.
+//! Scope: pure ranking math over document/query text. No ML, no embeddings,
+//! no network I/O, no filesystem access — every call is a deterministic
+//! function of its inputs, so identical inputs always produce identical
+//! outputs (bit-for-bit) regardless of platform, thread count, or call
+//! order. No floating-point behavior varies by target arch (musl vs glibc,
+//! `x86_64` vs aarch64) — this is why the crate is pure Rust with no C
+//! dependency: a C dependency's libm can vary output by platform, which
+//! would break the determinism contract.
 //!
-//! Inputs (land in M1.P1.T2 / M1.P2.*): per-document term frequencies, a
-//! corpus-wide document-frequency table, document lengths, and caller-tunable
-//! `k1`/`b` parameters — never a hardcoded corpus or a global mutable index.
-//! Outputs: a BM25 score per (query, document) pair, or a ranked document
-//! list. Invariants the real implementation must uphold: pure functions (no
-//! hidden state across calls), no panics on malformed-but-well-typed input
-//! (empty query, empty corpus, zero-length document all return a defined
-//! result, not a panic), and no floating-point behavior that varies by
-//! target arch (musl vs glibc, `x86_64` vs aarch64) — this is why the crate is
-//! pure Rust with no C dependency: a C dependency's libm can vary output by
-//! platform, which would break the determinism contract.
+//! # What's here (`M1.P1.T2` — the seed)
+//! - [`tokenize::tokenize_whole_identifier`] — the whole-identifier
+//!   tokenizer (`[a-z0-9_]+`, lowercased), ported from ka. This IS this
+//!   crate's tokenizer, not a caller/adapter concern: `bm25` owns
+//!   tokenization so a query and an indexed document always tokenize
+//!   identically.
+//! - [`okapi::OkapiIndex`] — the classic flat, single-bag-of-tokens-per-
+//!   document Okapi scorer (`K1 = 1.5`, `B = 0.75`), also ported from ka.
 //!
-//! Tokenization is a caller/adapter concern, not this crate's: `bm25` never
-//! decides what a "term" is. Callers pre-tokenize and hand this crate term
-//! statistics.
+//! Both are faithful ports of ka's `retrieve::bm25` — same constants, same
+//! formula, same tokenizer regex — generalized only enough to be a
+//! freestanding library (public types, caller-supplied string ids,
+//! guaranteed-deterministic ranked output) rather than ka's internal,
+//! `usize`-row-keyed, `HashMap`-order-dependent original.
 //!
-//! This file is the M1.P1.T1 scaffold only — no scoring or tokenization
-//! logic yet. It exists to prove the crate compiles, lints clean, and tests
-//! green inside the workspace, ahead of the real implementation.
+//! # M1.P2.T1
+//! BM25F (fielded, per-field-weighted, multi-field documents) lands as a
+//! sibling module to `okapi` — the flat [`okapi::OkapiIndex`] is untouched;
+//! BM25F is new work, not a rewrite of it.
+//!
+//! # M1.P2.T2
+//! An all-case-splitting tokenizer mode (`camelCase`/`snake_case`/`TitleCase`/
+//! `PascalCase`/`SCREAMING_SNAKE`/kebab -> sub-tokens) lands as a sibling
+//! function/mode in `tokenize` alongside [`tokenize::tokenize_whole_identifier`].
+//!
+//! # M1.P2.T3
+//! A call-time selection API (variant `{Okapi | BM25F}` x tokenizer
+//! `{whole-identifier | case-splitting}`) lands here, composing the two
+//! variants and two tokenizer modes without either implementation knowing
+//! about selection.
 
 #![deny(unsafe_code)]
 
+pub mod okapi;
+pub mod tokenize;
+
 /// Returns this crate's semantic version, read from `Cargo.toml` at compile
-/// time via `env!("CARGO_PKG_VERSION")`. Placeholder public surface for the
-/// M1.P1.T1 scaffold — exercised by the crate's one scaffold-era test.
-///
-/// # M1.P1.T2
-/// Real BM25 scoring entry points (e.g. `score`, `Bm25Params`, a document/
-/// corpus statistics type) land here, replacing/joining this placeholder.
-///
-/// # M1.P2.*
-/// Tokenization-adapter traits and any batch/streaming scoring API land
-/// alongside the M1.P1.T2 scoring core.
+/// time via `env!("CARGO_PKG_VERSION")`.
 #[must_use]
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
