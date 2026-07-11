@@ -8,8 +8,10 @@ publish = false
 
 [dependencies]
 # Pure-Rust deps only (no CGO/C) so the crate stays musl-static-buildable.
-# regex: whole-identifier tokenizer (M1.P1.T2); reused by the case-splitting
-# tokenizer mode (M1.P2.T2).
+# regex: whole-identifier tokenizer (M1.P1.T2) only. The case-splitting
+# tokenizer mode (M1.P2.T2) is a hand-rolled char scan instead — its
+# case-boundary rules need one-character lookahead/lookbehind, which the
+# `regex` crate's finite-automaton engine doesn't support (no lookaround).
 regex = "1"
 
 [dev-dependencies]

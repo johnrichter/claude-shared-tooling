@@ -32,16 +32,24 @@
 //! (`crate::tokenize`) and the ranked-output shape
 //! ([`okapi::ScoredDocument`]) with `okapi`, per the plan.
 //!
-//! # M1.P2.T2
-//! An all-case-splitting tokenizer mode (`camelCase`/`snake_case`/`TitleCase`/
-//! `PascalCase`/`SCREAMING_SNAKE`/kebab -> sub-tokens) lands as a sibling
-//! function/mode in `tokenize` alongside [`tokenize::tokenize_whole_identifier`].
+//! # M1.P2.T2 (landed)
+//! [`tokenize::tokenize_all_case_split`] — the all-case-splitting tokenizer
+//! mode (`camelCase`/`snake_case`/`TitleCase`/`PascalCase`/`SCREAMING_SNAKE`/
+//! kebab -> sub-tokens, e.g. `ddTrace`/`dd_trace`/`DD_TRACE`/`DdTrace` all ->
+//! `["dd", "trace"]`). A sibling free function to
+//! [`tokenize::tokenize_whole_identifier`], same `fn(&str) -> Vec<String>`
+//! signature, on purpose — see `M1.P2.T3` below.
 //!
 //! # M1.P2.T3
 //! A call-time selection API (variant `{Okapi | BM25F}` x tokenizer
 //! `{whole-identifier | case-splitting}`) lands here, composing the two
 //! variants and two tokenizer modes without either implementation knowing
-//! about selection.
+//! about selection. Both tokenizers already share one `fn(&str) ->
+//! Vec<String>` signature (per `M1.P2.T2`) specifically so this task can
+//! hold either behind one function-pointer/closure type and inject it into
+//! `okapi`/`bm25f` uniformly — `okapi`/`bm25f` currently hardcode
+//! [`tokenize::tokenize_whole_identifier`] (flagged by the M1.P2.T1 QR);
+//! this task replaces that hardcoding with the injected tokenizer.
 
 #![deny(unsafe_code)]
 
