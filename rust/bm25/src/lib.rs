@@ -18,10 +18,11 @@
 //!   Okapi scorer (`K1 = 1.5`, `B = 0.75`), also ported from ka.
 //!
 //! Both are faithful ports of ka's `retrieve::bm25` — same constants, same
-//! formula, same tokenizer regex — generalized only enough to be a
-//! freestanding library (public types, caller-supplied string ids,
-//! guaranteed-deterministic ranked output) rather than ka's internal,
-//! `usize`-row-keyed, `HashMap`-order-dependent original.
+//! formula, same tokenizer character class (later made Unicode-aware, see
+//! `M1.P3.T2` below) — generalized only enough to be a freestanding library
+//! (public types, caller-supplied string ids, guaranteed-deterministic
+//! ranked output) rather than ka's internal, `usize`-row-keyed,
+//! `HashMap`-order-dependent original.
 //!
 //! # M1.P2.T1 (landed)
 //! [`BM25FIndex`] — the fielded, per-field-weighted scorer (multi-field
@@ -88,6 +89,20 @@
 //! `impl Into<_>`, so a bare `f64` still works ergonomically) instead of
 //! raw `f64` — invalid values CLAMP into a valid range at construction
 //! instead of panicking. See [`bm25f`] module docs for the clamp mapping.
+//!
+//! # M1.P3.T2 (landed)
+//! Both tokenizers refined per two decisions, in [`tokenize`]:
+//! - **(E) drop pure-digit tokens** — a token made entirely of digits is
+//!   dropped post-split (`12345` → `[]`; `2Client` → `["client"]`).
+//! - **(F) Unicode-aware, emoji/symbols/punctuation as boundaries** — token
+//!   content is Unicode alphanumerics + combining marks (was ASCII-only),
+//!   so `José` → `["josé"]` instead of `["jos"]`; an emoji ends a token
+//!   like punctuation does and is never itself emitted. A shared per-char
+//!   classification seam (`tokenize::classify_char`, module-private) is
+//!   consumed by both tokenizers and documents where a future emoji→name
+//!   mode (option (c), not implemented) would slot in. No new dependency:
+//!   `regex` was dropped from this crate entirely — both tokenizers are now
+//!   hand-rolled `std::char`-Unicode-method scans.
 
 #![deny(unsafe_code)]
 

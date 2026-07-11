@@ -8,11 +8,15 @@ publish = false
 
 [dependencies]
 # Pure-Rust deps only (no CGO/C) so the crate stays musl-static-buildable.
-# regex: whole-identifier tokenizer (M1.P1.T2) only. The case-splitting
-# tokenizer mode (M1.P2.T2) is a hand-rolled char scan instead — its
-# case-boundary rules need one-character lookahead/lookbehind, which the
-# `regex` crate's finite-automaton engine doesn't support (no lookaround).
-regex = "1"
+# No third-party deps as of M1.P3.T2: both tokenizers are hand-rolled char
+# scans over `std::char`'s Unicode-table methods (is_alphanumeric,
+# is_uppercase/is_lowercase, to_lowercase, is_numeric) -- sufficient for
+# Unicode-aware tokenization without a regex or ICU crate. `regex` (used
+# only by the whole-identifier tokenizer through M1.P1.T2/M1.P2.T2) was
+# dropped here: making that tokenizer Unicode-aware and fold `_` in as
+# content alongside Unicode alphanumerics/combining marks needed the same
+# hand-rolled char scan the case-split tokenizer already used, so both
+# tokenizers now share one scan style and neither needs `regex`.
 
 [dev-dependencies]
 
