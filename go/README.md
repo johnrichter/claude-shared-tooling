@@ -25,6 +25,19 @@ the module path also gains a `/v2` major-version suffix, per Go's module rules �
   of putting it here first.
 - **`cmd/jr-readme-manifest/`** — the CLI over that package.
 
+## Dependency policy
+
+For a non-trivial common capability (CLI parsing, YAML/JSON, regex, and the like), **prefer a
+well-maintained, robust, trusted module over hand-rolling it** — same posture as the Rust workspace
+and Python package: robustness and correctness over minimizing dependency count. Vet every material
+module choice robustness-first (maintenance cadence, adoption, security-advisory history), clear
+its license per the org policy, and pin the exact version in `go.mod`/`go.sum`.
+
+Stdlib (`crypto/sha256`, `encoding/binary`, and the like) stays correct for what it covers well —
+this module's manifest algorithm currently needs nothing beyond it, so `go.mod` declares no
+dependency. Hand-roll only when no module clears vetting and license — flag it, state why, and get
+sign-off.
+
 ## The manifest contract (drift-critical — implement exactly this)
 
 A folder's manifest is a `sha256` over its canonically-sorted **source-input set**:
