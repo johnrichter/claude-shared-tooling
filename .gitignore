@@ -162,6 +162,10 @@ node_modules/
 # Rust
 target/
 
+# Claude Code git worktrees (see agent/workflows/governance-git.md) — never
+# tracked; each worktree is a full checkout on its own branch, not repo content.
+.git-worktrees/
+
 # .NET
 obj/
 
