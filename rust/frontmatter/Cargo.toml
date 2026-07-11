@@ -16,6 +16,18 @@ publish = false
 # `ParsedFrontmatter`/`FrontmatterValue` types own no yaml-rust2 type, so the
 # backend is swappable later without a breaking change to consumers.
 yaml-rust2 = "0.11.0"
+# M2.P2.T1b (operator-approved: MIT OR Apache-2.0, pure-Rust, no CGO,
+# musl-fine, ubiquitous/standard): deserializes the declarative frontmatter
+# schema (core profile + extension pack, both plain JSON) into `validate`'s
+# `Profile` type. `derive` generates the field-by-field `Deserialize` impls
+# so the schema's JSON shape and the Rust struct shape stay one definition
+# each, not hand-kept in sync.
+serde = { version = "1.0.228", features = ["derive"] }
+# Paired with `serde` above: the schema files are JSON, so this is the
+# natural decoder. Also used to embed the bundled core/psa-apm profiles via
+# `include_str!` + `serde_json::from_str`, so the crate's own tests and the
+# psa-apm default validate with zero filesystem reads.
+serde_json = "1.0.150"
 
 [dev-dependencies]
 
