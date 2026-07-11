@@ -24,10 +24,13 @@
 //! guaranteed-deterministic ranked output) rather than ka's internal,
 //! `usize`-row-keyed, `HashMap`-order-dependent original.
 //!
-//! # M1.P2.T1
-//! BM25F (fielded, per-field-weighted, multi-field documents) lands as a
-//! sibling module to `okapi` — the flat [`okapi::OkapiIndex`] is untouched;
-//! BM25F is new work, not a rewrite of it.
+//! # M1.P2.T1 (landed)
+//! [`bm25f::BM25FIndex`] — the fielded, per-field-weighted scorer (multi-
+//! field documents, configurable field weight + length-normalization `b`
+//! via [`bm25f::BM25FConfig`]). New work, not a rewrite: the flat
+//! [`okapi::OkapiIndex`] is untouched. Shares the tokenizer seam
+//! (`crate::tokenize`) and the ranked-output shape
+//! ([`okapi::ScoredDocument`]) with `okapi`, per the plan.
 //!
 //! # M1.P2.T2
 //! An all-case-splitting tokenizer mode (`camelCase`/`snake_case`/`TitleCase`/
@@ -42,6 +45,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod bm25f;
 pub mod okapi;
 pub mod tokenize;
 
