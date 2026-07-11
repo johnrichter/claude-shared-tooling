@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 
 # Directories never scanned (VCS internals, build/venv artifacts).
-SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "node_modules", "dist", "build"}
+SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "node_modules", "dist", "build", "target"}
 SKIP_SUFFIX_DIRS = (".egg-info",)
 
 # Binary/asset extensions we never text-scan.

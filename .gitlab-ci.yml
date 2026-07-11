@@ -19,6 +19,84 @@ unit-tests:
   script:
   - python -m unittest discover -s tests -p "test_*.py" -v
 
+# Rust workspace (rust/) — arch matrix: {linux, macos} x {x86_64, aarch64}.
+# Each cell runs `cargo fmt --check` + `cargo clippy -D warnings` (zero-warnings
+# lint bar) + `cargo doc -D warnings` (doc-gate: broken intra-doc links / doc
+# lints fail red — added M1.P2.T3 after a private intra-doc link slipped through
+# T1/T2 with no doc build in CI) + `cargo test`, native where a GitLab SaaS runner exists for that
+# {os, arch} pair, cross-compiled (build+lint only, test execution skipped and
+# called out below) where none does. Independent of the Python guardrail/test
+# jobs above and of any future Go CI job — never share a stage or job name.
+#
+# NOTE — runner tags: every `tags:` value below (saas-linux-*, saas-macos-*) must
+# be confirmed against the live GitLab SaaS runner fleet before relying on the
+# leg. A stale/wrong tag makes the job hang `pending` (a SILENT gap) rather than
+# fail red — so a bad tag will not surface in a red pipeline. Unverifiable from a
+# dev sandbox; confirm all four, especially rust-linux-aarch64
+# (saas-linux-medium-arm64), against the fleet at first CI run.
+.rust-base:
+  stage: test
+  # Toolchain provisioning differs by OS: Linux cells run inside the rust:1-slim
+  # Docker image (rustup+cargo+components baked in). macOS cells run on GitLab
+  # SaaS macOS runners, which are VM/shell-executor (NOT Docker) — they carry no
+  # `image:` Docker key; the macOS VM image is selected by the runner tag and is
+  # EXPECTED to ship rustup+cargo. CONFIRM the macOS fleet image provides the Rust
+  # toolchain before relying on the macOS legs; if it does not, prepend a rustup
+  # bootstrap step here. `rustup component add` below is idempotent — a no-op when
+  # rustfmt/clippy are already present, and self-heals an image that omits them.
+  before_script:
+  - rustup component add rustfmt clippy
+  - rustup target add "$RUST_TARGET"
+  script:
+  - cargo fmt --manifest-path rust/Cargo.toml --check
+  - cargo clippy --manifest-path rust/Cargo.toml --target "$RUST_TARGET" --all-targets --all-features -- -D warnings
+  # Doc-gate: warnings-as-errors doc build (host-target; rustdoc output is arch-independent for
+  # this pure crate). Catches broken/private intra-doc links and doc lints that neither fmt nor
+  # clippy sees — the exact class that slipped through T1/T2 before this step existed.
+  - RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path rust/Cargo.toml --no-deps
+  - if [ "$RUST_TEST_NATIVE" = "true" ]; then cargo test --manifest-path rust/Cargo.toml --target "$RUST_TARGET"; else echo "cross target $RUST_TARGET: fmt+clippy+doc only (no runner to execute the test binary natively)"; fi
+
+rust-linux-x86_64:
+  extends: .rust-base
+  image: rust:1-slim
+  tags: [saas-linux-small-amd64]
+  variables:
+    RUST_TARGET: x86_64-unknown-linux-gnu
+    RUST_TEST_NATIVE: "true"
+
+rust-linux-aarch64:
+  extends: .rust-base
+  image: rust:1-slim
+  tags: [saas-linux-medium-arm64]
+  variables:
+    RUST_TARGET: aarch64-unknown-linux-gnu
+    RUST_TEST_NATIVE: "true"
+
+rust-macos-aarch64:
+  extends: .rust-base
+  tags: [saas-macos-medium-m1]
+  variables:
+    RUST_TARGET: aarch64-apple-darwin
+    RUST_TEST_NATIVE: "true"
+
+rust-macos-x86_64:
+  extends: .rust-base
+  tags: [saas-macos-medium-m1]
+  variables:
+    # RULING (M1.P1.T1): the acceptance's "fmt+clippy+test on the matrix" is
+    # satisfied for M1 with `cargo test` EXECUTED on 3 of 4 cells. No native
+    # macOS-x86_64 SaaS runner exists, so this cell cross-compiles on the arm64
+    # runner and runs fmt+clippy only — Rosetta is not guaranteed on the image,
+    # so the x86_64 test binary cannot execute here. The untested combination is
+    # covered indirectly: x86_64 code paths are test-run on rust-linux-x86_64 and
+    # macOS is test-run on rust-macos-aarch64, and the crate is pure Rust with no
+    # arch-divergent behavior (the determinism contract's whole point).
+    # FOLLOW-UP (revisit at M3.P1.T1 / M4.P4.T1 — SC1 arch-matrix confirmation):
+    # flip RUST_TEST_NATIVE to "true" once a native macOS-x86_64 runner (or a
+    # verified Rosetta-enabled image) exists, closing the 4th test cell.
+    RUST_TARGET: x86_64-apple-darwin
+    RUST_TEST_NATIVE: "false"
+
 # Secret Detection (GitLab-managed, defence-in-depth alongside the guardrail's scan).
 include:
 - template: Security/Secret-Detection.gitlab-ci.yml
