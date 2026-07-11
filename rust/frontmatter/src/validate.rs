@@ -1076,4 +1076,523 @@ body\n"
             .iter()
             .any(|v| v.code == "MISSING_REQUIRED_FIELD" && v.field == "owner_email"));
     }
+
+    // -----------------------------------------------------------------------
+    // SDET (M2.P2.T1b verification): cascade order under MULTIPLE
+    // simultaneous violations, cross-checked against the live Python
+    // emitter (`audit_helper.frontmatter.validate` + `schema.tag_rule_violations`).
+    // -----------------------------------------------------------------------
+
+    /// One doc that trips EVERY cascade phase at once: a singleton excess
+    /// (`status`), a singleton absence (`privacy`), a parent-dependency
+    /// chain with two orphans (`feature`->`suite` via `product`), and
+    /// (since `type:report` is present) both a `report_required` absence
+    /// (`source`) and a `report_period_format` failure (`period`).
+    /// `type`/`topic` are present and clean so this isolates the phases
+    /// that DO fire.
+    ///
+    /// Expected order, hand-verified against a live run of
+    /// `audit_helper.frontmatter.validate()` on the SAME tag list (see this
+    /// task's SDET report): singleton(status excess) -> singleton(privacy
+    /// absent) -> [owner absent -- Rust-only, D1 divergence, sorts last
+    /// among singletons per `DIVERGENCES.md`] -> parent(feature->suite) ->
+    /// parent(product->suite) -> `report_required(source)` ->
+    /// `report_period_format(period)`. Python emits the identical sequence
+    /// MINUS the owner line (schema.py has no `owner` namespace at all --
+    /// see `DIVERGENCES.md` D1); every other code/field, in this exact
+    /// order, matched byte-for-byte in the live comparison.
+    fn multi_violation_report_doc() -> &'static str {
+        "---\n\
+name: \"x\"\n\
+description: \"d\"\n\
+id: \"a:b:c\"\n\
+tags:\n\
+  - type:report\n\
+  - status:complete\n\
+  - status:stub\n\
+  - topic:t\n\
+  - feature:x\n\
+  - product:y\n\
+  - period:bad-format\n\
+links: []\n\
+updated: 2026-07-11T00:00:00Z\n\
+---\n\
+body\n"
+    }
+
+    #[test]
+    fn cascade_order_under_multiple_simultaneous_violations_matches_live_python_plus_owner() {
+        let parsed = parse::parse(multi_violation_report_doc()).unwrap();
+        let entry = validate(&parsed, "some/report.md", &profile());
+        let codes: Vec<(&str, &str)> = entry
+            .violations
+            .iter()
+            .map(|v| (v.code.as_str(), v.field.as_str()))
+            .collect();
+        assert_eq!(
+            codes,
+            vec![
+                ("MULTIPLE_SINGLE_VALUE_TAGS", "status"),
+                ("MISSING_REQUIRED_TAG", "privacy"),
+                ("MISSING_REQUIRED_TAG", "owner"), // Rust-only: D1 divergence
+                ("ORPHAN_NAMESPACE_TAG", "feature"),
+                ("ORPHAN_NAMESPACE_TAG", "product"),
+                ("MISSING_REQUIRED_TAG", "source"),
+                ("INVALID_PERIOD_FORMAT", "period"),
+            ],
+            "cascade order (minus the owner line) must match the live Python \
+             emitter's tag_rule_violations() output on the identical tag list"
+        );
+    }
+
+    /// Same fixture with the Rust-only `owner` line filtered out --
+    /// asserts the REMAINING sequence is byte-for-byte the live Python
+    /// emitter's actual output (captured by running
+    /// `audit_helper.frontmatter.validate()` against this exact tags list
+    /// during SDET verification; see the task's SDET report for the raw
+    /// transcript). This is the parity-critical assertion T2's frozen
+    /// goldens will formalize at scale.
+    #[test]
+    fn cascade_order_minus_owner_line_is_byte_for_byte_the_live_python_sequence() {
+        let parsed = parse::parse(multi_violation_report_doc()).unwrap();
+        let entry = validate(&parsed, "some/report.md", &profile());
+        let without_owner: Vec<(&str, &str, &str)> = entry
+            .violations
+            .iter()
+            .filter(|v| v.field != "owner")
+            .map(|v| (v.code.as_str(), v.field.as_str(), v.message.as_str()))
+            .collect();
+        assert_eq!(
+            without_owner,
+            vec![
+                (
+                    "MULTIPLE_SINGLE_VALUE_TAGS",
+                    "status",
+                    "'status:' must appear exactly once, found 2: ['status:complete', 'status:stub']"
+                ),
+                (
+                    "MISSING_REQUIRED_TAG",
+                    "privacy",
+                    "missing required 'privacy:' tag"
+                ),
+                (
+                    "ORPHAN_NAMESPACE_TAG",
+                    "feature",
+                    "'feature:' tag requires a 'suite:' tag, which is missing"
+                ),
+                (
+                    "ORPHAN_NAMESPACE_TAG",
+                    "product",
+                    "'product:' tag requires a 'suite:' tag, which is missing"
+                ),
+                (
+                    "MISSING_REQUIRED_TAG",
+                    "source",
+                    "type:report requires a 'source:' tag, which is missing"
+                ),
+                (
+                    "INVALID_PERIOD_FORMAT",
+                    "period",
+                    "'period:bad-format' is not YYYY-MM-DD..YYYY-MM-DD"
+                ),
+            ]
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // SDET: spot-parity fixtures (ran LIVE against
+    // `.claude/skills/workspace-audit/audit-helper`'s venv'd
+    // `audit_helper.frontmatter.validate()`; see the task's SDET report for
+    // the paired Python transcript). Every fixture below produces the
+    // EXACT SAME violation set as the live Python emitter, except for the
+    // Rust-only `owner` line (D1) -- confirmed present/absent as expected
+    // in each case.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn spot_parity_valid_context_doc_has_only_the_owner_divergence() {
+        let input = "---\nname: Valid Context File\ndescription: \"A valid context file with all required fields properly formatted and exactly at the description cap.\"\nid: knowledge-base:tooling:valid-context\ntags:\n  - type:knowledge\n  - topic:tooling\n  - status:complete\n  - privacy:internal\nlinks:\n  - knowledge-base:claude:rules-frontmatter\nupdated: 2026-07-01T12:34:56Z\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(
+            &parsed,
+            "knowledge-base/tooling/valid-context.md",
+            &profile(),
+        );
+        assert_eq!(entry.file_class, "context");
+        assert_eq!(entry.violations.len(), 1, "{:?}", entry.violations);
+        assert_eq!(entry.violations[0].code, "MISSING_REQUIRED_TAG");
+        assert_eq!(entry.violations[0].field, "owner");
+    }
+
+    #[test]
+    fn spot_parity_valid_skill_with_workspace_nesting_has_only_the_owner_divergence() {
+        let input = "---\nname: Valid Skill\ndescription: \"A valid skill file with nested workspace: structure and all required fields properly formatted and exactly at the skill description cap.\"\nworkspace:\n  id: skill:workspace:valid-skill\n  tags:\n    - type:skill\n    - topic:tooling\n    - status:complete\n    - privacy:internal\n  links:\n    - knowledge-base:claude:rules-frontmatter\n  updated: 2026-07-02T08:30:00Z\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, ".claude/skills/valid-skill/SKILL.md", &profile());
+        assert_eq!(entry.file_class, "skill");
+        assert_eq!(entry.violations.len(), 1, "{:?}", entry.violations);
+        assert_eq!(entry.violations[0].field, "owner");
+    }
+
+    #[test]
+    fn spot_parity_report_with_good_period_has_only_the_owner_divergence() {
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - topic:t\n  - source:slack\n  - period:2026-04-01..2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/report.md", &profile());
+        assert_eq!(entry.violations.len(), 1, "{:?}", entry.violations);
+        assert_eq!(entry.violations[0].field, "owner");
+    }
+
+    // -----------------------------------------------------------------------
+    // SDET: never-panic / robustness on adversarial ParsedFrontmatter input
+    // (step 2). Every case below is constructed via the crate's own public
+    // API (RawFields::from_ordered_pairs + FrontmatterValue variants), not
+    // through parse(), so it can express shapes parse()'s YAML backend
+    // would reject or never produce -- exactly the seam a future caller
+    // bypassing parse() could hit.
+    // -----------------------------------------------------------------------
+
+    fn entry_from_raw(pairs: Vec<(&str, FrontmatterValue)>, rel_path: &str) -> FrontmatterEntry {
+        let raw = RawFields::from_ordered_pairs(
+            pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+        );
+        // `ParsedFrontmatter::from_raw_fields` is `pub(crate)`, reachable
+        // from this in-crate test module directly -- constructing via
+        // `RawFields` (never through `parse::parse`) exercises the same
+        // public-API seam a future caller building `ParsedFrontmatter`
+        // directly (bypassing this crate's own parser and its nesting cap)
+        // could hit.
+        let parsed = ParsedFrontmatter::from_raw_fields(raw, String::new());
+        validate(&parsed, rel_path, &profile())
+    }
+
+    #[test]
+    fn validate_on_completely_empty_raw_fields_never_panics() {
+        let entry = entry_from_raw(vec![], "some/doc.md");
+        assert!(!entry.is_valid);
+        assert!(entry
+            .violations
+            .iter()
+            .any(|v| v.code == "MISSING_REQUIRED_FIELD" && v.field == "name"));
+    }
+
+    #[test]
+    fn validate_on_tags_as_a_mapping_never_panics_and_reports_not_a_list() {
+        let tags_mapping = FrontmatterValue::Mapping(RawFields::from_ordered_pairs(vec![(
+            "type".to_string(),
+            FrontmatterValue::Scalar("knowledge".to_string()),
+        )]));
+        let entry = entry_from_raw(vec![("tags", tags_mapping)], "some/doc.md");
+        assert!(entry
+            .violations
+            .iter()
+            .any(|v| v.code == "TAGS_NOT_A_LIST" && v.field == "tags"));
+    }
+
+    #[test]
+    fn validate_on_tags_as_a_scalar_never_panics_and_reports_not_a_list() {
+        let entry = entry_from_raw(
+            vec![("tags", FrontmatterValue::Scalar("oops".to_string()))],
+            "some/doc.md",
+        );
+        assert!(entry.violations.iter().any(|v| v.code == "TAGS_NOT_A_LIST"));
+    }
+
+    #[test]
+    fn validate_on_description_as_a_sequence_never_panics() {
+        // Not a Scalar -- the cap check's `if let Some(Scalar(...))` guard
+        // simply doesn't match, so no DESCRIPTION_OVER_CAP fires, but the
+        // top-level-presence check still runs (description IS present at
+        // top level here) and no panic occurs either way.
+        let entry = entry_from_raw(
+            vec![(
+                "description",
+                FrontmatterValue::Sequence(vec!["a".to_string(), "b".to_string()]),
+            )],
+            "some/doc.md",
+        );
+        assert!(!entry
+            .violations
+            .iter()
+            .any(|v| v.code == "DESCRIPTION_OVER_CAP"));
+        assert!(!entry
+            .violations
+            .iter()
+            .any(|v| v.code == "DESCRIPTION_NOT_TOP_LEVEL"));
+    }
+
+    #[test]
+    fn validate_on_description_as_a_mapping_never_panics() {
+        let entry = entry_from_raw(
+            vec![(
+                "description",
+                FrontmatterValue::Mapping(RawFields::from_ordered_pairs(vec![(
+                    "x".to_string(),
+                    FrontmatterValue::Scalar("y".to_string()),
+                )])),
+            )],
+            "some/doc.md",
+        );
+        assert!(!entry.violations.iter().any(|v| v.code.is_empty())); // no panic occurred, entry produced
+    }
+
+    #[test]
+    fn validate_on_workspace_as_a_scalar_never_panics_and_ignores_it() {
+        // `flatten()` only descends into `workspace` when it IS a Mapping;
+        // a scalar `workspace:` value is left as an ordinary (unused) top-
+        // level field -- required fields must still come from top level.
+        let entry = entry_from_raw(
+            vec![
+                ("name", FrontmatterValue::Scalar("x".to_string())),
+                (
+                    "workspace",
+                    FrontmatterValue::Scalar("not-a-mapping".to_string()),
+                ),
+            ],
+            "some/doc.md",
+        );
+        assert!(entry
+            .violations
+            .iter()
+            .any(|v| v.code == "MISSING_REQUIRED_FIELD" && v.field == "id"));
+    }
+
+    #[test]
+    fn validate_on_a_huge_tag_list_never_panics_and_completes() {
+        let mut tags: Vec<String> = (0..20_000).map(|i| format!("topic:t{i}")).collect();
+        tags.push("type:knowledge".to_string());
+        tags.push("status:complete".to_string());
+        tags.push("privacy:internal".to_string());
+        tags.push("owner:datadog".to_string());
+        let entry = entry_from_raw(
+            vec![
+                ("name", FrontmatterValue::Scalar("x".to_string())),
+                ("description", FrontmatterValue::Scalar("d".to_string())),
+                ("id", FrontmatterValue::Scalar("a:b:c".to_string())),
+                ("tags", FrontmatterValue::Sequence(tags)),
+                ("links", FrontmatterValue::Sequence(vec![])),
+                (
+                    "updated",
+                    FrontmatterValue::Scalar("2026-07-11T00:00:00Z".to_string()),
+                ),
+            ],
+            "some/doc.md",
+        );
+        assert!(entry.is_valid, "{:?}", entry.violations);
+    }
+
+    #[test]
+    fn validate_on_a_deeply_recursively_nested_mapping_value_never_panics() {
+        // Builds a 2000-level-deep single-child Mapping chain and assigns
+        // it as an ordinary field's value. `validate()`/`flatten()` never
+        // recurse into a field's OWN nested shape (only the single
+        // `workspace:` level is descended into), so this exercises
+        // construction/traversal/eventual Drop of a value this deep
+        // without validate() itself ever walking it -- proving the no-
+        // panic contract holds even for a shape parse()'s own 64-level
+        // nesting cap (crate::parse::MAX_NESTING_DEPTH) would have rejected
+        // long before validate() ever saw it.
+        let mut deep = FrontmatterValue::Scalar("leaf".to_string());
+        for _ in 0..2000 {
+            deep = FrontmatterValue::Mapping(RawFields::from_ordered_pairs(vec![(
+                "next".to_string(),
+                deep,
+            )]));
+        }
+        let entry = entry_from_raw(vec![("junk_field", deep)], "some/doc.md");
+        // No panic reaching here is the assertion; content is incidental.
+        assert!(!entry.is_valid);
+    }
+
+    #[test]
+    fn validate_on_duplicated_top_level_keys_never_panics_and_uses_first_occurrence() {
+        // RawFields::get() (crate::value) documents first-match lookup;
+        // this pins that a validator built on it sees the FIRST of two
+        // same-named top-level entries, not a panic or a merge.
+        let entry = entry_from_raw(
+            vec![
+                ("name", FrontmatterValue::Scalar("first".to_string())),
+                ("name", FrontmatterValue::Scalar("second".to_string())),
+            ],
+            "some/doc.md",
+        );
+        assert!(!entry
+            .violations
+            .iter()
+            .any(|v| v.code == "MISSING_REQUIRED_FIELD" && v.field == "name"));
+    }
+
+    // -----------------------------------------------------------------------
+    // SDET: NON_STRING_FRONTMATTER_KEY false-positive risk (step 6).
+    // -----------------------------------------------------------------------
+
+    /// DEFECT (escalated to the quality-reviewer, not fixed here -- see
+    /// this task's SDET report): a LEGITIMATE plain-string top-level key
+    /// that happens to contain a literal `(` -- e.g. an author's ad hoc
+    /// "notes (draft)" field -- DOES false-positive as
+    /// `NON_STRING_FRONTMATTER_KEY`, even though `yaml_key_to_string`
+    /// rendered it via `scalar_to_string` (a genuine `Yaml::String`), never
+    /// the `{key:?}` debug fallback the check exists to detect. Proven
+    /// through the REAL parser (`parse::parse`), not a contrived
+    /// `RawFields`, to show this is reachable from ordinary YAML input, not
+    /// just a hypothetical. Root cause: `key.contains('(')`
+    /// (`CODE_NON_STRING_KEY`'s check, this module) cannot distinguish "a
+    /// real string that happens to contain a paren" from "Rust's derived
+    /// `Debug` rendering of a compound YAML key," because both produce
+    /// text containing `(`. A correct fix needs `crate::parse` to carry a
+    /// distinct signal (e.g. a dedicated `FrontmatterValue`/key-shape
+    /// variant) rather than rely on `Debug`-format sniffing -- a
+    /// value-model change out of this task's scope; pinned here as a green
+    /// test recording CURRENT (defective) behavior, not desired behavior.
+    #[test]
+    fn defect_legitimate_string_key_containing_a_paren_false_positives() {
+        let input = "---\nname: \"x\"\n\"notes (draft)\": some value\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/doc.md", &profile());
+        assert!(
+            entry
+                .violations
+                .iter()
+                .any(|v| v.code == "NON_STRING_FRONTMATTER_KEY" && v.field == "notes (draft)"),
+            "documents the CURRENT false-positive (see doc comment) -- if this \
+             ever fails, the heuristic has been fixed and this test (plus its \
+             escalation note) should be retired: {:?}",
+            entry.violations
+        );
+    }
+
+    /// Same defect, unquoted plain-scalar key -- YAML's plain-scalar
+    /// grammar permits `(`/`)` outside flow-collection context, so this is
+    /// also a real, parser-reachable string key that false-positives.
+    #[test]
+    fn defect_unquoted_plain_scalar_key_containing_a_paren_false_positives() {
+        let input = "---\nname: \"x\"\nnotes (draft): some value\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/doc.md", &profile());
+        assert!(entry
+            .violations
+            .iter()
+            .any(|v| v.code == "NON_STRING_FRONTMATTER_KEY"));
+    }
+
+    /// The heuristic's actual (narrow, intended) trigger surface: a YAML
+    /// key whose own shape is a SEQUENCE (`[a]:`), which
+    /// `yaml_key_to_string` cannot render via `scalar_to_string` and so
+    /// falls back to Rust's derived `Debug` (`Array([...])`-shaped text
+    /// containing `(`). This is the ONLY reachable case that trips the
+    /// heuristic through the real parser -- pinned alongside the two
+    /// false-positive tests above for contrast.
+    #[test]
+    fn a_sequence_shaped_key_is_the_heuristics_real_trigger() {
+        let input = "---\nname: \"x\"\n[a, b]: z\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/doc.md", &profile());
+        assert!(entry
+            .violations
+            .iter()
+            .any(|v| v.code == "NON_STRING_FRONTMATTER_KEY"));
+    }
+
+    // -----------------------------------------------------------------------
+    // SDET: data-driven property extended beyond the SE's two tests (step 7).
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn mutating_a_singleton_namespace_to_optional_removes_its_violation() {
+        let mut pack = bundled_pack_as_value();
+        for ns in pack["namespaces"].as_array_mut().unwrap() {
+            if ns["name"] == "privacy" {
+                ns["cardinality"] = serde_json::json!("optional");
+            }
+        }
+        let profile =
+            Profile::from_pack_json(&pack.to_string()).expect("edited pack must still deserialize");
+        // conformant_context_doc has no privacy: substitute -- reuse a doc
+        // missing privacy on purpose.
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:knowledge\n  - topic:t\n  - status:complete\n  - owner:datadog\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/doc.md", &profile);
+        assert!(
+            !entry.violations.iter().any(|v| v.field == "privacy"),
+            "privacy demoted to optional in the schema must drop its violation \
+             with no validate.rs change: {:?}",
+            entry.violations
+        );
+    }
+
+    #[test]
+    fn mutating_report_required_namespaces_changes_the_verdict() {
+        let mut pack = bundled_pack_as_value();
+        pack["report"]["required_namespaces"] = serde_json::json!(["source", "period", "audience"]);
+        let profile =
+            Profile::from_pack_json(&pack.to_string()).expect("edited pack must still deserialize");
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-04-01..2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/report.md", &profile);
+        assert!(
+            entry
+                .violations
+                .iter()
+                .any(|v| v.code == "MISSING_REQUIRED_TAG" && v.field == "audience"),
+            "adding 'audience' to report.required_namespaces in the schema must \
+             surface a new MISSING_REQUIRED_TAG with no validate.rs change: {:?}",
+            entry.violations
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // SDET: file_class first-match-wins + exempt dir_components (step 8).
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn file_class_first_matching_rule_wins_over_a_later_matching_rule() {
+        let mut pack = bundled_pack_as_value();
+        // Insert a broad `*.md` -> "agent" rule BEFORE the existing skill
+        // rules -- if classify_file_class is truly first-match-wins, this
+        // new rule (now first) decides, even though a later rule would
+        // also match.
+        pack["file_class"]["rules"].as_array_mut().unwrap().insert(
+            0,
+            serde_json::json!({ "class": "agent", "match": { "glob": "*.md" } }),
+        );
+        let profile =
+            Profile::from_pack_json(&pack.to_string()).expect("edited pack must still deserialize");
+        let parsed = parse::parse("---\nname: \"x\"\n---\nbody\n").unwrap();
+        let entry = validate(&parsed, ".claude/skills/x/SKILL.md", &profile);
+        assert_eq!(
+            entry.file_class, "agent",
+            "the inserted first-position rule must win over the later, also-\
+             matching skill rule"
+        );
+    }
+
+    #[test]
+    fn exempt_dir_component_anywhere_in_the_path_is_honored() {
+        let parsed = parse::parse("---\nname: \"x\"\n---\nbody\n").unwrap();
+        let entry = validate(&parsed, "some/nested/__pycache__/x.md", &profile());
+        assert!(entry.is_valid, "{:?}", entry.violations);
+    }
+
+    #[test]
+    fn exempt_filename_match_is_honored_regardless_of_directory() {
+        let parsed = parse::parse("---\nname: \"x\"\n---\nbody\n").unwrap();
+        let entry = validate(&parsed, "deeply/nested/path/CLAUDE.md", &profile());
+        assert!(entry.is_valid, "{:?}", entry.violations);
+    }
+
+    // -----------------------------------------------------------------------
+    // SDET: determinism on a NON-conformant (multi-violation) doc, not just
+    // the happy path (step 9).
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn determinism_holds_for_a_multi_violation_entry_too() {
+        let parsed = parse::parse(multi_violation_report_doc()).unwrap();
+        let profile = profile();
+        let first = validate(&parsed, "some/report.md", &profile);
+        let second = validate(&parsed, "some/report.md", &profile);
+        let third = validate(&parsed, "some/report.md", &profile);
+        assert_eq!(first, second);
+        assert_eq!(second, third);
+    }
 }

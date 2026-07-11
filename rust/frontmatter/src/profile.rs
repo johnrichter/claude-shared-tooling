@@ -436,6 +436,72 @@ mod tests {
         assert!(matches!(result, Err(ProfileError::InvalidPack(_))));
     }
 
+    // -- SDET: never-panic on malformed/empty/wrong-shape profile JSON -----
+
+    #[test]
+    fn empty_pack_json_is_a_typed_error_not_a_panic() {
+        let result = Profile::from_pack_json("");
+        assert!(matches!(result, Err(ProfileError::InvalidPack(_))));
+    }
+
+    #[test]
+    fn truncated_pack_json_is_a_typed_error_not_a_panic() {
+        // Bundled pack text cut off mid-object -- a realistic "partial
+        // write"/"truncated download" shape, not just a syntax typo.
+        let truncated = &EMBEDDED_PSA_APM_PACK_JSON[..EMBEDDED_PSA_APM_PACK_JSON.len() / 2];
+        let result = Profile::from_pack_json(truncated);
+        assert!(matches!(result, Err(ProfileError::InvalidPack(_))));
+    }
+
+    #[test]
+    fn pack_json_missing_a_required_key_is_a_typed_error_not_a_panic() {
+        // Valid JSON, valid object shape, but missing `report` entirely --
+        // `Pack`'s fields are not `#[serde(default)]`, so this must fail
+        // deserialization rather than construct a half-populated `Pack`.
+        let result = Profile::from_pack_json(
+            r#"{"required_fields":[],"description_caps":{},"file_class":{"default":"context","rules":[]},"namespaces":[],"exempt":{"filenames":[],"dir_components":[],"path_globs":[]}}"#,
+        );
+        assert!(matches!(result, Err(ProfileError::InvalidPack(_))));
+    }
+
+    #[test]
+    fn pack_json_with_wrong_field_type_is_a_typed_error_not_a_panic() {
+        // `required_fields` must be an array of objects; a bare string is
+        // the wrong shape entirely.
+        let mut pack = bundled_pack_as_value_standalone();
+        pack["required_fields"] = serde_json::json!("not-an-array");
+        let result = Profile::from_pack_json(&pack.to_string());
+        assert!(matches!(result, Err(ProfileError::InvalidPack(_))));
+    }
+
+    #[test]
+    fn wrong_shape_top_level_pack_json_is_a_typed_error_not_a_panic() {
+        // A JSON array, not an object -- Pack expects a map.
+        let result = Profile::from_pack_json("[1, 2, 3]");
+        assert!(matches!(result, Err(ProfileError::InvalidPack(_))));
+    }
+
+    #[test]
+    fn malformed_core_json_is_a_typed_error_not_a_panic() {
+        let result = Profile::from_json("{ not json", EMBEDDED_PSA_APM_PACK_JSON);
+        assert!(matches!(result, Err(ProfileError::InvalidCore(_))));
+    }
+
+    #[test]
+    fn unsupported_period_regex_is_a_typed_error_not_a_panic() {
+        let mut pack = bundled_pack_as_value_standalone();
+        pack["report"]["period"]["regex"] = serde_json::json!(r"^[0-9]{4}$"); // character class, unsupported
+        let result = Profile::from_pack_json(&pack.to_string());
+        assert!(matches!(
+            result,
+            Err(ProfileError::UnsupportedPeriodRegex(_))
+        ));
+    }
+
+    fn bundled_pack_as_value_standalone() -> serde_json::Value {
+        serde_json::from_str(EMBEDDED_PSA_APM_PACK_JSON).expect("bundled pack JSON must parse")
+    }
+
     #[test]
     fn period_pattern_compiles_and_matches_the_psa_apm_regex() {
         let pattern = PeriodPattern::compile(r"^\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}$").unwrap();
@@ -453,5 +519,60 @@ mod tests {
             "character class"
         );
         assert!(PeriodPattern::compile(r"^a|b$").is_none(), "alternation");
+    }
+
+    // -- SDET: PeriodPattern vs Python PERIOD_RE semantics (step 5) --------
+
+    fn psa_apm_pattern() -> PeriodPattern {
+        PeriodPattern::compile(r"^\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}$").unwrap()
+    }
+
+    #[test]
+    fn period_pattern_matches_the_canonical_shape() {
+        assert!(psa_apm_pattern().is_match("2026-04-01..2026-06-30"));
+    }
+
+    #[test]
+    fn period_pattern_rejects_tricky_non_matches() {
+        let p = psa_apm_pattern();
+        // Extra/missing digits.
+        assert!(!p.is_match("2026-4-01..2026-06-30"), "short month");
+        assert!(
+            !p.is_match("2026-04-01..2026-06-300"),
+            "extra trailing digit"
+        );
+        assert!(
+            !p.is_match("02026-04-01..2026-06-30"),
+            "extra leading digit"
+        );
+        // Missing/wrong separator.
+        assert!(!p.is_match("2026-04-01.2026-06-30"), "single dot");
+        assert!(!p.is_match("2026-04-01...2026-06-30"), "triple dot");
+        // Leading/trailing junk (implicit `^`/`$` anchoring).
+        assert!(!p.is_match(" 2026-04-01..2026-06-30"), "leading space");
+        assert!(!p.is_match("2026-04-01..2026-06-30 "), "trailing space");
+        assert!(!p.is_match("x2026-04-01..2026-06-30"), "leading junk char");
+        assert!(!p.is_match(""), "empty string");
+    }
+
+    /// DIVERGENCE (T2 input): Python's `re` module matches `\d` against any
+    /// Unicode decimal-digit codepoint by default (no `re.ASCII` flag on
+    /// `schema.py`'s `PERIOD_RE`), so a period value built from
+    /// Arabic-Indic digits (`٢٠٢٦-٠٤-٠١..٢٠٢٦-٠٦-٣٠`) matches Python's regex.
+    /// This crate's hand-rolled `PeriodPattern::is_match` checks
+    /// `char::is_ascii_digit`, which is ASCII-only, so the same string does
+    /// NOT match here. Pinned as a green test recording current (diverging)
+    /// behavior -- not fixed in this task, since resolving it is a semantic
+    /// choice for M2.P2.T2 (does psa-apm's schema actually want to accept
+    /// non-ASCII digits in a `period:` tag, given every legitimate value is
+    /// authored in ASCII). Escalate to the quality-reviewer as a parity gap.
+    #[test]
+    fn period_pattern_rejects_unicode_digits_that_pythons_d_would_accept() {
+        let p = psa_apm_pattern();
+        assert!(
+            !p.is_match("\u{0662}\u{0660}\u{0662}\u{0666}-04-01..2026-06-30"),
+            "Rust's ASCII-only digit check must reject Arabic-Indic digits, \
+             even though Python's default (non-ASCII-flagged) \\d would accept them"
+        );
     }
 }
