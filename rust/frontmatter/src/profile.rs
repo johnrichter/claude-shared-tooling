@@ -22,6 +22,8 @@
 //! - [`Profile::from_json`] -- both core and pack supplied as JSON text.
 //!   The fully general constructor the two above wrap.
 
+use globset::{Glob, GlobSet, GlobSetBuilder};
+use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fmt;
@@ -34,9 +36,9 @@ const EMBEDDED_PSA_APM_PACK_JSON: &str =
 /// Why a [`Profile`] could not be built from supplied JSON text.
 ///
 /// Malformed schema JSON is a caller-facing error, never a panic -- a
-/// broken profile (bad JSON, a pack whose `period.regex` this crate's
-/// restricted regex subset cannot compile) is something a caller can
-/// report and act on.
+/// broken profile (bad JSON, a pack whose `period.regex` does not compile
+/// as a `regex::Regex`, a `file_class`/`exempt` glob `globset` rejects) is
+/// something a caller can report and act on.
 #[derive(Debug)]
 pub enum ProfileError {
     /// The core profile JSON did not deserialize into `Core` (this crate's
@@ -45,11 +47,12 @@ pub enum ProfileError {
     /// The extension pack JSON did not deserialize into `Pack` (this
     /// crate's private extension-pack struct).
     InvalidPack(serde_json::Error),
-    /// The pack's `report.period.regex` uses a pattern feature outside the
-    /// restricted subset `PeriodPattern` (this module) supports (anchors
-    /// `^`/`$`, `\d{N}` digit-repeats, `\.` literal dots, other literal
-    /// characters).
-    UnsupportedPeriodRegex(String),
+    /// The pack's `report.period.regex` is not a `regex`-crate-compilable
+    /// pattern.
+    InvalidPeriodRegex(String, regex::Error),
+    /// One of the pack's `file_class` rule globs, or one of its
+    /// `exempt.path_globs`, is not a `globset`-compilable glob.
+    InvalidGlob(String, globset::Error),
 }
 
 impl fmt::Display for ProfileError {
@@ -57,11 +60,11 @@ impl fmt::Display for ProfileError {
         match self {
             Self::InvalidCore(err) => write!(f, "core profile JSON is invalid: {err}"),
             Self::InvalidPack(err) => write!(f, "extension pack JSON is invalid: {err}"),
-            Self::UnsupportedPeriodRegex(pattern) => {
-                write!(
-                    f,
-                    "pack's period.regex '{pattern}' uses an unsupported pattern feature"
-                )
+            Self::InvalidPeriodRegex(pattern, err) => {
+                write!(f, "pack's period.regex '{pattern}' is invalid: {err}")
+            }
+            Self::InvalidGlob(glob, err) => {
+                write!(f, "pack's glob '{glob}' is invalid: {err}")
             }
         }
     }
@@ -77,11 +80,15 @@ impl std::error::Error for ProfileError {}
 pub struct Profile {
     pub(crate) core: Core,
     pub(crate) pack: Pack,
-    /// The pack's `report.period.regex`, pre-compiled into this crate's
-    /// restricted pattern subset once at construction time (never
-    /// per-file), so a malformed pattern is a construction-time
-    /// [`ProfileError`], not a per-match failure deep in `validate`.
-    pub(crate) period_pattern: PeriodPattern,
+    /// The pack's `report.period.regex`, compiled once at construction
+    /// time (never per-file/per-match), so a malformed pattern is a
+    /// construction-time [`ProfileError`], not a per-match failure deep in
+    /// `validate`. See the pack file's `report.period.regex`/`notes` for
+    /// why the shipped pattern uses `[0-9]`, not `\d`.
+    pub(crate) period_pattern: Regex,
+    /// The pack's `file_class.rules` globs and `exempt.path_globs`,
+    /// compiled once at construction time -- see [`CompiledGlobs`].
+    pub(crate) globs: CompiledGlobs,
 }
 
 impl Profile {
@@ -107,8 +114,10 @@ impl Profile {
     ///
     /// # Errors
     /// [`ProfileError::InvalidPack`] if `pack_json` does not deserialize
-    /// into `Pack`; [`ProfileError::UnsupportedPeriodRegex`] if the pack's
-    /// period regex is outside this crate's supported subset.
+    /// into `Pack`; [`ProfileError::InvalidPeriodRegex`] if the pack's
+    /// `report.period.regex` does not compile as a `regex::Regex`;
+    /// [`ProfileError::InvalidGlob`] if any `file_class` rule glob or
+    /// `exempt.path_globs` entry does not compile as a `globset` glob.
     pub fn from_pack_json(pack_json: &str) -> Result<Self, ProfileError> {
         Self::from_json(EMBEDDED_CORE_JSON, pack_json)
     }
@@ -118,20 +127,22 @@ impl Profile {
     /// # Errors
     /// [`ProfileError::InvalidCore`] / [`ProfileError::InvalidPack`] on
     /// malformed JSON or a shape that doesn't match `Core`/`Pack`;
-    /// [`ProfileError::UnsupportedPeriodRegex`] if the pack's period regex
-    /// is outside this crate's supported subset (see `PeriodPattern::compile`,
-    /// below).
+    /// [`ProfileError::InvalidPeriodRegex`] if the pack's `report.period.regex`
+    /// does not compile as a `regex::Regex`; [`ProfileError::InvalidGlob`]
+    /// if any `file_class` rule glob or `exempt.path_globs` entry does not
+    /// compile as a `globset` glob.
     pub fn from_json(core_json: &str, pack_json: &str) -> Result<Self, ProfileError> {
         let core: Core = serde_json::from_str(core_json).map_err(ProfileError::InvalidCore)?;
         let pack: Pack = serde_json::from_str(pack_json).map_err(ProfileError::InvalidPack)?;
-        let period_pattern =
-            PeriodPattern::compile(&pack.report.period.regex).ok_or_else(|| {
-                ProfileError::UnsupportedPeriodRegex(pack.report.period.regex.clone())
-            })?;
+        let period_pattern = Regex::new(&pack.report.period.regex).map_err(|err| {
+            ProfileError::InvalidPeriodRegex(pack.report.period.regex.clone(), err)
+        })?;
+        let globs = CompiledGlobs::compile(&pack)?;
         Ok(Self {
             core,
             pack,
             period_pattern,
+            globs,
         })
     }
 }
@@ -319,98 +330,62 @@ pub(crate) struct ExemptSpec {
 }
 
 // ---------------------------------------------------------------------------
-// Restricted period-regex subset
+// Compiled globs (file_class rules + exempt path_globs)
 // ---------------------------------------------------------------------------
 
-/// One compiled token of this crate's restricted regex subset -- just
-/// enough grammar to interpret a pack's `report.period.regex` as DATA
-/// (per the build-plan's "no validator-code edit" requirement) without
-/// pulling in a full regex engine as a new dependency. Supports exactly
-/// the shapes a calendar-range-style pattern needs: start/end anchors,
-/// `\d{N}` digit-repeats, `\.` literal dots, and other literal characters.
-/// Anything else (character classes, alternation, unanchored patterns, ...)
-/// is rejected at `PeriodPattern::compile` time as [`ProfileError::UnsupportedPeriodRegex`]
-/// rather than silently mismatched.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum PeriodTok {
-    DigitRepeat(usize),
-    Literal(char),
+/// The pack's `file_class.rules` globs and `exempt.path_globs`, each
+/// compiled once into a `globset::GlobSet` at [`Profile`] construction
+/// (never per-file) -- determinism + perf, and a malformed glob in the
+/// schema is a construction-time [`ProfileError`], not a per-file mismatch
+/// deep in `validate`. `literal_separator` is left at `globset`'s default
+/// (`false`), so `*` crosses `/` -- exact `fnmatch.fnmatch` parity with the
+/// Python emitter, so none of the pack's existing globs need editing.
+#[derive(Debug, Clone)]
+pub(crate) struct CompiledGlobs {
+    file_class: GlobSet,
+    exempt_path: GlobSet,
 }
 
-/// A compiled `report.period.regex`, produced once at [`Profile`] construction.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PeriodPattern(Vec<PeriodTok>);
-
-impl PeriodPattern {
-    /// Compiles `pattern` if it is exactly `^`, then a sequence of
-    /// `\d{N}` / `\.` / literal-character tokens, then `$` -- the shape
-    /// every psa-apm-style calendar-range period regex takes. Returns
-    /// `None` for anything outside that subset (unanchored, character
-    /// classes, alternation, unescaped metacharacters, ...).
-    fn compile(pattern: &str) -> Option<Self> {
-        let inner = pattern.strip_prefix('^')?.strip_suffix('$')?;
-        let mut toks = Vec::new();
-        let chars: Vec<char> = inner.chars().collect();
-        let mut i = 0;
-        while i < chars.len() {
-            match chars[i] {
-                '\\' => {
-                    let esc = *chars.get(i + 1)?;
-                    match esc {
-                        'd' => {
-                            // Expect `{N}` immediately following `\d`.
-                            if chars.get(i + 2) != Some(&'{') {
-                                return None;
-                            }
-                            let close = chars[i + 3..].iter().position(|c| *c == '}')? + i + 3;
-                            let digits: String = chars[i + 3..close].iter().collect();
-                            let n: usize = digits.parse().ok()?;
-                            toks.push(PeriodTok::DigitRepeat(n));
-                            i = close + 1;
-                        }
-                        '.' => {
-                            toks.push(PeriodTok::Literal('.'));
-                            i += 2;
-                        }
-                        _ => return None, // unsupported escape
-                    }
-                }
-                // Any other regex metacharacter in this position is outside
-                // the supported subset -- reject rather than mismatch.
-                '*' | '+' | '?' | '[' | ']' | '(' | ')' | '|' | '^' | '$' | '.' => return None,
-                c => {
-                    toks.push(PeriodTok::Literal(c));
-                    i += 1;
-                }
-            }
+impl CompiledGlobs {
+    fn compile(pack: &Pack) -> Result<Self, ProfileError> {
+        let mut file_class_builder = GlobSetBuilder::new();
+        for rule in &pack.file_class.rules {
+            let glob = Glob::new(&rule.matcher.glob)
+                .map_err(|err| ProfileError::InvalidGlob(rule.matcher.glob.clone(), err))?;
+            file_class_builder.add(glob);
         }
-        Some(Self(toks))
+        let file_class = file_class_builder
+            .build()
+            .map_err(|err| ProfileError::InvalidGlob("file_class.rules".to_string(), err))?;
+
+        let mut exempt_builder = GlobSetBuilder::new();
+        for pattern in &pack.exempt.path_globs {
+            let glob = Glob::new(pattern)
+                .map_err(|err| ProfileError::InvalidGlob(pattern.clone(), err))?;
+            exempt_builder.add(glob);
+        }
+        let exempt_path = exempt_builder
+            .build()
+            .map_err(|err| ProfileError::InvalidGlob("exempt.path_globs".to_string(), err))?;
+
+        Ok(Self {
+            file_class,
+            exempt_path,
+        })
     }
 
-    /// True if `value` matches this compiled pattern in full (implicitly
-    /// anchored both ends, matching the source regex's `^...$`).
-    pub(crate) fn is_match(&self, value: &str) -> bool {
-        let chars: Vec<char> = value.chars().collect();
-        let mut pos = 0;
-        for tok in &self.0 {
-            match tok {
-                PeriodTok::Literal(expected) => {
-                    if chars.get(pos) != Some(expected) {
-                        return false;
-                    }
-                    pos += 1;
-                }
-                PeriodTok::DigitRepeat(n) => {
-                    for _ in 0..*n {
-                        if !chars.get(pos).is_some_and(char::is_ascii_digit) {
-                            return false;
-                        }
-                        pos += 1;
-                    }
-                }
-            }
-        }
-        pos == chars.len()
+    /// The lowest `file_class.rules` index matching `rel_path`, or `None`
+    /// if no rule matches -- `GlobSet::matches` returns every matching
+    /// index, so this picks the minimum itself to preserve first-match-wins
+    /// (pack array order), the same semantics the prior hand-rolled matcher
+    /// gave.
+    pub(crate) fn file_class_rule_index(&self, rel_path: &str) -> Option<usize> {
+        self.file_class.matches(rel_path).into_iter().min()
+    }
+
+    /// True if `rel_path` matches any `exempt.path_globs` entry.
+    pub(crate) fn exempt_path_matches(&self, rel_path: &str) -> bool {
+        self.exempt_path.is_match(rel_path)
     }
 }
 
@@ -487,44 +462,61 @@ mod tests {
         assert!(matches!(result, Err(ProfileError::InvalidCore(_))));
     }
 
+    /// M2.P2.T1b finalization: swapping the hand-rolled restricted subset
+    /// for a real `regex::Regex` means "unsupported pattern feature" is no
+    /// longer a concept -- any valid regex compiles, including a character
+    /// class. So this now proves the genuinely-new failure mode: a pattern
+    /// `regex` itself rejects (unbalanced group), not a feature the prior
+    /// hand-rolled subset happened not to support. EXPECTED-VALUE CHANGE
+    /// from the pre-swap test of the same name: the prior assertion (a
+    /// character-class pattern is rejected) is now FALSE -- `[0-9]{4}` is
+    /// ordinary, fully-supported regex syntax -- so it is retired rather
+    /// than pinned as a regression.
     #[test]
-    fn unsupported_period_regex_is_a_typed_error_not_a_panic() {
+    fn invalid_period_regex_is_a_typed_error_not_a_panic() {
         let mut pack = bundled_pack_as_value_standalone();
-        pack["report"]["period"]["regex"] = serde_json::json!(r"^[0-9]{4}$"); // character class, unsupported
+        pack["report"]["period"]["regex"] = serde_json::json!(r"^(unbalanced"); // real regex syntax error
         let result = Profile::from_pack_json(&pack.to_string());
         assert!(matches!(
             result,
-            Err(ProfileError::UnsupportedPeriodRegex(_))
+            Err(ProfileError::InvalidPeriodRegex(_, _))
         ));
+    }
+
+    #[test]
+    fn a_character_class_period_regex_now_compiles_cleanly() {
+        // The prior hand-rolled subset rejected any character class as
+        // "unsupported"; the real `regex` crate has no such restriction.
+        let mut pack = bundled_pack_as_value_standalone();
+        pack["report"]["period"]["regex"] = serde_json::json!(r"^[0-9]{4}$");
+        let result = Profile::from_pack_json(&pack.to_string());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn invalid_file_class_glob_is_a_typed_error_not_a_panic() {
+        let mut pack = bundled_pack_as_value_standalone();
+        pack["file_class"]["rules"][0]["match"]["glob"] = serde_json::json!("[unterminated");
+        let result = Profile::from_pack_json(&pack.to_string());
+        assert!(matches!(result, Err(ProfileError::InvalidGlob(_, _))));
+    }
+
+    #[test]
+    fn invalid_exempt_path_glob_is_a_typed_error_not_a_panic() {
+        let mut pack = bundled_pack_as_value_standalone();
+        pack["exempt"]["path_globs"] = serde_json::json!(["[unterminated"]);
+        let result = Profile::from_pack_json(&pack.to_string());
+        assert!(matches!(result, Err(ProfileError::InvalidGlob(_, _))));
     }
 
     fn bundled_pack_as_value_standalone() -> serde_json::Value {
         serde_json::from_str(EMBEDDED_PSA_APM_PACK_JSON).expect("bundled pack JSON must parse")
     }
 
-    #[test]
-    fn period_pattern_compiles_and_matches_the_psa_apm_regex() {
-        let pattern = PeriodPattern::compile(r"^\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}$").unwrap();
-        assert!(pattern.is_match("2026-04-01..2026-06-30"));
-        assert!(!pattern.is_match("2026-04-01.2026-06-30"));
-        assert!(!pattern.is_match("2026-4-1..2026-6-30"));
-        assert!(!pattern.is_match("2026-04-01..2026-06-30 "));
-    }
+    // -- SDET: shipped period regex vs Python PERIOD_RE semantics ----------
 
-    #[test]
-    fn period_pattern_rejects_unsupported_subset() {
-        assert!(PeriodPattern::compile(r"\d{4}").is_none(), "unanchored");
-        assert!(
-            PeriodPattern::compile(r"^[0-9]{4}$").is_none(),
-            "character class"
-        );
-        assert!(PeriodPattern::compile(r"^a|b$").is_none(), "alternation");
-    }
-
-    // -- SDET: PeriodPattern vs Python PERIOD_RE semantics (step 5) --------
-
-    fn psa_apm_pattern() -> PeriodPattern {
-        PeriodPattern::compile(r"^\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}$").unwrap()
+    fn psa_apm_pattern() -> Regex {
+        Profile::bundled_psa_apm().period_pattern
     }
 
     #[test]
@@ -555,24 +547,26 @@ mod tests {
         assert!(!p.is_match(""), "empty string");
     }
 
-    /// DIVERGENCE (T2 input): Python's `re` module matches `\d` against any
-    /// Unicode decimal-digit codepoint by default (no `re.ASCII` flag on
-    /// `schema.py`'s `PERIOD_RE`), so a period value built from
-    /// Arabic-Indic digits (`٢٠٢٦-٠٤-٠١..٢٠٢٦-٠٦-٣٠`) matches Python's regex.
-    /// This crate's hand-rolled `PeriodPattern::is_match` checks
-    /// `char::is_ascii_digit`, which is ASCII-only, so the same string does
-    /// NOT match here. Pinned as a green test recording current (diverging)
-    /// behavior -- not fixed in this task, since resolving it is a semantic
-    /// choice for M2.P2.T2 (does psa-apm's schema actually want to accept
-    /// non-ASCII digits in a `period:` tag, given every legitimate value is
-    /// authored in ASCII). Escalate to the quality-reviewer as a parity gap.
+    /// RESOLVED (was a TE Unicode-digit escalation, M2.P2.T1b finalization):
+    /// Python's `re` module matches `\d` against any Unicode decimal-digit
+    /// codepoint by default (no `re.ASCII` flag on `schema.py`'s
+    /// `PERIOD_RE`), so a period value built from Arabic-Indic digits
+    /// (`٢٠٢٦-٠٤-٠١..٢٠٢٦-٠٦-٣٠`) matches Python's regex. The shipped pack
+    /// regex deliberately uses `[0-9]`, not `\d` -- a character class is
+    /// ASCII-only regardless of the `regex` crate's Unicode mode, so the
+    /// same string does NOT match here. This is a DELIBERATE, documented
+    /// choice (see the pack file's `report.period.regex`/`notes`), not an
+    /// open gap: every real `period:` value in the corpus is ASCII, so this
+    /// is strictly more correct than Python's un-flagged `\d`, not a
+    /// functional regression.
     #[test]
-    fn period_pattern_rejects_unicode_digits_that_pythons_d_would_accept() {
+    fn shipped_period_regex_rejects_unicode_digits_that_pythons_d_would_accept() {
         let p = psa_apm_pattern();
         assert!(
             !p.is_match("\u{0662}\u{0660}\u{0662}\u{0666}-04-01..2026-06-30"),
-            "Rust's ASCII-only digit check must reject Arabic-Indic digits, \
-             even though Python's default (non-ASCII-flagged) \\d would accept them"
+            "the shipped ASCII-only `[0-9]` pattern must reject Arabic-Indic \
+             digits, even though Python's default (non-ASCII-flagged) \\d \
+             would accept them -- deliberate, documented divergence"
         );
     }
 }

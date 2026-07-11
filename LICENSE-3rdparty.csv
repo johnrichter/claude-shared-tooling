@@ -20,3 +20,10 @@ serde_json,https://github.com/serde-rs/json,MIT OR Apache-2.0,Erick Tryzelaar <e
 itoa,https://github.com/dtolnay/itoa,MIT OR Apache-2.0,David Tolnay <dtolnay@gmail.com>
 memchr,https://github.com/BurntSushi/memchr,Unlicense OR MIT,Andrew Gallant <jamslam@gmail.com> and bluss
 zmij,https://github.com/dtolnay/zmij,MIT,David Tolnay <dtolnay@gmail.com>
+regex,https://github.com/rust-lang/regex,MIT OR Apache-2.0,The Rust Project Developers and Andrew Gallant <jamslam@gmail.com>
+regex-automata,https://github.com/rust-lang/regex,MIT OR Apache-2.0,The Rust Project Developers and Andrew Gallant <jamslam@gmail.com>
+regex-syntax,https://github.com/rust-lang/regex,MIT OR Apache-2.0,The Rust Project Developers and Andrew Gallant <jamslam@gmail.com>
+aho-corasick,https://github.com/BurntSushi/aho-corasick,Unlicense OR MIT,Andrew Gallant <jamslam@gmail.com>
+globset,https://github.com/BurntSushi/ripgrep/tree/master/crates/globset,Unlicense OR MIT,Andrew Gallant <jamslam@gmail.com>
+bstr,https://github.com/BurntSushi/bstr,MIT OR Apache-2.0,Andrew Gallant <jamslam@gmail.com>
+log,https://github.com/rust-lang/log,MIT OR Apache-2.0,The Rust Project Developers

@@ -143,27 +143,29 @@ pub fn fold(rollup: &mut CoverageRollup, outcome: ScanOutcome<'_>) {
 }
 
 // ---------------------------------------------------------------------------
-// New (non-Python) violation code: non-string top-level frontmatter keys.
+// DROPPED (M2.P2.T1b finalization, TE escalation #1): NON_STRING_FRONTMATTER_KEY.
 // ---------------------------------------------------------------------------
 
-/// Not a Python-parity code -- `audit_helper` never encounters this case
-/// because `PyYAML` keeps a non-string mapping key as its native Python
-/// type (a real `int`/`bool`/etc key), while this crate's parser
-/// (`crate::parse::yaml_key_to_string`) stringifies EVERY key, falling back
-/// to a `{key:?}` Rust-Debug rendering for a key that was itself a YAML
-/// sequence or mapping (never a legitimate frontmatter key). That
-/// fallback rendering is recognizable -- Rust's derived `Debug` for a
-/// compound value always looks like `Variant(...)`, containing `(`, which
-/// no legitimate plain frontmatter key does -- so this flags it rather
-/// than silently treating it as an ordinary field name (the QR carry-over
-/// concern this task calls out). A key that stringified from a YAML
-/// scalar int/bool (e.g. `123:`, `true:`) is NOT flagged: it renders as
-/// plain digits/letters, indistinguishable from a hand-typed string key,
-/// and Python has the same blind spot for those (a `123` int key would
-/// simply never match any known field name and be ignored).
-const CODE_NON_STRING_KEY: &str = "NON_STRING_FRONTMATTER_KEY";
+// Was a non-Python-parity invention: `audit_helper` never encounters this
+// case (PyYAML keeps a non-string mapping key as its native Python
+// int/bool/etc type, and Python simply never matches it against any known
+// field name -- no violation emitted either way), while this crate's
+// parser stringifies EVERY key, falling back to a `{key:?}` Rust-Debug
+// rendering for a key that was itself a YAML sequence or mapping. The
+// check used `key.contains('(')` to detect that fallback rendering, but a
+// LEGITIMATE plain-string key containing a literal `(` (e.g. an author's ad
+// hoc `"notes (draft)"` field) produces the exact same substring, so the
+// check false-positived on ordinary human-authored keys -- textually
+// indistinguishable from the case it existed to catch. Dropped entirely
+// rather than fixed: fixing it correctly needs `crate::parse` to carry a
+// distinct non-string-key signal instead of `Debug`-format sniffing (a
+// value-model change outside this task's scope), and parity strongly
+// favors matching Python's actual behavior (no code at all) over inventing
+// a new one. A non-string-keyed field is now handled exactly as Python
+// handles it: it doesn't match any required field name and doesn't
+// participate in namespace rules, so no violation is emitted.
 
-/// Not a Python-parity code -- see [`CODE_NON_STRING_KEY`]. Python's
+/// Not a Python-parity code -- see the dropped-check note above. Python's
 /// `tags` not-a-list check is `TAGS_NOT_A_LIST`
 /// (`audit_helper/frontmatter.py`'s `validate()`, tags branch); pinned
 /// here as a named constant (not inline in the cascade) purely for
@@ -239,48 +241,14 @@ fn is_missing_value(value: Option<&FrontmatterValue>) -> bool {
 /// Classifies `rel_path` via the pack's `file_class` rules: first matching
 /// glob wins (array order), else `default` -- re-porting the pack's
 /// documented classification logic (`frontmatter-psa-apm.pack.json`'s
-/// `file_class.note`).
+/// `file_class.note`). Matching itself is `profile.globs`' pre-compiled
+/// `GlobSet` (see `crate::profile::CompiledGlobs`); this function only
+/// resolves the winning rule's `class`.
 fn classify_file_class(rel_path: &str, profile: &Profile) -> String {
-    for rule in &profile.pack.file_class.rules {
-        if glob_match(&rule.matcher.glob, rel_path) {
-            return rule.class.clone();
-        }
+    match profile.globs.file_class_rule_index(rel_path) {
+        Some(index) => profile.pack.file_class.rules[index].class.clone(),
+        None => profile.pack.file_class.default.clone(),
     }
-    profile.pack.file_class.default.clone()
-}
-
-/// `fnmatch`-equivalent glob match: `*` matches any sequence of characters
-/// (including none, and including `/` -- this crate's globs are NOT
-/// path-segment-aware, matching Python `fnmatch.fnmatch`'s semantics
-/// exactly, per the pack's own `note` fields), `?` matches exactly one
-/// character, every other character matches itself literally. Character
-/// classes (`[...]`) are NOT supported -- no glob in the current core or
-/// psa-apm pack uses one; a pack that needs one would need this function
-/// extended, not worked around.
-fn glob_match(pattern: &str, text: &str) -> bool {
-    let p: Vec<char> = pattern.chars().collect();
-    let t: Vec<char> = text.chars().collect();
-    let (mut pi, mut ti) = (0usize, 0usize);
-    let mut star: Option<(usize, usize)> = None; // (pattern index after '*', text index tried)
-    while ti < t.len() {
-        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
-            pi += 1;
-            ti += 1;
-        } else if pi < p.len() && p[pi] == '*' {
-            star = Some((pi + 1, ti));
-            pi += 1;
-        } else if let Some((star_pi, star_ti)) = star {
-            pi = star_pi;
-            ti = star_ti + 1;
-            star = Some((star_pi, ti));
-        } else {
-            return false;
-        }
-    }
-    while pi < p.len() && p[pi] == '*' {
-        pi += 1;
-    }
-    pi == p.len()
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +258,8 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 /// True if `rel_path` is exempt from the completeness/tag-cascade checks --
 /// re-porting `schema.py`'s `is_doc_exempt()` verbatim against the pack's
 /// `exempt` vocabulary: basename in `filenames`, any path component in
-/// `dir_components`, or the POSIX path matches a `path_globs` entry.
+/// `dir_components`, or the POSIX path matches a `path_globs` entry (via
+/// `profile.globs`' pre-compiled `GlobSet`).
 fn is_exempt(rel_path: &str, profile: &Profile) -> bool {
     let exempt = &profile.pack.exempt;
     let basename = rel_path.rsplit('/').next().unwrap_or(rel_path);
@@ -303,7 +272,7 @@ fn is_exempt(rel_path: &str, profile: &Profile) -> bool {
     {
         return true;
     }
-    exempt.path_globs.iter().any(|g| glob_match(g, rel_path))
+    profile.globs.exempt_path_matches(rel_path)
 }
 
 // ---------------------------------------------------------------------------
@@ -618,22 +587,6 @@ pub fn validate(parsed: &ParsedFrontmatter, rel_path: &str, profile: &Profile) -
     }
 
     let mut violations = Vec::new();
-
-    // New (non-Python) check: reject a top-level key this crate's parser
-    // could only have produced via its debug-stringify fallback -- see
-    // `CODE_NON_STRING_KEY`'s doc comment for why this, and only this,
-    // subset of "not a string key" is detectable at this layer.
-    for (key, _) in parsed.raw_fields.iter() {
-        if key.contains('(') {
-            violations.push(Violation {
-                code: CODE_NON_STRING_KEY.to_string(),
-                field: key.to_string(),
-                message: format!(
-                    "frontmatter key {key:?} did not come from a plain YAML string/scalar"
-                ),
-            });
-        }
-    }
 
     let effective = flatten(&parsed.raw_fields);
 
@@ -995,12 +948,17 @@ body\n"
         assert!(entry.is_valid);
     }
 
+    /// M2.P2.T1b finalization: `NON_STRING_FRONTMATTER_KEY` is dropped
+    /// (see the module-level "DROPPED" note) -- a sequence-shaped key
+    /// (the check's real, narrow trigger) now produces NO violation of
+    /// that code, matching Python's actual behavior (it never emits this
+    /// code at all).
     #[test]
-    fn non_string_top_level_key_is_flagged() {
+    fn non_string_top_level_key_produces_no_non_string_key_violation() {
         let input = "---\nname: \"x\"\n[a]: z\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/doc.md", &profile());
-        assert!(entry
+        assert!(!entry
             .violations
             .iter()
             .any(|v| v.code == "NON_STRING_FRONTMATTER_KEY"));
@@ -1423,71 +1381,47 @@ body\n"
     }
 
     // -----------------------------------------------------------------------
-    // SDET: NON_STRING_FRONTMATTER_KEY false-positive risk (step 6).
+    // NON_STRING_FRONTMATTER_KEY DROPPED (M2.P2.T1b finalization, TE
+    // escalation #1 -- see the module-level "DROPPED" note above). The
+    // check's false-positive on a legitimate paren-containing key is
+    // resolved by removing the check outright, not by fixing the
+    // heuristic: the tests below now assert NO such violation, for both
+    // the false-positive shapes AND the heuristic's former real trigger.
     // -----------------------------------------------------------------------
 
-    /// DEFECT (escalated to the quality-reviewer, not fixed here -- see
-    /// this task's SDET report): a LEGITIMATE plain-string top-level key
-    /// that happens to contain a literal `(` -- e.g. an author's ad hoc
-    /// "notes (draft)" field -- DOES false-positive as
-    /// `NON_STRING_FRONTMATTER_KEY`, even though `yaml_key_to_string`
-    /// rendered it via `scalar_to_string` (a genuine `Yaml::String`), never
-    /// the `{key:?}` debug fallback the check exists to detect. Proven
-    /// through the REAL parser (`parse::parse`), not a contrived
-    /// `RawFields`, to show this is reachable from ordinary YAML input, not
-    /// just a hypothetical. Root cause: `key.contains('(')`
-    /// (`CODE_NON_STRING_KEY`'s check, this module) cannot distinguish "a
-    /// real string that happens to contain a paren" from "Rust's derived
-    /// `Debug` rendering of a compound YAML key," because both produce
-    /// text containing `(`. A correct fix needs `crate::parse` to carry a
-    /// distinct signal (e.g. a dedicated `FrontmatterValue`/key-shape
-    /// variant) rather than rely on `Debug`-format sniffing -- a
-    /// value-model change out of this task's scope; pinned here as a green
-    /// test recording CURRENT (defective) behavior, not desired behavior.
     #[test]
-    fn defect_legitimate_string_key_containing_a_paren_false_positives() {
+    fn legitimate_string_key_containing_a_paren_produces_no_violation() {
         let input = "---\nname: \"x\"\n\"notes (draft)\": some value\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/doc.md", &profile());
-        assert!(
-            entry
-                .violations
-                .iter()
-                .any(|v| v.code == "NON_STRING_FRONTMATTER_KEY" && v.field == "notes (draft)"),
-            "documents the CURRENT false-positive (see doc comment) -- if this \
-             ever fails, the heuristic has been fixed and this test (plus its \
-             escalation note) should be retired: {:?}",
-            entry.violations
-        );
-    }
-
-    /// Same defect, unquoted plain-scalar key -- YAML's plain-scalar
-    /// grammar permits `(`/`)` outside flow-collection context, so this is
-    /// also a real, parser-reachable string key that false-positives.
-    #[test]
-    fn defect_unquoted_plain_scalar_key_containing_a_paren_false_positives() {
-        let input = "---\nname: \"x\"\nnotes (draft): some value\n---\nbody\n";
-        let parsed = parse::parse(input).unwrap();
-        let entry = validate(&parsed, "some/doc.md", &profile());
-        assert!(entry
+        assert!(!entry
             .violations
             .iter()
             .any(|v| v.code == "NON_STRING_FRONTMATTER_KEY"));
     }
 
-    /// The heuristic's actual (narrow, intended) trigger surface: a YAML
-    /// key whose own shape is a SEQUENCE (`[a]:`), which
-    /// `yaml_key_to_string` cannot render via `scalar_to_string` and so
-    /// falls back to Rust's derived `Debug` (`Array([...])`-shaped text
-    /// containing `(`). This is the ONLY reachable case that trips the
-    /// heuristic through the real parser -- pinned alongside the two
-    /// false-positive tests above for contrast.
     #[test]
-    fn a_sequence_shaped_key_is_the_heuristics_real_trigger() {
+    fn unquoted_plain_scalar_key_containing_a_paren_produces_no_violation() {
+        let input = "---\nname: \"x\"\nnotes (draft): some value\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/doc.md", &profile());
+        assert!(!entry
+            .violations
+            .iter()
+            .any(|v| v.code == "NON_STRING_FRONTMATTER_KEY"));
+    }
+
+    /// A non-string-shaped key (here, a YAML sequence key, `[a, b]:`) --
+    /// the dropped heuristic's former real trigger -- now produces no
+    /// `NON_STRING_FRONTMATTER_KEY` violation either: it simply doesn't
+    /// match any required field name or participate in namespace rules,
+    /// exactly Python's behavior for the same shape.
+    #[test]
+    fn a_sequence_shaped_key_produces_no_non_string_key_violation() {
         let input = "---\nname: \"x\"\n[a, b]: z\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/doc.md", &profile());
-        assert!(entry
+        assert!(!entry
             .violations
             .iter()
             .any(|v| v.code == "NON_STRING_FRONTMATTER_KEY"));
