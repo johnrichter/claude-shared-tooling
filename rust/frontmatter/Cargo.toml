@@ -31,8 +31,8 @@ serde_json = "1.0.150"
 # M2.P2.T1b finalization (operator-approved, replacing a hand-rolled
 # restricted-subset matcher): compiles the pack's `report.period.regex`
 # into a real `regex::Regex`, once, at `Profile` construction
-# (`profile::PeriodPattern`) -- see that module for why `[0-9]` (not `\d`)
-# is used in the shipped pattern.
+# (`profile::Profile::period_pattern`) -- see that module for why `[0-9]`
+# (not `\d`) is used in the shipped pattern.
 regex = "1.13.0"
 # M2.P2.T1b finalization (operator-approved, replacing a hand-rolled
 # `fnmatch`-style matcher): compiles the pack's `file_class` rule globs and

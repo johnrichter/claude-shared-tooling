@@ -1500,6 +1500,52 @@ body\n"
         );
     }
 
+    /// TE (M2.P2.T1b verification): the broad `**/SKILL.md` fallback rule
+    /// (index 1) must still classify a `SKILL.md` that does NOT sit under
+    /// `.claude/skills/` -- i.e. the anchored rule (index 0) does not match,
+    /// but the array-order fallback does, confirmed against `fnmatch`
+    /// parity (`fnmatch.fnmatch("tools/SKILL.md", "**/SKILL.md")` is
+    /// `True`; the anchored glob on the same path is `False`).
+    #[test]
+    fn skill_md_outside_dot_claude_skills_still_classifies_via_the_broad_fallback_rule() {
+        let parsed = parse::parse("---\nname: \"x\"\n---\nbody\n").unwrap();
+        let entry = validate(&parsed, "tools/SKILL.md", &profile());
+        assert_eq!(entry.file_class, "skill");
+    }
+
+    /// TE (M2.P2.T1b verification): the anchored skill rule's leading `*`
+    /// must cross `/` (fnmatch parity, `literal_separator=false`) so a
+    /// `SKILL.md` several directories deep still matches the anchored rule,
+    /// not just the top-level `.claude/skills/*/SKILL.md` shape.
+    #[test]
+    fn anchored_skill_glob_leading_star_crosses_multiple_path_separators() {
+        let parsed = parse::parse("---\nname: \"x\"\n---\nbody\n").unwrap();
+        let entry = validate(
+            &parsed,
+            "some/deep/prefix/.claude/skills/foo/SKILL.md",
+            &profile(),
+        );
+        assert_eq!(entry.file_class, "skill");
+    }
+
+    /// TE (M2.P2.T1b verification): the `exempt.path_globs` entry
+    /// `the-work/projects/*/findings/*.md` -- fnmatch parity means each `*`
+    /// crosses `/`, so a `findings/` doc nested MORE than one level below
+    /// `projects/` (extra path segments on either side of the two `*`s)
+    /// still matches, not just the single-segment shape the glob's literal
+    /// text suggests. Confirmed against `fnmatch.fnmatch` directly (see the
+    /// TE verification notes) before pinning here.
+    #[test]
+    fn exempt_findings_glob_matches_extra_nested_path_segments_too() {
+        let parsed = parse::parse("---\nname: \"x\"\n---\nbody\n").unwrap();
+        let entry = validate(
+            &parsed,
+            "the-work/projects/a/b/findings/sub/x.md",
+            &profile(),
+        );
+        assert!(entry.is_valid, "{:?}", entry.violations);
+    }
+
     #[test]
     fn exempt_dir_component_anywhere_in_the_path_is_honored() {
         let parsed = parse::parse("---\nname: \"x\"\n---\nbody\n").unwrap();
