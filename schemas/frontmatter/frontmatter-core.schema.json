@@ -1,0 +1,148 @@
+{
+  "kind": "core-profile",
+  "profile": "core",
+  "version": "core@1",
+  "description": "Workspace frontmatter validation CORE PROFILE (mechanisms only, workspace-agnostic). Declares HOW frontmatter is validated as data — the cardinality vocabulary, the ordered tag-rule cascade with its exact violation codes/fields/message templates, and the required-field / description-cap / file-class / exempt mechanisms — WITHOUT any concrete namespace names, caps, or globs (those live in an extension pack, e.g. `frontmatter-psa-apm.pack.json`, that sets `extends: core@1`). INPUTS: an extension pack (concrete vocab) + one file's parsed frontmatter (`{fields, tags[], path}`). OUTPUT: an ordered list of violations `{code, field, message}` plus a derived `file_class`, byte-identical for identical input. INVARIANTS: the `violation_cascade` array is order-significant and both the Rust validator (M2.P2.T1b) and the refitted stdlib Python gate (M2.P2.T3/T4) MUST iterate it in array order so their emitted code+field sequences match (SC6 parity); every namespace/required-field iteration follows the pack's DECLARED array order; no LLM participates in validation. This file is a faithful externalization of `audit_helper/schema.py` (see `codes[].source` for line provenance) plus four reviewed additions documented in `DIVERGENCES.md`: the `owner` singleton, `description_caps`, `file_class`, and per-field `authorship`.",
+  "spec": {
+    "instance_shape": {
+      "fields": "map of top-level frontmatter keys to values; a field required by the pack counts as present whether declared top-level or nested under the `workspace:` wrapper (Skills/Agents/Rules), per CLAUDE.md frontmatter table and schema.py REQUIRED_FIELDS comment (schema.py:60-62)",
+      "tags": "list of raw tag strings; each meaningful tag is `namespace:value`; non-string or colon-less entries are dropped before any namespace rule runs (schema.py:107-119 tag_namespaces)",
+      "path": "repo-root-relative POSIX path of the file (drives file_class classification and exempt matching)"
+    }
+  },
+  "cardinality_types": {
+    "singleton": {
+      "min": 1,
+      "max": 1,
+      "meaning": "namespace must appear exactly once",
+      "codes": { "absent": "MISSING_REQUIRED_TAG", "excess": "MULTIPLE_SINGLE_VALUE_TAGS" },
+      "source": "schema.py:68-69 SINGLE_VALUE_NAMESPACES + tag_rule_violations:143-154"
+    },
+    "at_least_one": {
+      "min": 1,
+      "max": null,
+      "meaning": "namespace must appear one or more times",
+      "codes": { "absent": "MISSING_REQUIRED_TAG" },
+      "source": "schema.py:71-72 AT_LEAST_ONE_NAMESPACES + tag_rule_violations:156-158"
+    },
+    "optional": {
+      "min": 0,
+      "max": null,
+      "meaning": "namespace may appear zero or more times; still subject to parent-dependency and report-only rules",
+      "codes": {},
+      "source": "CLAUDE.md Tagging Strategy — namespaces marked optional/❌"
+    }
+  },
+  "authorship": {
+    "values": ["machine_derivable", "human_authored"],
+    "meaning": "per-field fix-tier boundary read from the schema (not hardcoded) by `navigator fix` (M4.P3.T2). `machine_derivable` = a deterministic Tier-1 repair can produce/stamp it; `human_authored` = only the operator-gated Tier-2 model turn may author it. `file_class` is a derived attribute (machine_derivable), not an authored field.",
+    "source": "NEW mechanism (build-plan M2.P1.T1 declaration list + M4.P3.T2 fix tiers); see DIVERGENCES.md"
+  },
+  "mechanisms": {
+    "required_fields": {
+      "meaning": "the pack supplies an ordered array of `{field, authorship, source}`; each listed field must be present (top-level or under `workspace:`). A missing field emits one violation.",
+      "code": "MISSING_REQUIRED_FIELD",
+      "message": "required field '{field}:' is missing",
+      "source": "schema.py:60-62 REQUIRED_FIELDS (field tuple); code string + message template pinned to the live emitter frontmatter.py:360-362 (`MISSING_REQUIRED_FIELD`, message `required field '{field}:' is missing`). Confirmed against live, not assumed. See DIVERGENCES.md D5."
+    },
+    "description_caps": {
+      "meaning": "the pack supplies a map `file_class -> max description length` (character count). The `description` field is capped by the file's derived `file_class`; a class absent from the map is uncapped (NOTE: the pack MUST supply a cap for every file_class its `file_class` mechanism can derive — the live emitter indexes the cap map directly). Exceeding the cap (len strictly greater) emits one violation.",
+      "code": "DESCRIPTION_OVER_CAP",
+      "message": "description is {length} chars, over the {file_class} cap of {cap}",
+      "source": "NEW mechanism — CLAUDE.md frontmatter table description-cap classes (context ≤350, skill ≤500, agent ≤750). Absent from schema.py, but LIVE in the emitter frontmatter.py:364-374: code `DESCRIPTION_OVER_CAP`, char-count `len(description) > DESCRIPTION_CAPS[file_class]`, message `description is {len} chars, over the {file_class.value} cap of {cap}`. Code string + message template pinned to live. See DIVERGENCES.md D2."
+    },
+    "namespaces": {
+      "meaning": "the pack supplies an ORDER-SIGNIFICANT array of `{name, cardinality, parents?, report_only?}`. Array order IS the iteration order for every cascade phase that scans namespaces, so it must mirror schema.py's constant order (see the pack's `namespaces` note). `parents` = ordered list of namespaces that must co-occur when this namespace is used. `report_only: true` = valid only on report files.",
+      "source": "schema.py:68-88 (SINGLE_VALUE/AT_LEAST_ONE/NAMESPACE_PARENTS/REPORT_ONLY) + CLAUDE.md Tagging Strategy namespaces"
+    },
+    "report": {
+      "meaning": "the pack supplies `{trigger:{namespace,value}, required_namespaces[], period:{namespace,regex}}`. `trigger` (e.g. type:report) flips report-mode. In report-mode each `required_namespaces` entry must be present, and every tag in the `period` namespace must match `period.regex`.",
+      "codes": { "required_absent": "MISSING_REQUIRED_TAG", "bad_period": "INVALID_PERIOD_FORMAT" },
+      "source": "schema.py:83-91 (REPORT_ONLY/REPORT_REQUIRED/PERIOD_RE) + tag_rule_violations:172-191 + is_report:122-128"
+    },
+    "file_class": {
+      "meaning": "the pack supplies `{rules:[{class, match:{glob}}], default}`. Rules are evaluated in array order against the repo-root-relative POSIX path (glob per fnmatch semantics, `*` spans `/`); the FIRST matching rule wins; if none match, `default` is used. The derived class selects the `description_caps` entry. No violation code — classification is an input to other checks.",
+      "source": "NEW mechanism — derived from CLAUDE.md description-cap classes (context/skill/agent). Absent from schema.py. See DIVERGENCES.md for classification logic."
+    },
+    "exempt": {
+      "meaning": "the pack supplies `{filenames[], dir_components[], path_globs[]}`. A repo-root-relative path is exempt from the frontmatter-completeness scan if: its basename is in `filenames`; OR any of its path components is in `dir_components`; OR its POSIX path matches any `path_globs` entry (fnmatch, `*` spans `/`, anchored as written). Exempt files are skipped entirely (no required-field or tag checks).",
+      "source": "schema.py:200-238 (DOC_EXEMPT_FILENAMES/DIR_COMPONENTS/PATH_GLOBS + is_doc_exempt) — ported verbatim"
+    }
+  },
+  "violation_cascade": [
+    {
+      "step": "singleton_cardinality",
+      "iterate": "namespaces where cardinality == 'singleton', in pack-declared array order",
+      "emit": [
+        { "when": "count == 0", "code": "MISSING_REQUIRED_TAG", "field": "{namespace}", "message": "missing required '{namespace}:' tag" },
+        { "when": "count > 1", "code": "MULTIPLE_SINGLE_VALUE_TAGS", "field": "{namespace}", "message": "'{namespace}:' must appear exactly once, found {count}: {tags}" }
+      ],
+      "source": "schema.py:143-154"
+    },
+    {
+      "step": "at_least_one_cardinality",
+      "iterate": "namespaces where cardinality == 'at_least_one', in pack-declared array order",
+      "emit": [
+        { "when": "count == 0", "code": "MISSING_REQUIRED_TAG", "field": "{namespace}", "message": "missing required '{namespace}:' tag (at least one)" }
+      ],
+      "source": "schema.py:156-158"
+    },
+    {
+      "step": "parent_dependency",
+      "iterate": "namespaces that declare a non-empty `parents`, in pack-declared array order; for each, iterate its `parents` in listed order",
+      "emit": [
+        { "when": "child present AND parent absent", "code": "ORPHAN_NAMESPACE_TAG", "field": "{child}", "message": "'{child}:' tag requires a '{parent}:' tag, which is missing" }
+      ],
+      "source": "schema.py:160-170"
+    },
+    {
+      "step": "report_detection",
+      "action": "report = (the `report.trigger.namespace` group contains a tag whose value equals `report.trigger.value`)",
+      "emit": [],
+      "source": "schema.py:172 + is_report:122-128"
+    },
+    {
+      "step": "report_only_misuse",
+      "iterate": "namespaces where report_only == true, in pack-declared array order",
+      "emit": [
+        { "when": "present AND NOT report", "code": "REPORT_ONLY_TAG_MISUSED", "field": "{namespace}", "message": "'{namespace}:' tag is only valid on type:report files" }
+      ],
+      "source": "schema.py:174-178"
+    },
+    {
+      "step": "report_required",
+      "guard": "report",
+      "iterate": "report.required_namespaces, in listed order",
+      "emit": [
+        { "when": "count == 0", "code": "MISSING_REQUIRED_TAG", "field": "{namespace}", "message": "type:report requires a '{namespace}:' tag, which is missing" }
+      ],
+      "source": "schema.py:180-185"
+    },
+    {
+      "step": "report_period_format",
+      "guard": "report",
+      "iterate": "each raw tag in the `report.period.namespace` group, in file order",
+      "emit": [
+        { "when": "tag value does NOT match report.period.regex", "code": "INVALID_PERIOD_FORMAT", "field": "{period_namespace}", "message": "'{period_tag}' is not YYYY-MM-DD..YYYY-MM-DD" }
+      ],
+      "source": "schema.py:186-191"
+    }
+  ],
+  "independent_checks": {
+    "note": "Run outside the tag cascade (schema.py keeps completeness separate from tag_rule_violations). Relative ordering vs the tag cascade is consumer-defined; each check's OWN iteration order is the pack-declared field order. Message templates for the two emitting checks live on their `mechanisms.*` entries (`required_fields.message`, `description_caps.message`) — an interpreter renders those, so its output is byte-identical to the other interpreter's.",
+    "order": ["exempt_gate", "required_fields", "description_cap", "file_class_classification"],
+    "exempt_gate": "if `exempt` matches the path, skip required_fields + description_cap + all tag-cascade checks for this file",
+    "required_fields": "emit MISSING_REQUIRED_FIELD (field={field}, message=`mechanisms.required_fields.message`) per absent pack `required_fields` entry, in declared order",
+    "description_cap": "emit DESCRIPTION_OVER_CAP (field=`description`, message=`mechanisms.description_caps.message`) if len(description) > description_caps[file_class]",
+    "file_class_classification": "derive file_class from path (input to description_cap; never emits)"
+  },
+  "codes": [
+    { "code": "MISSING_REQUIRED_TAG", "meaning": "a required tag namespace (singleton, at_least_one, or report-required) is absent", "source": "schema.py:146,158,184" },
+    { "code": "MULTIPLE_SINGLE_VALUE_TAGS", "meaning": "a singleton namespace appears more than once", "source": "schema.py:150" },
+    { "code": "ORPHAN_NAMESPACE_TAG", "meaning": "a child namespace is used without a required parent namespace", "source": "schema.py:166" },
+    { "code": "REPORT_ONLY_TAG_MISUSED", "meaning": "a report-only namespace appears on a non-report file", "source": "schema.py:177" },
+    { "code": "INVALID_PERIOD_FORMAT", "meaning": "a period tag value is not YYYY-MM-DD..YYYY-MM-DD", "source": "schema.py:190" },
+    { "code": "MISSING_REQUIRED_FIELD", "meaning": "a required top-level frontmatter field is absent (checked outside the tag cascade)", "source": "schema.py:60-62 (field tuple) + live emitter frontmatter.py:362; code string CONFIRMED against live. See DIVERGENCES.md D5." },
+    { "code": "DESCRIPTION_OVER_CAP", "meaning": "the `description` field exceeds the character cap for the file's file_class", "source": "NEW mechanism vs schema.py, but CONFIRMED against the live emitter frontmatter.py:370 (`DESCRIPTION_OVER_CAP`). See DIVERGENCES.md D2." }
+  ]
+}
