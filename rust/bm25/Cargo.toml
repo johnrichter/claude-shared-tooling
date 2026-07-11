@@ -1,0 +1,16 @@
+[package]
+name = "bm25"
+version = "0.1.0"
+edition = "2021"
+description = "General-purpose, call-time-customizable BM25 ranking library — deterministic, no ML."
+license = "MIT"
+publish = false
+
+[dependencies]
+# M1.P1.T2 / M1.P2.*: BM25 scoring + tokenization land here. Pure-Rust deps
+# only (no CGO/C) so the crate stays musl-static-buildable.
+
+[dev-dependencies]
+
+[lints]
+workspace = true
