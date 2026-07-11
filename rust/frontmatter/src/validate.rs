@@ -1,28 +1,24 @@
 //! `M2.P2.T1b` -- the sole frontmatter validator: interprets a [`Profile`]
 //! (the declarative schema, `crate::profile`) over one file's already-parsed
 //! [`ParsedFrontmatter`] (`crate::parse`) and emits a [`FrontmatterEntry`]
-//! verdict. This module re-ports `audit_helper/schema.py` +
-//! `audit_helper/frontmatter.py`'s `validate()` (the workspace's current
-//! Python emitter) as a generic schema interpreter: every fact this module
-//! checks (which fields are required, how tag namespaces cascade, what a
-//! description cap is, which paths are exempt) is read off `Profile`, not
-//! hardcoded here -- see `crate::profile`'s module doc and this module's
-//! `data_driven` test for the "schema edit, no code edit" property the
-//! build plan requires.
+//! verdict. Every fact this module checks (which fields are required, how
+//! tag namespaces cascade, what a description cap is, which paths are
+//! exempt) is read off `Profile`, never hardcoded here -- see
+//! `crate::profile`'s module doc and this module's `data_driven` test for
+//! the "schema edit, no code edit" property the build plan requires.
 //!
 //! # Scope (this task)
-//! Faithful port of the LIVE Python emitter's violation codes, fields,
-//! message text, and emission ORDER for the checks the declarative schema
-//! and task spec cover: `MISSING_REQUIRED_FIELD`, `DESCRIPTION_OVER_CAP`,
-//! `DESCRIPTION_NOT_TOP_LEVEL`, the five tag-namespace codes
-//! (`MISSING_REQUIRED_TAG`, `MULTIPLE_SINGLE_VALUE_TAGS`,
+//! Emits these violation codes, with the field, message text, and emission
+//! ORDER the declarative schema and task spec pin: `MISSING_REQUIRED_FIELD`,
+//! `DESCRIPTION_OVER_CAP`, `DESCRIPTION_NOT_TOP_LEVEL`, the five
+//! tag-namespace codes (`MISSING_REQUIRED_TAG`, `MULTIPLE_SINGLE_VALUE_TAGS`,
 //! `ORPHAN_NAMESPACE_TAG`, `REPORT_ONLY_TAG_MISUSED`,
 //! `INVALID_PERIOD_FORMAT`), and the tags-not-a-list code. Deliberately
 //! out of scope (see the task's violation-code enumeration and
-//! `DIVERGENCES.md`): `DESCRIPTION_INVALID_SCALAR` (YAML scalar-quoting
-//! style -- this crate's parser already normalizes scalar shape, so the
-//! raw-text quoting style Python's check inspects doesn't exist here in
-//! the same form), `INVALID_UPDATED_FORMAT` (timestamp format), and
+//! `DIVERGENCES.md`): `DESCRIPTION_INVALID_SCALAR` (raw YAML scalar-quoting
+//! style -- this crate's parser already normalizes scalar shape, so that
+//! raw-text quoting distinction doesn't exist here in the same form),
+//! `INVALID_UPDATED_FORMAT` (timestamp format), and
 //! `MISSING_FRONTMATTER`/`MALFORMED_FRONTMATTER` (raw-text-level concerns
 //! `crate::parse::parse`'s `Result` already reports -- see
 //! [`ScanOutcome`]/[`fold`] below for how a caller folds that into the
@@ -37,10 +33,9 @@ use crate::value::{FrontmatterValue, RawFields};
 use crate::ParsedFrontmatter;
 
 /// One frontmatter schema violation: a stable `code`, the `field` it's
-/// about, and a human-readable `message`. Field order and shape mirror the
-/// Python emitter's `Violation` `NamedTuple` (`audit_helper/frontmatter.py`)
-/// so a consumer mapping this into another representation (e.g. the CLI's
-/// human-readable output) needs no extra lookup.
+/// about, and a human-readable `message`. This three-field shape is the
+/// stable contract downstream consumers (e.g. the CLI's human-readable
+/// output) map from, so none needs an extra lookup to render it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Violation {
     /// A stable, uppercase-snake-case identifier (e.g.
@@ -146,37 +141,32 @@ pub fn fold(rollup: &mut CoverageRollup, outcome: ScanOutcome<'_>) {
 // DROPPED (M2.P2.T1b finalization, TE escalation #1): NON_STRING_FRONTMATTER_KEY.
 // ---------------------------------------------------------------------------
 
-// Was a non-Python-parity invention: `audit_helper` never encounters this
-// case (PyYAML keeps a non-string mapping key as its native Python
-// int/bool/etc type, and Python simply never matches it against any known
-// field name -- no violation emitted either way), while this crate's
-// parser stringifies EVERY key, falling back to a `{key:?}` Rust-Debug
-// rendering for a key that was itself a YAML sequence or mapping. The
-// check used `key.contains('(')` to detect that fallback rendering, but a
-// LEGITIMATE plain-string key containing a literal `(` (e.g. an author's ad
-// hoc `"notes (draft)"` field) produces the exact same substring, so the
-// check false-positived on ordinary human-authored keys -- textually
-// indistinguishable from the case it existed to catch. Dropped entirely
-// rather than fixed: fixing it correctly needs `crate::parse` to carry a
-// distinct non-string-key signal instead of `Debug`-format sniffing (a
-// value-model change outside this task's scope), and parity strongly
-// favors matching Python's actual behavior (no code at all) over inventing
-// a new one. A non-string-keyed field is now handled exactly as Python
-// handles it: it doesn't match any required field name and doesn't
-// participate in namespace rules, so no violation is emitted.
+// This check had no reliable trigger. `crate::parse` stringifies EVERY
+// mapping key, falling back to a `{key:?}` Debug rendering only for a key
+// that was itself a YAML sequence or mapping. The check sniffed that
+// fallback via `key.contains('(')` -- but a legitimate plain-string key
+// containing a literal `(` (e.g. an author's ad hoc `"notes (draft)"`
+// field) produces the identical substring, so it false-positived on
+// ordinary human-authored keys, textually indistinguishable from the rare
+// shape it meant to catch. Dropped rather than fixed: catching the real
+// case correctly needs `crate::parse` to carry a distinct non-string-key
+// signal instead of Debug-format sniffing (a value-model change outside
+// this task's scope). A non-string-keyed field is now simply inert -- it
+// matches no required field name and joins no namespace rule, so it emits
+// no violation, which is also what the canonical validator does.
 
-/// Not a Python-parity code -- see the dropped-check note above. Python's
-/// `tags` not-a-list check is `TAGS_NOT_A_LIST`
-/// (`audit_helper/frontmatter.py`'s `validate()`, tags branch); pinned
-/// here as a named constant (not inline in the cascade) purely for
-/// discoverability, not because it's a new invention.
+/// The tags-not-a-list code. Not part of the declarative schema's cascade
+/// `codes` list -- it guards a structural precondition (`tags` must be a
+/// sequence before the namespace cascade can run at all) -- so it is
+/// pinned here as a named constant rather than read from the profile like
+/// the cascade codes.
 const CODE_TAGS_NOT_A_LIST: &str = "TAGS_NOT_A_LIST";
 
-/// Not part of the declarative schema's `codes` list (see
-/// `DIVERGENCES.md`) because it isn't in `schema.py` -- it's LIVE in
-/// `audit_helper/frontmatter.py`'s `validate()` (the `raw_value is None`
-/// branch). Pinned as a named constant for the same reason as
-/// [`CODE_TAGS_NOT_A_LIST`].
+/// The description-not-top-level code. Like [`CODE_TAGS_NOT_A_LIST`], it is
+/// not in the declarative schema's cascade `codes` list (see
+/// `DIVERGENCES.md`) -- it guards a placement rule (`description` must be a
+/// top-level field, not nested under `workspace:`) rather than a cascade
+/// step -- so it is pinned here as a named constant.
 const CODE_DESCRIPTION_NOT_TOP_LEVEL: &str = "DESCRIPTION_NOT_TOP_LEVEL";
 
 // ---------------------------------------------------------------------------
@@ -185,10 +175,9 @@ const CODE_DESCRIPTION_NOT_TOP_LEVEL: &str = "DESCRIPTION_NOT_TOP_LEVEL";
 
 /// A flattened view of a document's fields: every top-level field, with any
 /// same-named field nested under a top-level `workspace:` mapping
-/// OVERRIDING the top-level one -- re-porting `frontmatter.py`'s
-/// `_flatten()` verbatim (Skills/Agents/Rules nest their
+/// OVERRIDING the top-level one. Skills/Agents/Rules nest their
 /// id/tags/links/updated/description under `workspace:`; validation always
-/// runs against this merged view so one rule set covers both styles).
+/// runs against this merged view so one rule set covers both styles.
 struct Effective<'a> {
     pairs: Vec<(String, &'a FrontmatterValue)>,
 }
@@ -217,15 +206,12 @@ fn flatten(raw: &RawFields) -> Effective<'_> {
     Effective { pairs }
 }
 
-/// True if `value` counts as absent for a required field -- re-porting
-/// `frontmatter.py`'s `_is_missing()`: an outright-absent key (`None`
-/// here) or a blank/whitespace-only scalar string is missing; a present
-/// (even empty) sequence or mapping is not. [`FrontmatterValue::Other`]
-/// (a YAML explicit null, `key:` with nothing after it) is treated as
-/// missing -- `PyYAML` resolves that same YAML shape to Python `None`, which
-/// `_is_missing(None)` already treats as missing, so this is the same
-/// fact expressed through this crate's typed value instead of a dynamic
-/// `is None` check.
+/// True if `value` counts as absent for a required field: an outright-absent
+/// key (`None`) or a blank/whitespace-only scalar string is missing; a
+/// present (even empty) sequence or mapping is not. [`FrontmatterValue::Other`]
+/// -- a YAML explicit null (`key:` with nothing after it) -- also counts as
+/// missing, since "key present but carrying no value" is the same as
+/// absence for a required-field check.
 fn is_missing_value(value: Option<&FrontmatterValue>) -> bool {
     match value {
         Some(FrontmatterValue::Scalar(s)) => s.trim().is_empty(),
@@ -239,8 +225,7 @@ fn is_missing_value(value: Option<&FrontmatterValue>) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Classifies `rel_path` via the pack's `file_class` rules: first matching
-/// glob wins (array order), else `default` -- re-porting the pack's
-/// documented classification logic (`frontmatter-psa-apm.pack.json`'s
+/// glob wins (array order), else `default` (see the pack file's
 /// `file_class.note`). Matching itself is `profile.globs`' pre-compiled
 /// `GlobSet` (see `crate::profile::CompiledGlobs`); this function only
 /// resolves the winning rule's `class`.
@@ -255,11 +240,10 @@ fn classify_file_class(rel_path: &str, profile: &Profile) -> String {
 // Exempt taxonomy
 // ---------------------------------------------------------------------------
 
-/// True if `rel_path` is exempt from the completeness/tag-cascade checks --
-/// re-porting `schema.py`'s `is_doc_exempt()` verbatim against the pack's
-/// `exempt` vocabulary: basename in `filenames`, any path component in
-/// `dir_components`, or the POSIX path matches a `path_globs` entry (via
-/// `profile.globs`' pre-compiled `GlobSet`).
+/// True if `rel_path` is exempt from the completeness/tag-cascade checks,
+/// per the pack's `exempt` vocabulary: basename in `filenames`, any path
+/// component in `dir_components`, or the POSIX path matches a `path_globs`
+/// entry (via `profile.globs`' pre-compiled `GlobSet`).
 fn is_exempt(rel_path: &str, profile: &Profile) -> bool {
     let exempt = &profile.pack.exempt;
     let basename = rel_path.rsplit('/').next().unwrap_or(rel_path);
@@ -279,9 +263,9 @@ fn is_exempt(rel_path: &str, profile: &Profile) -> bool {
 // Message-template rendering
 // ---------------------------------------------------------------------------
 
-/// Substitutes `{key}` placeholders in `template` with their string value,
-/// verbatim -- the byte-identical-rendering contract `schemas/frontmatter/README.md`
-/// specifies for both interpreters.
+/// Substitutes `{key}` placeholders in `template` with their string value --
+/// the byte-identical-rendering contract `schemas/frontmatter/README.md`
+/// specifies for a message template.
 fn render(template: &str, subs: &[(&str, &str)]) -> String {
     let mut out = template.to_string();
     for (key, value) in subs {
@@ -290,14 +274,15 @@ fn render(template: &str, subs: &[(&str, &str)]) -> String {
     out
 }
 
-/// Renders a list of tag strings the way Python's f-string `{namespaces[ns]}`
-/// does -- `repr()` of a `list[str]`: `['type:a', 'type:b']`. Single-quoted
-/// unless a value contains a `'` and no `"`, in which case double-quoted;
-/// backslashes and the delimiter quote are escaped. Real tag values are
-/// plain `namespace:value` ASCII with neither quote character, so this
-/// covers every case this crate's own callers can produce; it does not
-/// reproduce Python's control-character (`\n`/`\t`/...) escaping, which no
-/// legitimate tag value contains either.
+/// Renders a list of tag strings in the reference emitter's list format --
+/// `['type:a', 'type:b']` -- so the emitted message is byte-identical to it
+/// (the message-parity contract). Each value is single-quoted, unless it
+/// contains a `'` and no `"` in which case it is double-quoted; backslashes
+/// and the delimiter quote are escaped. Real tag values are plain
+/// `namespace:value` ASCII with neither quote character, so this covers
+/// every case this crate's callers can produce; it does not reproduce the
+/// control-character (`\n`/`\t`/...) escaping that format applies to values,
+/// which no legitimate tag value contains.
 fn python_repr_list(values: &[String]) -> String {
     let rendered: Vec<String> = values.iter().map(|s| python_repr_str(s)).collect();
     format!("[{}]", rendered.join(", "))
@@ -322,18 +307,17 @@ fn python_repr_str(s: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Tag-namespace cascade (re-ports schema.py's tag_rule_violations verbatim,
-// driven by the pack's ordered `namespaces` array instead of schema.py's
-// constant tuples/dict).
+// Tag-namespace cascade: the ordered violation phases, driven entirely by
+// the pack's `namespaces` array order and `report` config rather than any
+// namespace vocabulary hardcoded here.
 // ---------------------------------------------------------------------------
 
 /// Groups tag strings by namespace (the part before the first `:`),
-/// preserving each namespace's tags in source order -- re-porting
-/// `schema.py`'s `tag_namespaces()`. A tag with no `:` is dropped (cannot
-/// participate in any namespace rule); every value this crate's parser
-/// puts in a `tags:` sequence is already a `String` (see `crate::value`),
-/// so the Python `isinstance(tag, str)` half of that filter is vacuous
-/// here -- only the `":" in tag` half does any work.
+/// preserving each namespace's tags in source order. A tag with no `:` is
+/// dropped -- it cannot participate in any namespace rule. Every value this
+/// crate's parser puts in a `tags:` sequence is already a `String` (see
+/// `crate::value`), so the only filter that does any work here is "the tag
+/// contains a `:`".
 fn group_by_namespace(tags: &[String]) -> Vec<(String, Vec<String>)> {
     let mut groups: Vec<(String, Vec<String>)> = Vec::new();
     for tag in tags {
@@ -356,9 +340,9 @@ fn group_get<'a>(groups: &'a [(String, Vec<String>)], ns: &str) -> &'a [String] 
         .map_or(&[], |(_, tags)| tags.as_slice())
 }
 
-/// Re-ports `schema.py`'s `tag_rule_violations()`: the full ordered
-/// cascade -- singleton, at-least-one, parent-dependency, report-only
-/// misuse, report-required, period format -- driven entirely by
+/// The full ordered tag cascade -- singleton, at-least-one,
+/// parent-dependency, report-only misuse, report-required, period format --
+/// driven entirely by
 /// `profile.pack.namespaces`' array order and `profile.pack.report`, with
 /// message wording read from `profile.core`'s cascade step templates.
 /// Delegates each cascade step to its own phase function (below), purely to
@@ -605,8 +589,8 @@ pub fn validate(parsed: &ParsedFrontmatter, rel_path: &str, profile: &Profile) -
     }
 
     // description_cap, then description_not_top_level -- both gated on
-    // description being present at all (re-porting frontmatter.py's
-    // `if not _is_missing(description):` guard).
+    // description being present at all (the `!is_missing_value` guard
+    // below).
     let description = effective.get("description");
     if !is_missing_value(description) {
         if let (Some(FrontmatterValue::Scalar(text)), Some(cap)) =

@@ -338,8 +338,8 @@ pub(crate) struct ExemptSpec {
 /// (never per-file) -- determinism + perf, and a malformed glob in the
 /// schema is a construction-time [`ProfileError`], not a per-file mismatch
 /// deep in `validate`. `literal_separator` is left at `globset`'s default
-/// (`false`), so `*` crosses `/` -- exact `fnmatch.fnmatch` parity with the
-/// Python emitter, so none of the pack's existing globs need editing.
+/// (`false`), so `*` crosses `/` -- matching shell `fnmatch` glob
+/// semantics, the behavior the pack's globs are written against.
 #[derive(Debug, Clone)]
 pub(crate) struct CompiledGlobs {
     file_class: GlobSet,
