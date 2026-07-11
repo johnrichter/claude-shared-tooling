@@ -2,3 +2,10 @@ Component,Origin,License,Copyright
 unicode-normalization,https://github.com/unicode-rs/unicode-normalization,MIT OR Apache-2.0,kwantam <kwantam@gmail.com> and Manish Goregaokar <manishsmail@gmail.com>
 tinyvec,https://github.com/Lokathor/tinyvec,Zlib OR Apache-2.0 OR MIT,Lokathor <zefria@gmail.com>
 tinyvec_macros,https://github.com/Soveu/tinyvec_macros,MIT OR Apache-2.0 OR Zlib,Soveu <marx.tomasz@gmail.com>
+yaml-rust2,https://github.com/Ethiraric/yaml-rust2,MIT OR Apache-2.0,Chen Yuheng and Ethiraric and David Aguilar <davvid@gmail.com>
+arraydeque,https://github.com/andylokandy/arraydeque,MIT OR Apache-2.0,Andy Lok <andylokandy@hotmail.com>
+cfg-if,https://github.com/rust-lang/cfg-if,MIT OR Apache-2.0,Alex Crichton <alex@alexcrichton.com>
+encoding_rs,https://github.com/hsivonen/encoding_rs,(Apache-2.0 OR MIT) AND BSD-3-Clause,Mozilla Foundation
+hashbrown,https://github.com/rust-lang/hashbrown,MIT OR Apache-2.0,Amanieu d'Antras <amanieu@gmail.com>
+hashlink,https://github.com/djc/hashlink,MIT OR Apache-2.0,The Rust Project Developers (linked-hash-map derivation) and hashlink contributors
+foldhash,https://github.com/orlp/foldhash,Zlib,Orson Peters <orsonpeters@gmail.com>

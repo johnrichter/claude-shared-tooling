@@ -2,7 +2,8 @@
 resolver = "2"
 members = [
     "bm25",
-    # M2.*: navigator symbol crate (tree-sitter-based) joins here as a second member.
+    "frontmatter",
+    # M2.*: navigator symbol crate (tree-sitter-based) joins here as a third member.
 ]
 
 # Shared lints enforced across every workspace member — each member's

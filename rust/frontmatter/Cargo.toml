@@ -1,0 +1,23 @@
+[package]
+name = "frontmatter"
+version = "0.1.0"
+edition = "2021"
+description = "Frontmatter parsing for navigator — one YAML-frontmatter-plus-Markdown-body parser producing a parser-agnostic, order-preserving result."
+license = "MIT"
+publish = false
+
+[dependencies]
+# M2.P2.T1a (operator-approved: MIT OR Apache-2.0, pure-Rust, no CGO,
+# musl-fine): pure-Rust, strict YAML 1.2 DOM parser. Loaded via
+# `YamlLoader`/`Yaml`, which returns `Result` (never panics on malformed
+# input) and preserves mapping insertion order via `hashlink::LinkedHashMap`
+# -- both properties this crate's no-panic and determinism contracts need.
+# `Yaml` itself never leaks past `crate::parse`: the public
+# `ParsedFrontmatter`/`FrontmatterValue` types own no yaml-rust2 type, so the
+# backend is swappable later without a breaking change to consumers.
+yaml-rust2 = "0.11.0"
+
+[dev-dependencies]
+
+[lints]
+workspace = true
