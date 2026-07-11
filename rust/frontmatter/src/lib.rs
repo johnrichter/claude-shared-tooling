@@ -23,10 +23,10 @@
 //!   public API -- only [`parse::parse`] (module-private beyond its `pub
 //!   fn`) ever imports `yaml_rust2`, so the YAML backend is swappable later
 //!   without a breaking change to any consumer.
-//! - [`FrontmatterParseError`] -- the parser's only two failure modes
-//!   (unclosed delimiter, malformed/non-mapping YAML). A document with NO
-//!   frontmatter at all is not an error -- see [`parse::parse`]'s doc
-//!   comment.
+//! - [`FrontmatterParseError`] -- the parser's failure modes: unclosed
+//!   delimiter, malformed/aliased/non-mapping YAML, and nesting deeper than
+//!   the crate accepts. A document with NO frontmatter at all is not an
+//!   error -- see [`parse::parse`]'s doc comment.
 //!
 //! # Module layout (and where `validate` slots in next)
 //! - `parse` -- this task's parser. Owns the only `yaml_rust2` import in
@@ -342,9 +342,10 @@ body\n";
 /// sneak past the "frontmatter is a flat mapping of scalars/sequences"
 /// assumption, YAML-1.2-vs-1.1 type pinning, encoding/size edges, delimiter
 /// edge cases, and determinism. Every case here asserts a well-typed
-/// `Ok`/`Err`, never a crash -- except `extreme_nesting_depth_...`, which
-/// documents a case that crashes the *process* (not a catchable panic) and
-/// is therefore isolated in a child process rather than asserted in-line.
+/// `Ok`/`Err`, in-process, never a crash -- including the deep-nesting and
+/// anchor/alias amplification cases, which previously required child-process
+/// isolation to document a process-abort defect (`prescan_events` closes
+/// that defect; see [`crate::parse::prescan_events`]).
 #[cfg(test)]
 mod sdet_adversarial_tests {
     use super::*;
@@ -449,11 +450,19 @@ mod sdet_adversarial_tests {
     // -- YAML features that could sneak in -----------------------------------
 
     #[test]
-    fn anchors_and_aliases_resolve_to_their_scalar_value_without_panicking() {
+    fn anchors_and_aliases_are_rejected_not_resolved() {
+        // BLOCKING finding 1+2 remediation: frontmatter never legitimately
+        // uses anchors/aliases, and resolving one is the mechanism behind
+        // the billion-laughs amplification attack -- `prescan_events`
+        // rejects any document containing an alias outright, rather than
+        // resolving it (superseded behavior: this used to resolve `*a` to
+        // `"foo"`).
         let input = "---\nname: &a foo\nid: *a\n---\nbody\n";
-        let parsed = parse(input).unwrap();
-        assert_eq!(parsed.name, Some("foo".to_string()));
-        assert_eq!(parsed.id, Some("foo".to_string()));
+        let result = parse(input);
+        assert!(
+            matches!(result, Err(FrontmatterParseError::MalformedYaml(_))),
+            "expected a MalformedYaml error for an aliased document, got {result:?}"
+        );
     }
 
     #[test]
@@ -464,13 +473,15 @@ mod sdet_adversarial_tests {
     }
 
     #[test]
-    fn flow_sequence_is_a_sequence_and_flow_mapping_is_other() {
+    fn flow_sequence_is_a_sequence_and_flow_mapping_is_a_recursive_mapping() {
         let input = "---\ntags: [a, b]\nmeta: {k: v}\n---\nbody\n";
         let parsed = parse(input).unwrap();
         assert_eq!(parsed.tags, vec!["a".to_string(), "b".to_string()]);
         assert_eq!(
             parsed.raw_fields.get("meta"),
-            Some(&FrontmatterValue::Other)
+            Some(&FrontmatterValue::Mapping(RawFields::from_ordered_pairs(
+                vec![("k".to_string(), FrontmatterValue::Scalar("v".to_string()))]
+            )))
         );
     }
 
@@ -545,17 +556,24 @@ mod sdet_adversarial_tests {
     // -- Encoding / size edges ------------------------------------------------
 
     #[test]
-    fn utf8_bom_prefix_before_opening_delimiter_defeats_delimiter_detection() {
-        // A literal U+FEFF BOM character is not `-`, so the first line is
-        // not exactly `---` and the whole input -- BOM included -- becomes
-        // body text. Not an error, but flags a real-world gotcha: a
-        // BOM-prefixed file silently loses its frontmatter rather than
-        // failing loudly. Escalation-worthy but not a panic/crash, so
-        // documented here rather than "fixed" unilaterally.
+    fn utf8_bom_prefix_before_opening_delimiter_is_stripped_and_frontmatter_still_parses() {
+        // MAJOR finding 3, fixed: exactly one leading U+FEFF BOM is
+        // stripped before delimiter detection, so a BOM-saved file's
+        // frontmatter is no longer silently swallowed into body_text.
         let input = "\u{feff}---\nname: x\n---\nbody\n";
         let parsed = parse(input).unwrap();
-        assert_eq!(parsed.name, None);
-        assert_eq!(parsed.body_text, input);
+        assert_eq!(parsed.name, Some("x".to_string()));
+        assert_eq!(parsed.body_text, "body\n");
+    }
+
+    #[test]
+    fn mid_body_bom_is_left_verbatim() {
+        // Only the one leading BOM is consumed; a BOM elsewhere in the
+        // input (here, mid-body) is untouched.
+        let input = "---\nname: x\n---\nbody with a \u{feff} mid-line BOM\n";
+        let parsed = parse(input).unwrap();
+        assert_eq!(parsed.name, Some("x".to_string()));
+        assert_eq!(parsed.body_text, "body with a \u{feff} mid-line BOM\n");
     }
 
     #[test]
@@ -589,65 +607,77 @@ mod sdet_adversarial_tests {
     }
 
     #[test]
-    fn moderately_deep_nesting_parses_without_panicking() {
-        // Within the depth a libtest worker thread's default (smaller than
-        // the process main thread's) stack tolerates. Empirically bracketed
-        // on a `std::thread::spawn`-default-stack thread during
-        // verification: depth 300 -> Ok, depth 400 -> stack overflow;
-        // 100 keeps a comfortable margin below that thread-local threshold.
-        let input = deeply_nested_yaml(100);
+    fn realistic_nesting_depth_still_parses_ok() {
+        // A realistic depth (workspace: map ~3-4 deep, tags depth 2) --
+        // comfortably under MAX_NESTING_DEPTH (64) -- must still parse.
+        let input = deeply_nested_yaml(16);
         let result = parse(&input);
-        assert!(result.is_ok(), "expected Ok for depth 100, got {result:?}");
+        assert!(result.is_ok(), "expected Ok for depth 16, got {result:?}");
     }
 
     #[test]
-    fn extreme_nesting_depth_crashes_the_process_not_a_catchable_panic_escalated_defect() {
-        // DEFECT, escalated rather than fixed: `YamlLoader::load_from_str`
-        // is a recursive-descent parser with no depth cap. On a default-size
-        // thread stack it overflows well under 1000 levels of nested block
-        // sequences (empirically bracketed on a libtest-style worker thread
-        // during verification: depth 300 -> Ok, depth 400 -> stack
-        // overflow -- far lower than the ~1000-2000 threshold measured on a
-        // full-size main-thread stack). It blows the OS thread stack, which
-        // Rust cannot turn into a catchable `panic!` -- it aborts the whole
-        // process (`std::panic::catch_unwind` does not help; this is a hard
-        // abort, not unwinding). That violates this crate's own "never
-        // panics on any input" contract in the strictest possible way: a
-        // hostile frontmatter block can kill the *entire host process*
-        // (e.g. every in-flight navigator request, not just one parse), and
-        // the depth needed is well within what a real file could contain.
-        //
-        // This is deliberately run in an isolated child process: were it
-        // run in-line, the abort would kill this whole test binary (every
-        // sibling test, not just this one). The child process is expected
-        // to fail to complete normally at depth 5000 -- that IS the
-        // documented, pinned defect; a green assertion here would mean the
-        // bug regressed to something worse (e.g. silently corrupting
-        // memory) or was fixed (worth re-checking this test then).
-        if std::env::var("FRONTMATTER_SDET_DEEP_NEST_CHILD").is_ok() {
-            let input = deeply_nested_yaml(5_000);
-            let _ = parse(&input); // never reached if the abort fires first
-            return;
-        }
+    fn nesting_just_under_the_cap_still_parses_ok() {
+        // `deeply_nested_yaml(31)` walks to event-level depth 63 (one
+        // MappingStart/SequenceStart pair per nested "- nested:" level,
+        // plus the outer `key:` mapping) -- one below MAX_NESTING_DEPTH
+        // (64), so this must still be accepted.
+        let input = deeply_nested_yaml(31);
+        let result = parse(&input);
+        assert!(result.is_ok(), "expected Ok for depth 31, got {result:?}");
+    }
 
-        let exe = std::env::current_exe().expect("test binary path");
-        let status = std::process::Command::new(exe)
-            .args([
-                "--exact",
-                "sdet_adversarial_tests::extreme_nesting_depth_crashes_the_process_not_a_catchable_panic_escalated_defect",
-                "--test-threads=1",
-                "--nocapture",
-            ])
-            .env("FRONTMATTER_SDET_DEEP_NEST_CHILD", "1")
-            .status()
-            .expect("failed to spawn isolated child process for the deep-nesting probe");
+    #[test]
+    fn nesting_just_over_the_cap_is_rejected() {
+        // `deeply_nested_yaml(32)` walks to event-level depth 65 -- one
+        // past MAX_NESTING_DEPTH (64) -- so this must be rejected, pinning
+        // the cap is not off-by-one in the permissive direction either.
+        let input = deeply_nested_yaml(32);
+        let result = parse(&input);
+        assert_eq!(result, Err(FrontmatterParseError::TooDeeplyNested));
+    }
+
+    #[test]
+    fn extreme_nesting_depth_returns_err_in_process_without_aborting() {
+        // BLOCKING findings 1+2, fixed: `prescan_events` walks the event
+        // stream (non-recursive) before `YamlLoader::load_from_str` ever
+        // builds a DOM, and rejects nesting past `parse::MAX_NESTING_DEPTH`
+        // (64). A 10,000-deep block sequence -- previously a process abort
+        // via `YamlLoader`'s recursive-descent DOM builder -- now returns a
+        // typed `Err` from an ordinary in-process call, no child-process
+        // isolation needed (the defect this test used to document as an
+        // escalation is now closed).
+        let input = deeply_nested_yaml(10_000);
+        let result = parse(&input);
+        assert_eq!(result, Err(FrontmatterParseError::TooDeeplyNested));
+    }
+
+    /// Builds a chained-anchor "billion laughs" document: `&a0 [x]`, then
+    /// each subsequent anchor aliases the previous one twice
+    /// (`&a1 [*a0, *a0]`, `&a2 [*a1, *a1]`, ...), doubling the naively
+    /// expanded node count at every step -- `n` anchors yields `2^n` nodes
+    /// if an alias is ever materialized instead of rejected.
+    fn chained_anchor_doubling(n: usize) -> String {
+        use std::fmt::Write as _;
+        let mut yaml = String::from("a0: &a0 [x]\n");
+        for i in 1..n {
+            let prev = i - 1;
+            let _ = writeln!(yaml, "a{i}: &a{i} [*a{prev}, *a{prev}]");
+        }
+        format!("---\n{yaml}---\nbody\n")
+    }
+
+    #[test]
+    fn chained_anchor_doubling_document_returns_err_bounded_in_process() {
+        // BLOCKING finding 2, fixed: 40 chained doublings would expand to
+        // 2^40 nodes (roughly a trillion) if any alias were ever resolved.
+        // `prescan_events` rejects the very first `Event::Alias` it
+        // observes, long before any expansion -- an ordinary bounded,
+        // in-process `Err`, not an OOM/abort.
+        let input = chained_anchor_doubling(40);
+        let result = parse(&input);
         assert!(
-            !status.success(),
-            "expected the child process to abort on extreme nesting depth (documenting a \
-             known stack-overflow defect in yaml-rust2's recursive descent) -- it exited \
-             successfully instead, which means either the defect was fixed (update this \
-             test to assert Ok and remove the escalation) or the depth chosen here no longer \
-             reproduces it (re-bracket the threshold)"
+            matches!(result, Err(FrontmatterParseError::MalformedYaml(_))),
+            "expected a MalformedYaml error for an aliased document, got {result:?}"
         );
     }
 

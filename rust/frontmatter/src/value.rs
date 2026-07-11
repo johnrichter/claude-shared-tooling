@@ -33,9 +33,18 @@ pub enum FrontmatterValue {
     /// panicking, since this crate's job is to preserve shape for the
     /// validator, not to reject content.
     Sequence(Vec<String>),
-    /// Anything that is neither a plain scalar nor a sequence: a nested
-    /// mapping, an explicit YAML null (`key:` with nothing after it), a YAML
-    /// alias, or a value the YAML backend could not resolve. The validator
+    /// A nested YAML mapping, preserved recursively (a `Mapping`'s own
+    /// values can themselves be `Scalar`/`Sequence`/`Mapping`/`Other`).
+    /// Needed because the workspace frontmatter schema nests
+    /// Skill/Agent/Rule-specific required fields under a top-level
+    /// `workspace:` key that a validator must be able to descend into (see
+    /// `M2.P2.T1b`). This crate only *preserves* the nested map's shape —
+    /// it does not flatten `workspace:` up into the top level or otherwise
+    /// interpret the nesting; that semantic is the validator's job.
+    Mapping(RawFields),
+    /// Anything that is neither a plain scalar, a sequence, nor a mapping:
+    /// an explicit YAML null (`key:` with nothing after it), a YAML alias,
+    /// or a value the YAML backend could not resolve. The validator
     /// (M2.P2.T1b) is expected to reject most of these for frontmatter
     /// fields, which is why this crate does not try to interpret them
     /// further.
