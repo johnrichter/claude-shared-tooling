@@ -333,6 +333,144 @@ body\n";
         let second = parse(input).unwrap();
         assert_eq!(first, second);
     }
+
+    // -- workspace: nested-map descent (M2.P2.T1b's whole reason for the
+    // -- Mapping variant) -------------------------------------------------
+
+    #[test]
+    fn skill_style_workspace_nested_map_descends_into_scalar_and_sequence_children() {
+        // Realistic Skill/Agent frontmatter shape: top-level CC fields
+        // (name/description) plus a nested `workspace:` map carrying this
+        // crate's own fields (id/tags/description/updated) -- T1b's
+        // validator must be able to reach every one of those nested keys
+        // through the same `RawFields` API it uses at the top level.
+        // NB: built with concatenated `\n`-terminated literals, not
+        // backslash-newline continuation -- the latter strips leading
+        // whitespace from the continued line, which would silently eat the
+        // indentation this test depends on.
+        let input = concat!(
+            "---\n",
+            "name: \"My Skill\"\n",
+            "description: \"top-level CC description\"\n",
+            "workspace:\n",
+            "  id: \"skill:workspace:my-skill\"\n",
+            "  description: \"workspace description\"\n",
+            "  updated: 2026-07-11T00:00:00Z\n",
+            "  tags:\n",
+            "    - type:skill\n",
+            "    - topic:testing\n",
+            "---\n",
+            "body\n"
+        );
+        let parsed = parse(input).unwrap();
+        // Top level is untouched by the nested map.
+        assert_eq!(parsed.name, Some("My Skill".to_string()));
+        assert_eq!(
+            parsed.description,
+            Some("top-level CC description".to_string())
+        );
+
+        let workspace = parsed
+            .raw_fields
+            .get("workspace")
+            .expect("workspace key must be present");
+        let FrontmatterValue::Mapping(inner) = workspace else {
+            panic!("expected workspace: to be a Mapping, got {workspace:?}");
+        };
+        assert_eq!(
+            inner.get("id"),
+            Some(&FrontmatterValue::Scalar(
+                "skill:workspace:my-skill".to_string()
+            ))
+        );
+        assert_eq!(
+            inner.get("description"),
+            Some(&FrontmatterValue::Scalar(
+                "workspace description".to_string()
+            ))
+        );
+        assert_eq!(
+            inner.get("updated"),
+            Some(&FrontmatterValue::Scalar(
+                "2026-07-11T00:00:00Z".to_string()
+            ))
+        );
+        assert_eq!(
+            inner.get("tags"),
+            Some(&FrontmatterValue::Sequence(vec![
+                "type:skill".to_string(),
+                "topic:testing".to_string()
+            ])),
+            "a sequence nested inside a Mapping must still surface as Sequence, not Other"
+        );
+        assert_eq!(
+            inner.iter().map(|(k, _)| k).collect::<Vec<_>>(),
+            vec!["id", "description", "updated", "tags"],
+            "nested map key order must be preserved same as top level"
+        );
+    }
+
+    // -- name: "" vs absent/null (load-bearing empty-string distinction) --
+
+    #[test]
+    fn explicit_empty_string_name_is_scalar_empty_not_other_or_absent() {
+        // Deliberately distinct from `name:` with nothing after it (that
+        // is a YAML null -> `Other`, see the null/tilde pin in
+        // `sdet_adversarial_tests`). An explicit `""` is a real, present
+        // scalar value that happens to be empty -- the validator (T1b) must
+        // be able to tell "present but empty" apart from "absent" or
+        // "explicit null".
+        let input = "---\nname: \"\"\n---\nbody\n";
+        let parsed = parse(input).unwrap();
+        assert_eq!(
+            parsed.raw_fields.get("name"),
+            Some(&FrontmatterValue::Scalar(String::new()))
+        );
+        assert_eq!(
+            parsed.name,
+            Some(String::new()),
+            "the convenience field must also surface the empty string, not None"
+        );
+    }
+
+    // -- Integer literal normalization (T2 parity edge) --------------------
+
+    #[test]
+    fn hex_integer_literal_normalizes_to_decimal_source_text_lost() {
+        // yaml-rust2 parses `0x10` to the i64 16 and this crate re-renders
+        // that as decimal -- the original hex spelling is NOT preserved.
+        // Pinning so a future T2 (parity check against another YAML
+        // backend/language) sees this divergence documented, not
+        // discovered by surprise.
+        let input = "---\ncount: 0x10\n---\nbody\n";
+        let parsed = parse(input).unwrap();
+        assert_eq!(
+            parsed.raw_fields.get("count"),
+            Some(&FrontmatterValue::Scalar("16".to_string()))
+        );
+    }
+
+    #[test]
+    fn leading_zero_integer_literal_normalizes_to_decimal_not_octal_text() {
+        // `007` parses as octal 7 (YAML 1.1/1.2 octal-looking literal) and
+        // is re-rendered decimal, not kept as the source text "007".
+        let input = "---\ncount: 007\n---\nbody\n";
+        let parsed = parse(input).unwrap();
+        assert_eq!(
+            parsed.raw_fields.get("count"),
+            Some(&FrontmatterValue::Scalar("7".to_string()))
+        );
+    }
+
+    #[test]
+    fn explicit_plus_sign_integer_literal_normalizes_to_decimal_without_the_sign() {
+        let input = "---\ncount: +5\n---\nbody\n";
+        let parsed = parse(input).unwrap();
+        assert_eq!(
+            parsed.raw_fields.get("count"),
+            Some(&FrontmatterValue::Scalar("5".to_string()))
+        );
+    }
 }
 
 /// SDET adversarial probing for `M2.P2.T1a` verification -- targets the
