@@ -24,10 +24,20 @@
 //! but the tokenizer seam (`crate::tokenize`) and the ranked-output shape
 //! (score-desc, id-asc total order) — both concerns already factored out
 //! here rather than inlined, precisely so BM25F can reuse them.
+//!
+//! # M1.P2.T3 (landed)
+//! [`OkapiIndex::build`] now takes a [`Tokenizer`] and stores it — the index
+//! OWNS its tokenizer, so [`OkapiIndex::search`] always reuses the exact
+//! same one `build` used; there is no API to call `search` with a different
+//! tokenizer than the index was built with (build/search agreement is
+//! structural, not a caller discipline). `ScoredDocument` moved to
+//! [`crate::result`] (a neutral module both variants depend on) in this
+//! same task.
 
 use std::collections::HashMap;
 
-use crate::tokenize::tokenize_whole_identifier;
+use crate::result::ScoredDocument;
+use crate::tokenize::Tokenizer;
 
 /// Term-frequency saturation constant. Higher `K1` lets repeated terms keep
 /// contributing score for longer before saturating. Okapi BM25 default.
@@ -50,21 +60,9 @@ const B: f64 = 0.75;
 pub struct Document<'a> {
     /// Caller-supplied identifier returned in [`ScoredDocument::id`].
     pub id: &'a str,
-    /// The document's full text; tokenized internally with
-    /// [`tokenize_whole_identifier`].
+    /// The document's full text; tokenized internally with the
+    /// [`Tokenizer`] passed to [`OkapiIndex::build`].
     pub text: &'a str,
-}
-
-/// A ranked search result: one document's id and its BM25 score against the
-/// query that produced it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ScoredDocument {
-    /// The [`Document::id`] this score belongs to.
-    pub id: String,
-    /// The BM25 score. Always finite for a well-formed index/query (no
-    /// `NaN`/`inf`) — see [`OkapiIndex::search`] for the zero-length-corpus
-    /// edge case that guarantees this.
-    pub score: f64,
 }
 
 /// An Okapi BM25 inverted index over a fixed corpus of documents.
@@ -82,19 +80,27 @@ pub struct OkapiIndex {
     /// Corpus average document length, in tokens. `0.0` iff the corpus has
     /// zero documents or every document tokenizes to zero tokens.
     avgdl: f64,
+    /// The tokenizer this index was built with; [`search`](Self::search)
+    /// always reuses it, so a query and its documents can never tokenize
+    /// under two different modes.
+    tokenizer: Tokenizer,
 }
 
 impl OkapiIndex {
-    /// Builds an index over `docs`. Each document is tokenized with
-    /// [`tokenize_whole_identifier`]; an empty or all-punctuation `text`
-    /// yields a zero-length document, not an error.
+    /// Builds an index over `docs` using `tokenizer`. Each document is
+    /// tokenized with `tokenizer`, which the index stores and reuses for
+    /// every subsequent [`search`](Self::search) call — this is the
+    /// build/search agreement guarantee: there is no way to query this
+    /// index with a different tokenizer than it was built with. An empty or
+    /// all-punctuation `text` yields a zero-length document, not an error.
     ///
-    /// Deterministic: two calls with the same `docs` in the same order
-    /// produce indexes that score and rank identically (row order affects
-    /// nothing observable — [`search`](Self::search) output is a total
-    /// order over `(score, id)`, independent of build/insertion order).
+    /// Deterministic: two calls with the same `tokenizer`/`docs` in the
+    /// same order produce indexes that score and rank identically (row
+    /// order affects nothing observable — [`search`](Self::search) output
+    /// is a total order over `(score, id)`, independent of build/insertion
+    /// order).
     #[must_use]
-    pub fn build<'a, I>(docs: I) -> Self
+    pub fn build<'a, I>(tokenizer: Tokenizer, docs: I) -> Self
     where
         I: IntoIterator<Item = Document<'a>>,
     {
@@ -105,7 +111,7 @@ impl OkapiIndex {
 
         for doc in docs {
             let row = doc_ids.len();
-            let tokens = tokenize_whole_identifier(doc.text);
+            let tokens = tokenizer.tokenize(doc.text);
             #[allow(
                 clippy::cast_possible_truncation,
                 reason = "a single document's token count fits u32 for any realistic corpus; \
@@ -139,6 +145,7 @@ impl OkapiIndex {
             doc_ids,
             doc_len,
             avgdl,
+            tokenizer,
         }
     }
 
@@ -176,10 +183,11 @@ impl OkapiIndex {
     /// Scores every document against `query` and returns them ranked.
     ///
     /// Query tokens are deduplicated (a repeated query term contributes its
-    /// idf-weighted score once, matching ka) and tokenized with the same
-    /// [`tokenize_whole_identifier`] used at build time — a query and a
-    /// document tokenize identically, so exact-identifier queries (e.g.
-    /// `dd_trace`) match documents containing that exact identifier.
+    /// idf-weighted score once, matching ka) and tokenized with this
+    /// index's own [`Tokenizer`] (the one passed to [`build`](Self::build))
+    /// — a query and a document always tokenize identically, so e.g.
+    /// exact-identifier queries (`dd_trace`) match documents containing
+    /// that exact identifier under [`Tokenizer::WholeIdentifier`].
     ///
     /// Only documents sharing at least one query term score above `0.0` and
     /// appear in the output; documents with no term overlap are omitted
@@ -199,7 +207,7 @@ impl OkapiIndex {
         let mut seen_terms = std::collections::HashSet::new();
         let mut scores: HashMap<usize, f64> = HashMap::new();
 
-        for term in tokenize_whole_identifier(query) {
+        for term in self.tokenizer.tokenize(query) {
             if !seen_terms.insert(term.clone()) {
                 continue;
             }
@@ -275,20 +283,23 @@ mod tests {
     //   Expected ranking: b (higher tf) > a; c excluded (zero overlap).
     #[test]
     fn golden_ranking_matches_ka_okapi_formula() {
-        let index = OkapiIndex::build([
-            Document {
-                id: "a",
-                text: "dd_trace span init",
-            },
-            Document {
-                id: "b",
-                text: "dd_trace dd_trace context",
-            },
-            Document {
-                id: "c",
-                text: "span context handler",
-            },
-        ]);
+        let index = OkapiIndex::build(
+            Tokenizer::WholeIdentifier,
+            [
+                Document {
+                    id: "a",
+                    text: "dd_trace span init",
+                },
+                Document {
+                    id: "b",
+                    text: "dd_trace dd_trace context",
+                },
+                Document {
+                    id: "c",
+                    text: "span context handler",
+                },
+            ],
+        );
 
         let results = index.search("dd_trace", 10);
 
@@ -308,16 +319,19 @@ mod tests {
     /// `dd_trace` twice scores identically to a query with it once.
     #[test]
     fn duplicate_query_terms_are_deduplicated() {
-        let index = OkapiIndex::build([
-            Document {
-                id: "a",
-                text: "dd_trace span",
-            },
-            Document {
-                id: "b",
-                text: "span handler",
-            },
-        ]);
+        let index = OkapiIndex::build(
+            Tokenizer::WholeIdentifier,
+            [
+                Document {
+                    id: "a",
+                    text: "dd_trace span",
+                },
+                Document {
+                    id: "b",
+                    text: "span handler",
+                },
+            ],
+        );
         let once = index.search("dd_trace", 10);
         let twice = index.search("dd_trace dd_trace", 10);
         assert_eq!(once, twice);
@@ -332,16 +346,19 @@ mod tests {
         // Two docs with identical text score identically -- the tie must
         // resolve by id ascending ("a" before "z"), regardless of build
         // order or HashMap iteration order.
-        let index = OkapiIndex::build([
-            Document {
-                id: "z",
-                text: "dd_trace span",
-            },
-            Document {
-                id: "a",
-                text: "dd_trace span",
-            },
-        ]);
+        let index = OkapiIndex::build(
+            Tokenizer::WholeIdentifier,
+            [
+                Document {
+                    id: "z",
+                    text: "dd_trace span",
+                },
+                Document {
+                    id: "a",
+                    text: "dd_trace span",
+                },
+            ],
+        );
 
         let first_run = index.search("dd_trace", 10);
         let second_run = index.search("dd_trace", 10);
@@ -357,20 +374,23 @@ mod tests {
     /// documents that remain.
     #[test]
     fn top_n_truncates_ranking() {
-        let index = OkapiIndex::build([
-            Document {
-                id: "a",
-                text: "dd_trace dd_trace dd_trace",
-            },
-            Document {
-                id: "b",
-                text: "dd_trace dd_trace",
-            },
-            Document {
-                id: "c",
-                text: "dd_trace",
-            },
-        ]);
+        let index = OkapiIndex::build(
+            Tokenizer::WholeIdentifier,
+            [
+                Document {
+                    id: "a",
+                    text: "dd_trace dd_trace dd_trace",
+                },
+                Document {
+                    id: "b",
+                    text: "dd_trace dd_trace",
+                },
+                Document {
+                    id: "c",
+                    text: "dd_trace",
+                },
+            ],
+        );
         let top1 = index.search("dd_trace", 1);
         assert_eq!(top1.len(), 1);
         assert_eq!(top1[0].id, "a");
@@ -380,24 +400,30 @@ mod tests {
     /// or produce a `NaN` score — the `avgdl == 0.0` guard in `search`.
     #[test]
     fn empty_corpus_and_empty_documents_do_not_panic_or_produce_nan() {
-        let empty_index = OkapiIndex::build(std::iter::empty());
+        let empty_index = OkapiIndex::build(Tokenizer::WholeIdentifier, std::iter::empty());
         assert!(empty_index.is_empty());
         assert_eq!(empty_index.search("dd_trace", 10), Vec::new());
 
-        let zero_len_index = OkapiIndex::build([
-            Document { id: "a", text: "" },
-            Document { id: "b", text: "" },
-        ]);
+        let zero_len_index = OkapiIndex::build(
+            Tokenizer::WholeIdentifier,
+            [
+                Document { id: "a", text: "" },
+                Document { id: "b", text: "" },
+            ],
+        );
         assert_eq!(zero_len_index.search("dd_trace", 10), Vec::new());
     }
 
     /// An empty query yields no results (no terms to score against).
     #[test]
     fn empty_query_yields_no_results() {
-        let index = OkapiIndex::build([Document {
-            id: "a",
-            text: "dd_trace span",
-        }]);
+        let index = OkapiIndex::build(
+            Tokenizer::WholeIdentifier,
+            [Document {
+                id: "a",
+                text: "dd_trace span",
+            }],
+        );
         assert_eq!(index.search("", 10), Vec::new());
     }
 
@@ -407,10 +433,13 @@ mod tests {
     /// stale/zero `avgdl`.
     #[test]
     fn single_doc_corpus_avgdl_equals_doc_len() {
-        let index = OkapiIndex::build([Document {
-            id: "only",
-            text: "dd_trace dd_trace span",
-        }]);
+        let index = OkapiIndex::build(
+            Tokenizer::WholeIdentifier,
+            [Document {
+                id: "only",
+                text: "dd_trace dd_trace span",
+            }],
+        );
         let results = index.search("dd_trace", 10);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "only");
@@ -428,10 +457,13 @@ mod tests {
     /// any postings lookup.
     #[test]
     fn query_term_absent_from_corpus_yields_no_result_for_it() {
-        let index = OkapiIndex::build([Document {
-            id: "a",
-            text: "dd_trace span",
-        }]);
+        let index = OkapiIndex::build(
+            Tokenizer::WholeIdentifier,
+            [Document {
+                id: "a",
+                text: "dd_trace span",
+            }],
+        );
         assert_eq!(index.search("nonexistent_term", 10), Vec::new());
         // Mixed query: one present term, one absent -> only the present
         // term's contribution counts (absent term adds 0.0, not NaN/error).
@@ -449,60 +481,69 @@ mod tests {
     /// output is always re-sorted into the total order before returning.
     #[test]
     fn ranking_is_identical_regardless_of_build_insertion_order() {
-        let forward = OkapiIndex::build([
-            Document {
-                id: "doc_a",
-                text: "dd_trace span",
-            },
-            Document {
-                id: "doc_b",
-                text: "dd_trace span",
-            },
-            Document {
-                id: "doc_c",
-                text: "dd_trace span",
-            },
-            Document {
-                id: "doc_d",
-                text: "dd_trace context",
-            },
-        ]);
-        let reversed = OkapiIndex::build([
-            Document {
-                id: "doc_d",
-                text: "dd_trace context",
-            },
-            Document {
-                id: "doc_c",
-                text: "dd_trace span",
-            },
-            Document {
-                id: "doc_b",
-                text: "dd_trace span",
-            },
-            Document {
-                id: "doc_a",
-                text: "dd_trace span",
-            },
-        ]);
-        let shuffled = OkapiIndex::build([
-            Document {
-                id: "doc_b",
-                text: "dd_trace span",
-            },
-            Document {
-                id: "doc_d",
-                text: "dd_trace context",
-            },
-            Document {
-                id: "doc_a",
-                text: "dd_trace span",
-            },
-            Document {
-                id: "doc_c",
-                text: "dd_trace span",
-            },
-        ]);
+        let forward = OkapiIndex::build(
+            Tokenizer::WholeIdentifier,
+            [
+                Document {
+                    id: "doc_a",
+                    text: "dd_trace span",
+                },
+                Document {
+                    id: "doc_b",
+                    text: "dd_trace span",
+                },
+                Document {
+                    id: "doc_c",
+                    text: "dd_trace span",
+                },
+                Document {
+                    id: "doc_d",
+                    text: "dd_trace context",
+                },
+            ],
+        );
+        let reversed = OkapiIndex::build(
+            Tokenizer::WholeIdentifier,
+            [
+                Document {
+                    id: "doc_d",
+                    text: "dd_trace context",
+                },
+                Document {
+                    id: "doc_c",
+                    text: "dd_trace span",
+                },
+                Document {
+                    id: "doc_b",
+                    text: "dd_trace span",
+                },
+                Document {
+                    id: "doc_a",
+                    text: "dd_trace span",
+                },
+            ],
+        );
+        let shuffled = OkapiIndex::build(
+            Tokenizer::WholeIdentifier,
+            [
+                Document {
+                    id: "doc_b",
+                    text: "dd_trace span",
+                },
+                Document {
+                    id: "doc_d",
+                    text: "dd_trace context",
+                },
+                Document {
+                    id: "doc_a",
+                    text: "dd_trace span",
+                },
+                Document {
+                    id: "doc_c",
+                    text: "dd_trace span",
+                },
+            ],
+        );
 
         let forward_results = forward.search("dd_trace span", 10);
         let reversed_results = reversed.search("dd_trace span", 10);
@@ -572,24 +613,27 @@ mod tests {
     fn independent_hardcoded_golden_matches_frozen_python_reference() {
         const TOLERANCE: f64 = 1e-9;
 
-        let index = OkapiIndex::build([
-            Document {
-                id: "alpha",
-                text: "dd_trace span init handler",
-            },
-            Document {
-                id: "beta",
-                text: "dd_trace context handler retry retry",
-            },
-            Document {
-                id: "gamma",
-                text: "span context handler",
-            },
-            Document {
-                id: "delta",
-                text: "dd_trace dd_trace dd_trace context",
-            },
-        ]);
+        let index = OkapiIndex::build(
+            Tokenizer::WholeIdentifier,
+            [
+                Document {
+                    id: "alpha",
+                    text: "dd_trace span init handler",
+                },
+                Document {
+                    id: "beta",
+                    text: "dd_trace context handler retry retry",
+                },
+                Document {
+                    id: "gamma",
+                    text: "span context handler",
+                },
+                Document {
+                    id: "delta",
+                    text: "dd_trace dd_trace dd_trace context",
+                },
+            ],
+        );
 
         let results = index.search("dd_trace handler", 10);
 

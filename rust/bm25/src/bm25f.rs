@@ -46,11 +46,18 @@
 //! sensitive sum's iteration order. Ranked output is always re-sorted into
 //! the same total order `okapi` uses: score descending
 //! (`f64::total_cmp`), then `id` ascending as the tie-break.
+//!
+//! # M1.P2.T3 (landed)
+//! [`BM25FIndex::build`] now takes a [`Tokenizer`] and stores it -- same
+//! build/search-agreement guarantee as [`crate::okapi::OkapiIndex`]:
+//! [`BM25FIndex::search`] always reuses the exact tokenizer `build` was
+//! given, structurally, not by caller discipline. `ScoredDocument` moved to
+//! [`crate::result`] in this same task (was `crate::okapi::ScoredDocument`).
 
 use std::collections::{HashMap, HashSet};
 
-use crate::okapi::ScoredDocument;
-use crate::tokenize::tokenize_whole_identifier;
+use crate::result::ScoredDocument;
+use crate::tokenize::Tokenizer;
 
 /// Term-frequency saturation constant, applied once to the combined
 /// cross-field pseudo-frequency (`tf_hat`). Same value as
@@ -200,7 +207,7 @@ pub struct Document<'a> {
     /// Caller-supplied identifier returned in [`ScoredDocument::id`].
     pub id: &'a str,
     /// `(field name, field text)` pairs. Field text is tokenized internally
-    /// with [`tokenize_whole_identifier`].
+    /// with the [`Tokenizer`] passed to [`BM25FIndex::build`].
     pub fields: Vec<(&'a str, &'a str)>,
 }
 
@@ -226,21 +233,27 @@ pub struct BM25FIndex {
     /// registration position. `0.0` at index `i` iff every document's
     /// field `i` is empty or absent (or the corpus has zero documents).
     avg_field_len: Vec<f64>,
+    /// The tokenizer this index was built with; [`search`](Self::search)
+    /// always reuses it — same build/search agreement guarantee as
+    /// [`crate::okapi::OkapiIndex`].
+    tokenizer: Tokenizer,
 }
 
 impl BM25FIndex {
-    /// Builds an index over `docs` against `config`. Each field's text is
-    /// tokenized with [`tokenize_whole_identifier`]; an empty, absent, or
-    /// all-punctuation field yields a zero-length field for that document,
-    /// not an error.
+    /// Builds an index over `docs` against `config`, tokenizing every field
+    /// with `tokenizer`. The index stores `tokenizer` and reuses it for
+    /// every subsequent [`search`](Self::search) call — there is no way to
+    /// query this index with a different tokenizer than it was built with.
+    /// An empty, absent, or all-punctuation field yields a zero-length
+    /// field for that document, not an error.
     ///
-    /// Deterministic: two calls with the same `config`/`docs` in the same
-    /// document order produce indexes that score and rank identically;
-    /// document build order affects nothing observable in
+    /// Deterministic: two calls with the same `config`/`tokenizer`/`docs`
+    /// in the same document order produce indexes that score and rank
+    /// identically; document build order affects nothing observable in
     /// [`search`](Self::search)'s output (a total order over `(score,
     /// id)`), matching [`crate::okapi::OkapiIndex::build`].
     #[must_use]
-    pub fn build<'a, I>(config: &BM25FConfig, docs: I) -> Self
+    pub fn build<'a, I>(config: &BM25FConfig, tokenizer: Tokenizer, docs: I) -> Self
     where
         I: IntoIterator<Item = Document<'a>>,
     {
@@ -260,7 +273,7 @@ impl BM25FIndex {
                     // text never enters postings or length accounting.
                     continue;
                 };
-                let tokens = tokenize_whole_identifier(text);
+                let tokens = tokenizer.tokenize(text);
                 #[allow(
                     clippy::cast_possible_truncation,
                     reason = "a single document field's token count fits u32 for any realistic \
@@ -308,6 +321,7 @@ impl BM25FIndex {
             doc_ids,
             doc_field_len,
             avg_field_len,
+            tokenizer,
         }
     }
 
@@ -376,8 +390,8 @@ impl BM25FIndex {
     /// Scores every document against `query` and returns them ranked.
     ///
     /// Query tokens are deduplicated (a repeated query term contributes its
-    /// idf-weighted score once) and tokenized with the same
-    /// [`tokenize_whole_identifier`] used at build time, matching
+    /// idf-weighted score once) and tokenized with this index's own
+    /// [`Tokenizer`] (the one passed to [`build`](Self::build)), matching
     /// [`crate::okapi::OkapiIndex::search`].
     ///
     /// Only documents sharing at least one query term (in any configured
@@ -389,7 +403,7 @@ impl BM25FIndex {
     /// # Determinism
     /// Query terms are summed in deduped left-to-right tokenize order;
     /// within each term, fields are summed in `config` registration order
-    /// (see [`tf_hat`](Self::tf_hat)) — both fixed, neither a `HashMap`
+    /// (see the private `tf_hat` helper) — both fixed, neither a `HashMap`
     /// iteration order. Output is sorted by score descending
     /// (`f64::total_cmp`), then by `id` ascending as a total-order
     /// tie-break, so identical `(index, query, top_n)` inputs always
@@ -399,7 +413,7 @@ impl BM25FIndex {
         let mut seen_terms = HashSet::new();
         let mut scores: HashMap<usize, f64> = HashMap::new();
 
-        for term in tokenize_whole_identifier(query) {
+        for term in self.tokenizer.tokenize(query) {
             if !seen_terms.insert(term.clone()) {
                 continue;
             }
@@ -478,7 +492,8 @@ mod tests {
         let equal_weights = BM25FConfig::new()
             .with_field("title", 1.0, 0.75)
             .with_field("body", 1.0, 0.75);
-        let tied = BM25FIndex::build(&equal_weights, docs()).search("target", 10);
+        let tied = BM25FIndex::build(&equal_weights, Tokenizer::WholeIdentifier, docs())
+            .search("target", 10);
         assert_eq!(
             tied.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
             vec!["aaa_body", "zzz_title"],
@@ -488,7 +503,8 @@ mod tests {
         let title_weighted = BM25FConfig::new()
             .with_field("title", 5.0, 0.75)
             .with_field("body", 1.0, 0.75);
-        let reordered = BM25FIndex::build(&title_weighted, docs()).search("target", 10);
+        let reordered = BM25FIndex::build(&title_weighted, Tokenizer::WholeIdentifier, docs())
+            .search("target", 10);
         assert_eq!(
             reordered.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
             vec!["zzz_title", "aaa_body"],
@@ -532,7 +548,11 @@ mod tests {
                     _ => unreachable!(),
                 }
             };
-            BM25FIndex::build(&config, order.into_iter().map(by_id))
+            BM25FIndex::build(
+                &config,
+                Tokenizer::WholeIdentifier,
+                order.into_iter().map(by_id),
+            )
         };
 
         let forward = make(["doc_a", "doc_b", "doc_c", "doc_d"]);
@@ -562,6 +582,7 @@ mod tests {
         let config = BM25FConfig::new().with_field("body", 1.0, 0.75);
         let index = BM25FIndex::build(
             &config,
+            Tokenizer::WholeIdentifier,
             [
                 Document {
                     id: "z",
@@ -594,13 +615,15 @@ mod tests {
             .with_field("body", 1.0, 0.75);
 
         // Empty corpus.
-        let empty_index = BM25FIndex::build(&config, std::iter::empty());
+        let empty_index =
+            BM25FIndex::build(&config, Tokenizer::WholeIdentifier, std::iter::empty());
         assert!(empty_index.is_empty());
         assert_eq!(empty_index.search("dd_trace", 10), Vec::new());
 
         // Empty field text, and a field entirely absent from a document.
         let index = BM25FIndex::build(
             &config,
+            Tokenizer::WholeIdentifier,
             [
                 Document {
                     id: "empty_title",
@@ -622,6 +645,7 @@ mod tests {
         // Single-document corpus.
         let single = BM25FIndex::build(
             &config,
+            Tokenizer::WholeIdentifier,
             [Document {
                 id: "only",
                 fields: vec![("title", "dd_trace"), ("body", "span")],
@@ -651,6 +675,7 @@ mod tests {
             .with_field("body", 1.0, 0.75);
         let index = BM25FIndex::build(
             &config,
+            Tokenizer::WholeIdentifier,
             [
                 Document {
                     id: "title_match",
@@ -679,6 +704,7 @@ mod tests {
             let config = BM25FConfig::new().with_field("body", 1.0, b);
             BM25FIndex::build(
                 &config,
+                Tokenizer::WholeIdentifier,
                 [
                     Document {
                         id: "short",
@@ -729,6 +755,7 @@ mod tests {
             .with_field("body", 5.0, 0.75);
         let index = BM25FIndex::build(
             &config,
+            Tokenizer::WholeIdentifier,
             [Document {
                 id: "only",
                 fields: vec![("body", "target")],
@@ -752,6 +779,7 @@ mod tests {
         let config = BM25FConfig::new().with_field("body", 1.0, 0.75);
         let index = BM25FIndex::build(
             &config,
+            Tokenizer::WholeIdentifier,
             [Document {
                 id: "has_unconfigured_field",
                 fields: vec![("body", "known"), ("unconfigured", "target")],
@@ -838,6 +866,7 @@ mod tests {
             .with_field("body", 1.0, 0.75);
         let index = BM25FIndex::build(
             &config,
+            Tokenizer::WholeIdentifier,
             [
                 Document {
                     id: "alpha",
@@ -930,6 +959,7 @@ mod tests {
             .with_field("body", 1.0, 0.0);
         let index = BM25FIndex::build(
             &config,
+            Tokenizer::WholeIdentifier,
             [
                 Document {
                     id: "has_x",

@@ -21,7 +21,9 @@ unit-tests:
 
 # Rust workspace (rust/) — arch matrix: {linux, macos} x {x86_64, aarch64}.
 # Each cell runs `cargo fmt --check` + `cargo clippy -D warnings` (zero-warnings
-# lint bar) + `cargo test`, native where a GitLab SaaS runner exists for that
+# lint bar) + `cargo doc -D warnings` (doc-gate: broken intra-doc links / doc
+# lints fail red — added M1.P2.T3 after a private intra-doc link slipped through
+# T1/T2 with no doc build in CI) + `cargo test`, native where a GitLab SaaS runner exists for that
 # {os, arch} pair, cross-compiled (build+lint only, test execution skipped and
 # called out below) where none does. Independent of the Python guardrail/test
 # jobs above and of any future Go CI job — never share a stage or job name.
@@ -48,7 +50,11 @@ unit-tests:
   script:
   - cargo fmt --manifest-path rust/Cargo.toml --check
   - cargo clippy --manifest-path rust/Cargo.toml --target "$RUST_TARGET" --all-targets --all-features -- -D warnings
-  - if [ "$RUST_TEST_NATIVE" = "true" ]; then cargo test --manifest-path rust/Cargo.toml --target "$RUST_TARGET"; else echo "cross target $RUST_TARGET: fmt+clippy only (no runner to execute the test binary natively)"; fi
+  # Doc-gate: warnings-as-errors doc build (host-target; rustdoc output is arch-independent for
+  # this pure crate). Catches broken/private intra-doc links and doc lints that neither fmt nor
+  # clippy sees — the exact class that slipped through T1/T2 before this step existed.
+  - RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path rust/Cargo.toml --no-deps
+  - if [ "$RUST_TEST_NATIVE" = "true" ]; then cargo test --manifest-path rust/Cargo.toml --target "$RUST_TARGET"; else echo "cross target $RUST_TARGET: fmt+clippy+doc only (no runner to execute the test binary natively)"; fi
 
 rust-linux-x86_64:
   extends: .rust-base

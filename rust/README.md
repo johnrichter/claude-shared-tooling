@@ -8,9 +8,11 @@ separate build/test/lint lifecycle. Holds only deterministic, no-ML machinery.
 
 ## What lives here
 
-- **`bm25/`** — general-purpose, call-time-customizable BM25 ranking library. Scaffold only as of
-  M1.P1.T1 (compiles, lints clean, one placeholder test); scoring + tokenization land in
-  M1.P1.T2 / M1.P2.* (see `bm25/src/lib.rs` for exact markers).
+- **`bm25/`** — general-purpose, call-time-customizable BM25 ranking library. Complete as of the
+  M1 capstone (M1.P2.T3): both scoring variants (`OkapiIndex` flat, `BM25FIndex` fielded) and both
+  tokenizers (`Tokenizer::CaseSplit` default, `Tokenizer::WholeIdentifier`) are selectable at call
+  time; the tokenizer is injected at `build` and reused at `search` so build/search agreement is
+  structural. Deterministic, no ML. See `bm25/src/lib.rs` for the public-API surface and example.
 - (forward-looking) a tree-sitter-based symbol-extraction crate joins as a second workspace
   member in a later navigator milestone.
 
@@ -35,11 +37,12 @@ that would fight local iteration.
 cd rust
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 cargo test
 ```
 
 ## CI
 
-`.gitlab-ci.yml` runs the above three commands per member crate across the
+`.gitlab-ci.yml` runs the above commands per member crate across the
 `{linux, macos} x {x86_64, aarch64}` arch matrix (cross-compiled where a runner can't execute the
 target natively) — see the `rust-*` jobs. Independent of the existing Go/Python/guardrail jobs.

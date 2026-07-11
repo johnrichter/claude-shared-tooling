@@ -125,12 +125,12 @@ pub fn tokenize_whole_identifier(text: &str) -> Vec<String> {
 /// in left-to-right order; no I/O, clock, or locale dependency. Returns an
 /// empty vector for empty or all-separator input — never panics.
 ///
-/// # M1.P2.T3
+/// # M1.P2.T3 (landed)
 /// Same signature as [`tokenize_whole_identifier`] — `fn(&str) -> Vec<String>`
-/// — by design, so the call-time selection API in M1.P2.T3 can hold either
-/// tokenizer behind one function-pointer/closure type and inject it into
-/// `okapi`/`bm25f` uniformly, without either scorer knowing which mode it
-/// got.
+/// — by design: the call-time selection API now holds either tokenizer
+/// behind [`Tokenizer`] (below), a closed enum injected into `okapi`/`bm25f`
+/// at construction and reused at search, without either scorer knowing which
+/// mode it got.
 #[must_use]
 pub fn tokenize_all_case_split(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
@@ -169,6 +169,50 @@ pub fn tokenize_all_case_split(text: &str) -> Vec<String> {
     }
 
     tokens
+}
+
+/// This crate's call-time-selectable tokenizer choice.
+///
+/// A closed, two-variant enum rather than a bare `fn(&str) -> Vec<String>`
+/// pointer or a caller-supplied closure — deliberately, for two reasons:
+/// 1. **AI/human legibility.** [`crate::okapi::OkapiIndex::build`] and
+///    [`crate::bm25f::BM25FIndex::build`] take a `Tokenizer` argument whose
+///    two named variants are documented right here; a caller (or an LLM
+///    generating a call site) reads `Tokenizer::CaseSplit` and knows exactly
+///    what it selects, vs. an opaque fn pointer that could be anything.
+/// 2. **Closed set.** This crate owns tokenization (see the crate-level
+///    docs) — a caller-supplied custom tokenizer would break the "query and
+///    document always tokenize identically" contract this crate exists to
+///    guarantee, since a custom fn could differ between build and search
+///    calls with no compile-time signal. An enum makes "exactly these two
+///    modes, nothing else" a type-level fact.
+///
+/// [`Default`] is [`Tokenizer::CaseSplit`] — navigator's default mode (see
+/// the design doc, "Shared Rust library" §(a)); [`Tokenizer::WholeIdentifier`]
+/// is the exact-symbol opt-in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Tokenizer {
+    /// All-case-splitting mode ([`tokenize_all_case_split`]) — navigator's
+    /// default. Splits `camelCase`/`snake_case`/`PascalCase`/
+    /// `SCREAMING_SNAKE`/kebab-case identifiers into sub-tokens.
+    #[default]
+    CaseSplit,
+    /// Whole-identifier mode ([`tokenize_whole_identifier`]) — exact-symbol
+    /// opt-in. Keeps an underscored/cased identifier as one token.
+    WholeIdentifier,
+}
+
+impl Tokenizer {
+    /// Tokenizes `text` with this variant's underlying tokenizer function.
+    /// Pure and deterministic — see the two underlying fns' own docs for the
+    /// per-mode splitting rules.
+    #[must_use]
+    pub fn tokenize(self, text: &str) -> Vec<String> {
+        match self {
+            Tokenizer::CaseSplit => tokenize_all_case_split(text),
+            Tokenizer::WholeIdentifier => tokenize_whole_identifier(text),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -603,5 +647,41 @@ mod all_case_split_tests {
         let b: fn(&str) -> Vec<String> = tokenize_whole_identifier;
         assert_eq!(a("ddTrace"), vec!["dd", "trace"]);
         assert_eq!(b("dd_trace"), vec!["dd_trace"]);
+    }
+}
+
+#[cfg(test)]
+mod tokenizer_enum_tests {
+    use super::*;
+
+    /// Each variant dispatches to its matching free fn — not a stand-in that
+    /// happens to look right; direct equality against the fn call itself.
+    #[test]
+    fn each_variant_dispatches_to_its_matching_free_fn() {
+        assert_eq!(
+            Tokenizer::CaseSplit.tokenize("ddTrace"),
+            tokenize_all_case_split("ddTrace")
+        );
+        assert_eq!(
+            Tokenizer::WholeIdentifier.tokenize("dd_trace"),
+            tokenize_whole_identifier("dd_trace")
+        );
+    }
+
+    /// Navigator's default is case-splitting, per the design doc.
+    #[test]
+    fn default_is_case_split() {
+        assert_eq!(Tokenizer::default(), Tokenizer::CaseSplit);
+    }
+
+    /// The two variants disagree on at least one input (otherwise
+    /// "selectable" would be a no-op) — `ddTrace` splits under `CaseSplit`
+    /// but stays whole under `WholeIdentifier`.
+    #[test]
+    fn variants_produce_different_output_for_the_same_input() {
+        assert_ne!(
+            Tokenizer::CaseSplit.tokenize("ddTrace"),
+            Tokenizer::WholeIdentifier.tokenize("ddTrace")
+        );
     }
 }
