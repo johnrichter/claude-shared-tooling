@@ -82,6 +82,12 @@
 //! `ScoredDocument`, this crate's one ranked-result type, moved from
 //! `crate::okapi` to the neutral [`crate::result`] module in this task —
 //! both variants return it, so neither should have "owned" it.
+//!
+//! # M1.P3.T1 (landed)
+//! [`BM25FConfig::with_field`] takes [`Weight`]/[`FieldB`] (via
+//! `impl Into<_>`, so a bare `f64` still works ergonomically) instead of
+//! raw `f64` — invalid values CLAMP into a valid range at construction
+//! instead of panicking. See [`bm25f`] module docs for the clamp mapping.
 
 #![deny(unsafe_code)]
 
@@ -96,7 +102,7 @@ pub mod tokenize;
 // out (`OkapiDocument`/`BM25FDocument`) since the two variants each have
 // their own `Document` type with a different field shape — re-exporting both
 // under the bare name `Document` would collide.
-pub use bm25f::{BM25FConfig, BM25FIndex, Document as BM25FDocument, FieldWeight};
+pub use bm25f::{BM25FConfig, BM25FIndex, Document as BM25FDocument, FieldB, FieldWeight, Weight};
 pub use okapi::{Document as OkapiDocument, OkapiIndex};
 pub use result::ScoredDocument;
 pub use tokenize::{tokenize_all_case_split, tokenize_whole_identifier, Tokenizer};

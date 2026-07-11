@@ -53,6 +53,14 @@
 //! [`BM25FIndex::search`] always reuses the exact tokenizer `build` was
 //! given, structurally, not by caller discipline. `ScoredDocument` moved to
 //! [`crate::result`] in this same task (was `crate::okapi::ScoredDocument`).
+//!
+//! # M1.P3.T1 (landed)
+//! [`BM25FConfig::with_field`]'s old contract PANICKED on an out-of-domain
+//! `weight`/`b`. Replaced with the [`Weight`]/[`FieldB`] clamping newtypes:
+//! construction is now infallible (never panics, never a `Result`) — an
+//! invalid raw `f64` is normalized into a valid value before it can ever
+//! reach [`FieldWeight`] or the scorer, rather than being rejected at the
+//! call site. See each newtype's doc for its exact clamp mapping.
 
 use std::collections::{HashMap, HashSet};
 
@@ -65,38 +73,126 @@ use crate::tokenize::Tokenizer;
 /// Okapi's, just applied to a different quantity.
 const K1: f64 = 1.5;
 
+/// A per-field weight `w_f` in BM25F's cross-field pseudo-frequency sum,
+/// valid by construction — never panics, never a `Result`.
+///
+/// # Clamp mapping
+/// Built only through [`Weight::new`] / `impl From<f64>`:
+/// - non-finite input (`NaN`, `+inf`, `-inf`) -> `0.0`.
+/// - finite and negative -> `0.0` (floored, never goes negative).
+/// - finite and `>= 0.0` -> preserved exactly, INCLUDING values `> 1.0`
+///   (e.g. `3.0` stays `3.0`). There is deliberately NO upper bound: BM25F
+///   weights are relative scaling factors, not a probability distribution,
+///   and a field legitimately outweighing others (`3.0` vs `1.0`) is the
+///   whole ranking mechanism — clamping that away would break every caller
+///   relying on it (see [`BM25FConfig::frontmatter_default`]).
+///
+/// A clamped-to-`0.0` weight makes that field contribute nothing to
+/// `tf_hat` (see [`BM25FIndex`]'s private `tf_hat` helper) — a document
+/// matching ONLY in a clamped field ends up with total score `0.0` and is
+/// dropped by [`BM25FIndex::search`]'s `score > 0.0` filter, same as an
+/// honestly-configured `0.0` weight. There is no way for an invalid raw
+/// weight to reach the scorer as anything other than a valid, non-negative
+/// `f64`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Weight(f64);
+
+impl Weight {
+    /// Clamps `raw` into a valid weight: non-finite -> `0.0`, negative ->
+    /// `0.0`, otherwise preserved exactly (see the type's clamp mapping).
+    /// Infallible — never panics, never returns `Result`.
+    #[must_use]
+    pub fn new(raw: f64) -> Self {
+        if raw.is_finite() {
+            Self(raw.max(0.0))
+        } else {
+            Self(0.0)
+        }
+    }
+
+    /// This weight's underlying, already-clamped `f64` value.
+    #[must_use]
+    pub fn value(&self) -> f64 {
+        self.0
+    }
+}
+
+impl From<f64> for Weight {
+    /// Clamping conversion — see [`Weight::new`].
+    fn from(raw: f64) -> Self {
+        Self::new(raw)
+    }
+}
+
+/// A per-field length-normalization strength `b_f` within a
+/// [`BM25FConfig`], valid by construction — never panics, never a
+/// `Result`. `0.0` disables length normalization for this field, `1.0`
+/// fully normalizes by this field's length relative to the corpus average
+/// for this field.
+///
+/// # Clamp mapping
+/// Built only through [`FieldB::new`] / `impl From<f64>`:
+/// - non-finite input (`NaN`, `+inf`, `-inf`) -> `0.0`.
+/// - finite -> clamped into `[0.0, 1.0]` (values below `0.0` become `0.0`,
+///   values above `1.0` become `1.0`).
+///
+/// Unlike [`Weight`], `b` DOES have an upper bound: it is a mixing
+/// coefficient in the length-norm denominator `1 - b + b*ratio`, and a value
+/// outside `[0.0, 1.0]` can drive that denominator to zero or negative —
+/// the same `NaN`/spurious-score hazard the old panic-based contract
+/// existed to prevent, now made unreachable by construction instead of
+/// asserted at the call site.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FieldB(f64);
+
+impl FieldB {
+    /// Clamps `raw` into `[0.0, 1.0]`: non-finite -> `0.0`, otherwise
+    /// [`f64::clamp`]'d into range. Infallible — never panics, never
+    /// returns `Result`.
+    #[must_use]
+    pub fn new(raw: f64) -> Self {
+        if raw.is_finite() {
+            Self(raw.clamp(0.0, 1.0))
+        } else {
+            Self(0.0)
+        }
+    }
+
+    /// This `b`'s underlying, already-clamped `f64` value.
+    #[must_use]
+    pub fn value(&self) -> f64 {
+        self.0
+    }
+}
+
+impl From<f64> for FieldB {
+    /// Clamping conversion — see [`FieldB::new`].
+    fn from(raw: f64) -> Self {
+        Self::new(raw)
+    }
+}
+
 /// One field's weight and length-normalization strength within a
 /// [`BM25FConfig`].
 ///
 /// `weight` scales that field's contribution to a document's combined
 /// pseudo-frequency before saturation — a higher `weight` makes a match in
-/// that field count for more. `b` is the per-field analogue of Okapi's `B`:
-/// `0.0` disables length normalization for this field, `1.0` fully
-/// normalizes by this field's length relative to the corpus average for
-/// this field.
+/// that field count for more. `b` is the per-field analogue of Okapi's `B`.
 ///
 /// # Domain
-/// `weight` must be finite and `>= 0.0`; `b` must be finite and in
-/// `[0.0, 1.0]`. These are load-bearing invariants, not style preferences:
-/// a negative `weight` can drive a document's combined pseudo-frequency
-/// `tf_hat` negative, which (a) makes a genuine match score `<= 0.0` so the
-/// score-positive output filter silently drops it, (b) hits a
-/// division-by-zero (`inf`/`NaN`, violating [`ScoredDocument`]'s finite-score
-/// guarantee) exactly at `tf_hat == -K1`, and (c) yields spuriously HIGH
-/// positive scores once `tf_hat < -K1` — ranking a non-match at the top. A
-/// `b` outside `[0.0, 1.0]` breaks the same way through the length-norm
-/// denominator `1 - b + b*ratio`. [`BM25FConfig::with_field`] enforces both
-/// domains at construction, so an index never scores against an out-of-domain
-/// [`FieldWeight`].
+/// Both fields are the [`Weight`]/[`FieldB`] newtypes: valid by
+/// construction (clamped, never panicking — see each type's clamp mapping),
+/// so [`BM25FIndex`] never scores against an out-of-domain value. There is
+/// no raw, unvalidated `f64` domain assumption left anywhere in the scoring
+/// path.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FieldWeight {
-    /// This field's weight `w_f` in the cross-field sum. Finite and
-    /// `>= 0.0`. Not required to sum to `1.0` across fields — BM25F weights
-    /// are relative scaling factors, not a probability distribution.
-    pub weight: f64,
-    /// This field's length-normalization strength `b_f`, finite and in
-    /// `[0.0, 1.0]`.
-    pub b: f64,
+    /// This field's weight `w_f` in the cross-field sum. Not required to
+    /// sum to `1.0` across fields — BM25F weights are relative scaling
+    /// factors, not a probability distribution.
+    pub weight: Weight,
+    /// This field's length-normalization strength `b_f`.
+    pub b: FieldB,
 }
 
 /// Fielded scoring configuration: which fields exist, in what order, and
@@ -137,28 +233,27 @@ impl BM25FConfig {
     /// treated as two distinct fields that happen to share a label, not
     /// merged. Callers should register each field name once.
     ///
-    /// # Panics
-    /// Panics if `weight` is not finite or is negative, or if `b` is not
-    /// finite or lies outside `[0.0, 1.0]` — see [`FieldWeight`]'s domain
-    /// note for why an out-of-domain value is a correctness hazard, not a
-    /// tuning choice. This is a fail-fast contract on a construction-time
-    /// programming constant (field weights are code, not runtime data), so
-    /// an invalid weight surfaces at the `with_field` call site rather than
-    /// silently corrupting scores; the check is an always-on `assert!` (not
-    /// a `debug_assert!`) precisely so it cannot compile out in release and
-    /// reintroduce the silent-failure path.
+    /// `weight`/`b` accept anything `impl Into<Weight>`/`impl Into<FieldB>`
+    /// — a bare `f64` (via the clamping `From<f64>` impls) works exactly as
+    /// before, e.g. `with_field("title", 3.0, 0.75)`, but an out-of-domain
+    /// raw value is now CLAMPED into range at conversion time rather than
+    /// rejected: this call never panics and never returns a `Result`, and
+    /// the value actually stored is a provably-valid [`Weight`]/[`FieldB`]
+    /// — see each type's clamp mapping.
     #[must_use]
-    pub fn with_field(mut self, name: &str, weight: f64, b: f64) -> Self {
-        assert!(
-            weight.is_finite() && weight >= 0.0,
-            "field {name:?} weight must be finite and >= 0.0, got {weight}"
-        );
-        assert!(
-            b.is_finite() && (0.0..=1.0).contains(&b),
-            "field {name:?} b must be finite and in [0.0, 1.0], got {b}"
-        );
-        self.fields
-            .push((name.to_string(), FieldWeight { weight, b }));
+    pub fn with_field(
+        mut self,
+        name: &str,
+        weight: impl Into<Weight>,
+        b: impl Into<FieldB>,
+    ) -> Self {
+        self.fields.push((
+            name.to_string(),
+            FieldWeight {
+                weight: weight.into(),
+                b: b.into(),
+            },
+        ));
         self
     }
 
@@ -381,8 +476,9 @@ impl BM25FIndex {
             // — treat the length-normalization ratio as 0.0 rather than
             // 0.0/0.0 (NaN), matching OkapiIndex::search's guard.
             let length_ratio = if avg_len == 0.0 { 0.0 } else { len_f / avg_len };
-            let tf_norm = tf_f / (1.0 - field_weight.b + field_weight.b * length_ratio);
-            tf_hat += field_weight.weight * tf_norm;
+            let b = field_weight.b.value();
+            let tf_norm = tf_f / (1.0 - b + b * length_ratio);
+            tf_hat += field_weight.weight.value() * tf_norm;
         }
         tf_hat
     }
@@ -439,12 +535,16 @@ impl BM25FIndex {
         // matching-docs-only semantics and this method's own doc comment.
         // `score > 0.0` (not `!= 0.0`) is exactly right because every score
         // is non-negative: `idf >= 0`, and `tf_hat >= 0` since every field
-        // `weight >= 0.0` and `b in [0.0, 1.0]` are enforced at construction
-        // (`with_field`) — so `tf_hat/(K1+tf_hat) in [0,1)` and a real match
-        // is always strictly positive. Were negative weights admissible,
-        // `tf_hat` could go negative and a genuine match could land `<= 0.0`
-        // and be silently dropped here; the construction-time domain check is
-        // what makes this filter safe.
+        // `weight >= 0.0` and `b in [0.0, 1.0]` are GUARANTEED BY TYPE — a
+        // `FieldWeight`'s `weight`/`b` are the [`Weight`]/[`FieldB`]
+        // newtypes, which clamp any invalid raw `f64` into range at
+        // construction (never panic, never a `Result`) — so
+        // `tf_hat/(K1+tf_hat) in [0,1)` and a real match is always strictly
+        // positive. A negative or garbage raw weight clamps to `0.0` and
+        // that field contributes nothing to `tf_hat`; a document matching
+        // ONLY in a clamped-to-`0.0` field totals `0.0` and is correctly
+        // filtered out here, not a phantom hit — same composition as an
+        // honestly-configured `0.0` weight (see `Weight`'s doc).
         let mut ranked: Vec<ScoredDocument> = scores
             .into_iter()
             .filter(|&(_, score)| score > 0.0)
@@ -991,44 +1091,177 @@ mod tests {
         );
     }
 
-    /// A negative field weight is rejected at construction, not silently
-    /// scored. This is the guard that keeps the `score > 0.0` output filter
-    /// safe: without it, a negative weight could drive a genuine match's
-    /// `tf_hat` negative and either silently drop the hit, divide by zero
-    /// (`tf_hat == -K1`), or produce a spuriously high positive score
-    /// (`tf_hat < -K1`) — all latent before this check existed.
+    /// [`Weight`]'s clamp mapping, exercised directly on the newtype (no
+    /// index/config involved): negative -> `0.0`, `NaN` -> `0.0`, `+inf` ->
+    /// `0.0`, and — the point of dropping the old upper-bound-free panic
+    /// contract — a weight `> 1.0` is preserved EXACTLY, not clamped, since
+    /// BM25F weights are relative scaling factors (e.g.
+    /// [`BM25FConfig::frontmatter_default`]'s `3.0`).
     #[test]
-    #[should_panic(expected = "weight must be finite and >= 0.0")]
-    fn negative_field_weight_is_rejected_at_construction() {
-        let _ = BM25FConfig::new().with_field("body", -1.0, 0.75);
+    #[allow(
+        clippy::float_cmp,
+        reason = "every value here is an exact, deterministic result of f64::max/clamp on a \
+                  literal input -- no computed/accumulated float, so exact equality is the \
+                  correct assertion, not an epsilon comparison"
+    )]
+    fn weight_clamp_mapping() {
+        assert_eq!(Weight::new(-1.0).value(), 0.0, "negative -> 0.0");
+        assert_eq!(Weight::new(f64::NAN).value(), 0.0, "NaN -> 0.0");
+        assert_eq!(Weight::new(f64::INFINITY).value(), 0.0, "+inf -> 0.0");
+        assert_eq!(Weight::new(f64::NEG_INFINITY).value(), 0.0, "-inf -> 0.0");
+        assert_eq!(Weight::new(0.0).value(), 0.0, "0.0 preserved");
+        assert_eq!(
+            Weight::new(3.0).value(),
+            3.0,
+            "weight > 1.0 must be preserved exactly, NOT clamped -- there is no upper bound"
+        );
+        assert_eq!(Weight::from(3.0), Weight::new(3.0), "From<f64> matches new");
     }
 
-    /// A non-finite (`NaN`) weight is rejected: it would poison every score
-    /// it touches into `NaN`, defeating the total order.
+    /// [`FieldB`]'s clamp mapping, exercised directly on the newtype: unlike
+    /// [`Weight`], `b` DOES have an upper bound (`1.0`) because it is a
+    /// mixing coefficient in the length-norm denominator, not a scaling
+    /// factor.
     #[test]
-    #[should_panic(expected = "weight must be finite and >= 0.0")]
-    fn nan_field_weight_is_rejected_at_construction() {
-        let _ = BM25FConfig::new().with_field("body", f64::NAN, 0.75);
+    #[allow(
+        clippy::float_cmp,
+        reason = "every value here is an exact, deterministic result of f64::clamp on a literal \
+                  input -- no computed/accumulated float, so exact equality is the correct \
+                  assertion, not an epsilon comparison"
+    )]
+    fn field_b_clamp_mapping() {
+        assert_eq!(FieldB::new(-0.5).value(), 0.0, "below range -> 0.0");
+        assert_eq!(
+            FieldB::new(1.5).value(),
+            1.0,
+            "above range -> 1.0 (clamped)"
+        );
+        assert_eq!(FieldB::new(f64::NAN).value(), 0.0, "NaN -> 0.0");
+        assert_eq!(FieldB::new(f64::INFINITY).value(), 0.0, "+inf -> 0.0");
+        assert_eq!(FieldB::new(0.0).value(), 0.0, "lower boundary preserved");
+        assert_eq!(FieldB::new(1.0).value(), 1.0, "upper boundary preserved");
+        assert_eq!(
+            FieldB::from(0.75),
+            FieldB::new(0.75),
+            "From<f64> matches new"
+        );
     }
 
-    /// A `b` above `1.0` is rejected: the length-norm denominator
-    /// `1 - b + b*ratio` can hit zero/negative outside `[0.0, 1.0]`, the
-    /// same `NaN`/negative-score class as a bad weight.
+    /// Adversarial sweep over every pathological `f64` a caller could pass:
+    /// none may panic, and each must land on its documented clamp value.
+    /// Covers cases NOT in `weight_clamp_mapping`/`field_b_clamp_mapping`:
+    /// `-0.0` (negative-zero, distinct bit pattern from `0.0`), a subnormal
+    /// (`f64::MIN_POSITIVE`), `f64::MAX`, and a huge-but-finite weight
+    /// (`1e300`) that must be PRESERVED (not clamped) for `Weight`, proving
+    /// the "no upper bound" contract holds even at the extreme end of the
+    /// finite range, not just at `3.0`.
     #[test]
-    #[should_panic(expected = "b must be finite and in [0.0, 1.0]")]
-    fn out_of_range_b_is_rejected_at_construction() {
-        let _ = BM25FConfig::new().with_field("body", 1.0, 1.5);
+    #[allow(
+        clippy::float_cmp,
+        reason = "every value here is an exact, deterministic result of f64::max/clamp on a \
+                  literal input -- no computed/accumulated float, so exact equality is the \
+                  correct assertion, not an epsilon comparison"
+    )]
+    fn pathological_f64_inputs_never_panic_and_clamp_as_documented() {
+        // Weight: negative-zero is finite and >= 0.0 under IEEE-754 total
+        // ordering via `>=`, so it is preserved as -0.0 by `f64::max(0.0)`
+        // -- `(-0.0_f64).max(0.0) == 0.0` exactly (max normalizes to +0.0).
+        assert_eq!(
+            Weight::new(-0.0).value(),
+            0.0,
+            "-0.0 -> 0.0 (max normalizes sign)"
+        );
+        assert_eq!(
+            Weight::new(f64::MIN_POSITIVE).value(),
+            f64::MIN_POSITIVE,
+            "subnormal-adjacent smallest positive normal preserved exactly"
+        );
+        assert_eq!(
+            Weight::new(f64::MAX).value(),
+            f64::MAX,
+            "f64::MAX preserved exactly -- no upper bound on Weight"
+        );
+        assert_eq!(
+            Weight::new(1e300).value(),
+            1e300,
+            "a huge but finite weight is preserved, not clamped -- regression guard for the \
+             'no upper bound' contract at the extreme end of the finite range"
+        );
+        assert_eq!(
+            Weight::new(f64::MIN).value(),
+            0.0,
+            "f64::MIN (most negative finite) -> 0.0"
+        );
+
+        // FieldB: same pathological set, but bounded to [0.0, 1.0].
+        assert_eq!(FieldB::new(-0.0).value(), 0.0, "-0.0 -> 0.0");
+        assert_eq!(
+            FieldB::new(f64::MIN_POSITIVE).value(),
+            f64::MIN_POSITIVE,
+            "subnormal-adjacent smallest positive normal is within [0,1], preserved exactly"
+        );
+        assert_eq!(
+            FieldB::new(f64::MAX).value(),
+            1.0,
+            "f64::MAX -> clamped to 1.0"
+        );
+        assert_eq!(
+            FieldB::new(1e300).value(),
+            1.0,
+            "huge finite -> clamped to 1.0"
+        );
+        assert_eq!(
+            FieldB::new(f64::MIN).value(),
+            0.0,
+            "f64::MIN -> clamped to 0.0"
+        );
+
+        // with_field itself never panics for any of these, end-to-end.
+        let config = BM25FConfig::new()
+            .with_field("a", f64::NAN, f64::NAN)
+            .with_field("b", f64::INFINITY, f64::INFINITY)
+            .with_field("c", f64::NEG_INFINITY, f64::NEG_INFINITY)
+            .with_field("d", f64::MAX, f64::MAX)
+            .with_field("e", -0.0, -0.0)
+            .with_field("f", 1e300, 1e300)
+            .with_field("g", f64::MIN_POSITIVE, f64::MIN_POSITIVE)
+            .with_field("h", f64::MIN, f64::MIN);
+        assert_eq!(
+            config.len(),
+            8,
+            "every pathological with_field call must succeed, not panic"
+        );
     }
 
-    /// The domain endpoints (`weight == 0.0`, `b == 0.0`, `b == 1.0`) are
-    /// valid and must NOT panic — the check rejects out-of-domain values
-    /// only, never the legal boundary the rest of the suite relies on.
+    /// End-to-end: a negative field weight passed to `with_field` clamps to
+    /// `0.0` (never panics), which makes that field contribute nothing to
+    /// `tf_hat` — composing correctly with `search`'s `score > 0.0` filter.
+    /// A doc matching ONLY in the negative-weight field must NOT appear in
+    /// results, same outcome as `zero_field_weight_contributes_nothing`
+    /// above, proving the clamp and the existing filter compose (no
+    /// phantom `score: 0.0` hit slips through).
     #[test]
-    fn domain_boundary_values_are_accepted() {
-        let _ = BM25FConfig::new()
-            .with_field("zero_weight", 0.0, 0.5)
-            .with_field("b_low", 1.0, 0.0)
-            .with_field("b_high", 1.0, 1.0);
+    fn negative_field_weight_clamps_to_zero_and_is_filtered_from_results() {
+        let config = BM25FConfig::new()
+            .with_field("title", -3.0, 0.75)
+            .with_field("body", 1.0, 0.75);
+        let index = BM25FIndex::build(
+            &config,
+            Tokenizer::WholeIdentifier,
+            [
+                Document {
+                    id: "title_match",
+                    fields: vec![("title", "target"), ("body", "other")],
+                },
+                Document {
+                    id: "no_match_at_all",
+                    fields: vec![("title", "other"), ("body", "other")],
+                },
+            ],
+        );
+        // "target" only ever appears in the clamped-to-0.0 field -> no
+        // document scores above 0.0, so neither appears in ranked output.
+        assert_eq!(index.search("target", 10), Vec::new());
     }
 
     /// The `frontmatter_default` config preserves the design's ordinal
@@ -1041,7 +1274,7 @@ mod tests {
                 .fields
                 .iter()
                 .find(|(n, _)| n == field)
-                .map(|(_, w)| w.weight)
+                .map(|(_, w)| w.weight.value())
                 .expect("field is registered")
         };
         for top in ["name", "id", "tags"] {
