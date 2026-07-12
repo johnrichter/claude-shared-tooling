@@ -40,6 +40,11 @@ regex = "1.13.0"
 # (`profile::CompiledGlobs`) -- `literal_separator` left at its default
 # (`false`) so `*` crosses `/`, matching Python `fnmatch.fnmatch` parity.
 globset = "0.4.18"
+# Workspace path dependency (facetquery <- frontmatter, per the crate
+# boundary doc): the `query` module bridges `ParsedFrontmatter` + `Profile`
+# to facetquery's generic `FacetSource` trait, so a caller parses a
+# `facetquery@1` query once and matches it against many frontmatter files.
+facetquery = { path = "../facetquery" }
 
 [dev-dependencies]
 
