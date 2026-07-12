@@ -308,6 +308,28 @@ impl Profile {
             .find(|n| n.name == name)
             .map(|n| n.facet_type)
     }
+
+    /// The merged pack's required fields, in pack-declared order: each
+    /// entry is `(field name, authorship)`, `authorship` being the pack's
+    /// own declared string (e.g. `"human_authored"`, `"machine_derivable"`).
+    /// The read path the Tier-1 fixer (`crate::fix`) uses to decide which
+    /// required field it may only stub (a placeholder a human/model must
+    /// still author) versus which it can fully repair itself -- driven
+    /// entirely by this schema value, never a hardcoded field-name list.
+    pub fn required_fields(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.pack
+            .required_fields
+            .iter()
+            .map(|rf| (rf.field.as_str(), rf.authorship.as_str()))
+    }
+
+    /// The description-length cap for `file_class`, or `None` if the merged
+    /// pack has no cap for that class (an uncapped class). The same value
+    /// [`crate::validate::validate`] checks a description against.
+    #[must_use]
+    pub fn description_cap(&self, file_class: &str) -> Option<u64> {
+        self.pack.description_caps.get(file_class)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -407,9 +429,8 @@ pub(crate) struct Pack {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub(crate) struct RequiredField {
     pub(crate) field: String,
-    // `authorship`/`source` are read by the pack for provenance and by the
-    // future Tier-1 fixer (M4.P3.T2); `validate` itself only needs `field`.
-    #[allow(dead_code)]
+    /// Read by [`Profile::required_fields`] -- the Tier-1 fixer's
+    /// machine-vs-human boundary; `validate` itself only needs `field`.
     pub(crate) authorship: String,
 }
 

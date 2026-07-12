@@ -59,12 +59,14 @@
 #![deny(unsafe_code)]
 
 mod error;
+mod fix;
 mod parse;
 mod profile;
 pub mod validate;
 mod value;
 
 pub use error::FrontmatterParseError;
+pub use fix::{propose_fix, propose_skeleton, render, FixProposal};
 pub use parse::parse;
 pub use profile::{Dimension, FacetType, MergeWarning, Profile, ProfileError};
 pub use validate::{validate, CoverageRollup, FrontmatterEntry, ScanOutcome, Violation};
