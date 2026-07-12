@@ -54,9 +54,10 @@ pub enum FacetLookup {
 
 /// A facet's type, as declared by its [`FacetSource`].
 ///
-/// `Numeric` and `Date` are "ordered" — eligible for `Range`/`Cmp` matchers.
-/// `String` (the language's default) is not: a range or comparison against
-/// a `String`-typed facet is [`EvalDiagnostic::RangeOnNonOrdered`].
+/// `Numeric`, `Date`, and `DateInterval` are "ordered" — eligible for
+/// `Range`/`Cmp` matchers. `String` (the language's default) is not: a
+/// range or comparison against a `String`-typed facet is
+/// [`EvalDiagnostic::RangeOnNonOrdered`].
 ///
 /// `#[non_exhaustive]` — a future ordered or unordered type may be added
 /// without breaking existing exhaustive-looking match arms (always include
@@ -72,6 +73,12 @@ pub enum FacetType {
     /// (which is order-correct for that shape, so no calendar parsing is
     /// needed).
     Date,
+    /// Ordered — a stored value is `YYYY-MM-DD/YYYY-MM-DD` (both endpoints
+    /// inclusive, `start <= end`), shape-checked the same way as `Date`. A
+    /// file matches a predicate if ANY of its interval values does. See the
+    /// "Date intervals" section below for how `Term`/`Range`/`Cmp` map onto
+    /// interval overlap rather than a single-point comparison.
+    DateInterval,
 }
 
 /// A generic source of facet data — the boundary between this crate and
@@ -251,7 +258,16 @@ fn eval_present(facet: &str, ty: FacetType, values: &[String], matcher: &Matcher
 
     match matcher {
         Matcher::Term(term) => {
-            if values.iter().any(|v| term_matches_value(term, v)) {
+            // On a `DateInterval` facet a term is date/interval-parsed, not
+            // glob-matched — a wildcard term (e.g. `2026-*`) is neither
+            // shape, so `interval_term_matches` reports it a no-match; see
+            // the "Date intervals" section below.
+            let value_hits = if ty == FacetType::DateInterval {
+                values.iter().any(|v| interval_term_matches(term, v))
+            } else {
+                values.iter().any(|v| term_matches_value(term, v))
+            };
+            if value_hits {
                 hit()
             } else {
                 no_match()
@@ -262,7 +278,13 @@ fn eval_present(facet: &str, ty: FacetType, values: &[String], matcher: &Matcher
             // placeholder for exactly one member and carries no meaning to
             // pick between here; the per-term/per-value check below is
             // identical to `Term` in that case regardless of `join`.
-            let term_hits = |term: &Term| values.iter().any(|v| term_matches_value(term, v));
+            let term_hits = |term: &Term| {
+                if ty == FacetType::DateInterval {
+                    values.iter().any(|v| interval_term_matches(term, v))
+                } else {
+                    values.iter().any(|v| term_matches_value(term, v))
+                }
+            };
             let set_hit = match join {
                 SetJoin::Or => terms.iter().any(term_hits),
                 SetJoin::And => !terms.is_empty() && terms.iter().all(term_hits),
@@ -290,6 +312,19 @@ fn eval_present(facet: &str, ty: FacetType, values: &[String], matcher: &Matcher
             if ty == FacetType::String {
                 return non_ordered(facet, ty);
             }
+            if ty == FacetType::DateInterval {
+                // Each bound is a single date (never itself an interval);
+                // an unparseable concrete bound can't be satisfied by
+                // anything, same as `bound_satisfied` below for the
+                // `OrdKey` types.
+                let Some(window) = range_window(lo, hi) else {
+                    return no_match();
+                };
+                let in_range = values
+                    .iter()
+                    .any(|v| parse_interval(v).is_some_and(|s| overlap(&s, &window)));
+                return if in_range { hit() } else { no_match() };
+            }
             let in_range = values.iter().any(|v| {
                 let Some(v) = OrdKey::parse(ty, v) else {
                     return false;
@@ -305,6 +340,17 @@ fn eval_present(facet: &str, ty: FacetType, values: &[String], matcher: &Matcher
         Matcher::Cmp { op, term } => {
             if ty == FacetType::String {
                 return non_ordered(facet, ty);
+            }
+            if ty == FacetType::DateInterval {
+                if !is_date_shape(&term.raw) {
+                    // An unparseable comparison operand can never be
+                    // satisfied — no-match, not a panic.
+                    return no_match();
+                }
+                let satisfies = values.iter().any(|v| {
+                    parse_interval(v).is_some_and(|s| interval_cmp_matches(*op, &s, &term.raw))
+                });
+                return if satisfies { hit() } else { no_match() };
             }
             let Some(operand) = OrdKey::parse(ty, &term.raw) else {
                 // An unparseable comparison operand can never be
@@ -359,7 +405,11 @@ fn cmp_matches(op: CmpOp, value: &OrdKey, operand: &OrdKey) -> bool {
 
 /// A facet value or bound, parsed into its ordered-type representation for
 /// comparison. Only ever constructed for `Numeric`/`Date` — `String` is
-/// gated out before any `OrdKey::parse` call.
+/// gated out before any `OrdKey::parse` call, and `DateInterval` never
+/// reaches it either: `eval_present` handles that type's `Range`/`Cmp`/
+/// `Term`/`Set` matchers itself, via `parse_interval`/`overlap` below,
+/// since a stored interval compares against a query window, not a single
+/// ordered point.
 #[derive(Debug, Clone, PartialEq)]
 enum OrdKey {
     /// A `Numeric` value, parsed as `f64`.
@@ -377,7 +427,7 @@ impl OrdKey {
         match ty {
             FacetType::Numeric => raw.parse::<f64>().ok().map(Self::Num),
             FacetType::Date => is_date_shape(raw).then(|| Self::Date(raw.to_string())),
-            FacetType::String => None,
+            FacetType::String | FacetType::DateInterval => None,
         }
     }
 }
@@ -405,6 +455,116 @@ fn is_date_shape(s: &str) -> bool {
         && bytes[5..7].iter().all(u8::is_ascii_digit)
         && bytes[7] == b'-'
         && bytes[8..10].iter().all(u8::is_ascii_digit)
+}
+
+// ---------------------------------------------------------------------------
+// Date intervals — a `DateInterval` stored value is a closed range
+// (`YYYY-MM-DD/YYYY-MM-DD`, both endpoints inclusive), so matching it is
+// range-overlap against a query [`Window`], not a single-point comparison
+// against an `OrdKey`. A file matches iff ANY of its interval values
+// overlaps (or, for `Cmp`, satisfies) the query.
+// ---------------------------------------------------------------------------
+
+/// A query-side date window: `lo`/`hi` are `None` on an open (unbounded)
+/// side, `Some` date otherwise. Both a bare date and a `[lo TO hi]` range
+/// collapse to this same shape before being tested against a stored
+/// interval.
+struct Window {
+    lo: Option<String>,
+    hi: Option<String>,
+}
+
+/// Parses a `DateInterval` stored value, or a query `Term`'s `A/B` shape:
+/// exactly two `/`-separated date-shaped parts with `start <= end`
+/// (lexically, which is calendar-correct for this fixed-width shape).
+/// `None` for anything else — wrong part count, a non-date-shaped endpoint,
+/// or an inverted range; a malformed stored value is always a silent
+/// no-match, never a diagnostic.
+fn parse_interval(v: &str) -> Option<(String, String)> {
+    let mut parts = v.split('/');
+    let start = parts.next()?;
+    let end = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    if !is_date_shape(start) || !is_date_shape(end) || start > end {
+        return None;
+    }
+    Some((start.to_string(), end.to_string()))
+}
+
+/// Parses a query operand into the [`Window`] it denotes: a bare date `D`
+/// is the single-day window `[D, D]`; `A/B` is `[A, B]`. `None` if `raw` is
+/// neither shape — e.g. a wildcard term is never date/interval-shaped, so
+/// it falls through to here and reports no-match rather than glob-matching.
+fn parse_window(raw: &str) -> Option<Window> {
+    if let Some((lo, hi)) = parse_interval(raw) {
+        return Some(Window {
+            lo: Some(lo),
+            hi: Some(hi),
+        });
+    }
+    is_date_shape(raw).then(|| Window {
+        lo: Some(raw.to_string()),
+        hi: Some(raw.to_string()),
+    })
+}
+
+/// Builds the [`Window`] a `Range` matcher's bounds denote against a
+/// `DateInterval` facet: each side is either open (`Bound::Unbounded`) or a
+/// single date — a `Range` bound is never itself an `A/B` interval. `None`
+/// if a concrete bound isn't date-shaped (an unparseable bound can never be
+/// satisfied, same as `bound_satisfied` for the `OrdKey` types).
+fn range_window(lo: &Bound, hi: &Bound) -> Option<Window> {
+    let side = |bound: &Bound| -> Option<Option<String>> {
+        match bound {
+            Bound::Unbounded => Some(None),
+            Bound::Value(term) => {
+                if is_date_shape(&term.raw) {
+                    Some(Some(term.raw.clone()))
+                } else {
+                    None
+                }
+            }
+        }
+    };
+    Some(Window {
+        lo: side(lo)?,
+        hi: side(hi)?,
+    })
+}
+
+/// `true` if stored interval `(s0, s1)` overlaps query window `w` — an
+/// open (`None`) window side never excludes anything on that end.
+fn overlap(stored: &(String, String), w: &Window) -> bool {
+    let (s0, s1) = stored;
+    w.hi.as_ref().is_none_or(|q1| s0 <= q1) && w.lo.as_ref().is_none_or(|q0| q0 <= s1)
+}
+
+/// A `Term`/`Set` member against a `DateInterval` facet value: parses both
+/// sides (the stored interval and the query operand's window) and checks
+/// overlap. Either side failing to parse is a no-match.
+fn interval_term_matches(term: &Term, value: &str) -> bool {
+    let Some(stored) = parse_interval(value) else {
+        return false;
+    };
+    let Some(window) = parse_window(&term.raw) else {
+        return false;
+    };
+    overlap(&stored, &window)
+}
+
+/// A `Cmp` operand against a `DateInterval` facet value: the operand is
+/// always a single date (never an `A/B` interval), compared against the
+/// stored interval's near endpoint — `s1` for `>`/`>=`, `s0` for `<`/`<=`.
+fn interval_cmp_matches(op: CmpOp, stored: &(String, String), operand: &str) -> bool {
+    let (s0, s1) = stored;
+    match op {
+        CmpOp::Gt => s1.as_str() > operand,
+        CmpOp::Ge => s1.as_str() >= operand,
+        CmpOp::Lt => s0.as_str() < operand,
+        CmpOp::Le => s0.as_str() <= operand,
+    }
 }
 
 // ---------------------------------------------------------------------------

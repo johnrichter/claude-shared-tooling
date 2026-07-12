@@ -471,6 +471,50 @@ fn range_accepted_on_any_facet_name_grammar_is_type_blind() {
 }
 
 // ===========================================================================
+// 6b. `DateInterval` operand shapes -- `/` is not reserved punctuation
+// (`is_reserved_punct` in parser.rs), so a `start/end` operand parses under
+// the unchanged grammar as one ordinary bare-word term, exactly like any
+// other literal_run. `FacetType::DateInterval` is purely an eval-time
+// concern (see tests/date_interval.rs); nothing here changes the grammar.
+// ===========================================================================
+
+#[test]
+fn interval_operand_is_one_literal_term_with_slash_decoded_as_a_literal_char() {
+    assert_eq!(
+        parse("period:2026-04-01/2026-06-30").unwrap().expr,
+        term_pred("period", "2026-04-01/2026-06-30")
+    );
+}
+
+#[test]
+fn interval_range_bounds_are_plain_dates_same_grammar_as_any_other_range() {
+    assert_eq!(
+        parse("period:[2026-04-01 TO 2026-06-30]").unwrap().expr,
+        pred(
+            "period",
+            Matcher::Range {
+                lo: Bound::Value(lit_term("2026-04-01")),
+                hi: Bound::Value(lit_term("2026-06-30")),
+            }
+        )
+    );
+}
+
+#[test]
+fn interval_facet_comparison_parses_like_any_other_cmp() {
+    assert_eq!(
+        parse("period:>2026-01-01").unwrap().expr,
+        pred(
+            "period",
+            Matcher::Cmp {
+                op: CmpOp::Gt,
+                term: lit_term("2026-01-01"),
+            }
+        )
+    );
+}
+
+// ===========================================================================
 // 7. Exists / not-exists (spec: "Exists / not-exists").
 // ===========================================================================
 
