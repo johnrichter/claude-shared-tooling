@@ -20,7 +20,13 @@
 /// bare `yes`/`no` already comes back from the YAML backend as a string,
 /// not a bool/timestamp — this enum simply keeps that "it's a string" fact
 /// visible rather than re-typing it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Serialize`/`Deserialize` are derived so a consumer can persist a parsed
+/// document (e.g. navigator's freshness cache) and read it back losslessly.
+/// `Deserialize` here is for round-tripping a cache's own previously-written
+/// output, not a second entry point for parsing untrusted frontmatter --
+/// [`crate::parse`] remains the only path for that.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum FrontmatterValue {
     /// A single value with no children — string, quoted or bare; integer;
     /// float; bool; or an explicit YAML null — always represented as its
@@ -61,7 +67,12 @@ pub enum FrontmatterValue {
 /// on a third-party ordered-map crate's iteration-order contract). Lookups
 /// are O(n) in field count, which is fine — frontmatter blocks have a
 /// handful of keys, never enough for this to matter.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+///
+/// `Serialize`/`Deserialize` are derived for the same cache-round-trip
+/// reason as [`FrontmatterValue`]'s -- see that type's doc comment. The
+/// derived impl serializes the backing `Vec` as a sequence, so insertion
+/// order survives a round trip (see `value_serde_tests` below).
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct RawFields(Vec<(String, FrontmatterValue)>);
 
 impl RawFields {
@@ -151,5 +162,79 @@ mod tests {
         assert!(raw.is_empty());
         assert_eq!(raw.len(), 0);
         assert!(!raw.contains_key("anything"));
+    }
+}
+
+#[cfg(test)]
+mod value_serde_tests {
+    use super::*;
+
+    #[test]
+    fn scalar_round_trips() {
+        let value = FrontmatterValue::Scalar("x".to_string());
+        let json = serde_json::to_string(&value).unwrap();
+        assert_eq!(
+            serde_json::from_str::<FrontmatterValue>(&json).unwrap(),
+            value
+        );
+    }
+
+    #[test]
+    fn sequence_round_trips() {
+        let value = FrontmatterValue::Sequence(vec!["a".to_string(), "b".to_string()]);
+        let json = serde_json::to_string(&value).unwrap();
+        assert_eq!(
+            serde_json::from_str::<FrontmatterValue>(&json).unwrap(),
+            value
+        );
+    }
+
+    #[test]
+    fn other_round_trips() {
+        let value = FrontmatterValue::Other;
+        let json = serde_json::to_string(&value).unwrap();
+        assert_eq!(
+            serde_json::from_str::<FrontmatterValue>(&json).unwrap(),
+            value
+        );
+    }
+
+    #[test]
+    fn nested_mapping_round_trips_recursively() {
+        // A Mapping whose own value is another Mapping -- proves the
+        // derived impl recurses through FrontmatterValue's own variants,
+        // not just one level.
+        let inner = RawFields::from_ordered_pairs(vec![(
+            "leaf".to_string(),
+            FrontmatterValue::Scalar("v".to_string()),
+        )]);
+        let value = FrontmatterValue::Mapping(RawFields::from_ordered_pairs(vec![
+            ("nested".to_string(), FrontmatterValue::Mapping(inner)),
+            (
+                "tags".to_string(),
+                FrontmatterValue::Sequence(vec!["t1".to_string()]),
+            ),
+        ]));
+        let json = serde_json::to_string(&value).unwrap();
+        assert_eq!(
+            serde_json::from_str::<FrontmatterValue>(&json).unwrap(),
+            value
+        );
+    }
+
+    #[test]
+    fn raw_fields_round_trip_preserves_insertion_order() {
+        let raw = RawFields::from_ordered_pairs(vec![
+            ("z".to_string(), FrontmatterValue::Scalar("1".to_string())),
+            ("a".to_string(), FrontmatterValue::Scalar("2".to_string())),
+        ]);
+        let json = serde_json::to_string(&raw).unwrap();
+        let restored: RawFields = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, raw);
+        assert_eq!(
+            restored.iter().map(|(k, _)| k).collect::<Vec<_>>(),
+            vec!["z", "a"],
+            "deserialized RawFields must replay the same key order, not resort"
+        );
     }
 }
