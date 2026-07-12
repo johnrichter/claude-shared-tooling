@@ -129,11 +129,59 @@ per-namespace `type`) — the grammar accepts `facet:[..]`/`facet:>..` on any fa
 
 | Facet type | Range / comparison eligible? |
 |---|---|
-| `date`, `numeric` (ordered types) | Yes |
+| `date`, `numeric`, `date-interval` (ordered types) | Yes |
 | `string` (default) | No — equality and wildcard matching only |
 
 A range or comparison predicate targeting a `string`-typed facet is a `RangeOnNonOrdered` eval-time
-diagnostic (warning); that predicate is a no-match, and the query still runs.
+diagnostic (warning); that predicate is a no-match, and the query still runs. `date-interval` is
+ordered and never raises this diagnostic — see "Date intervals" below for its own matching rules.
+
+## Date intervals
+
+`date-interval` is an ordered facet type (additive as of this section — `facetquery@1` is unchanged;
+no grammar or version bump). A stored value is a closed date range:
+
+```
+YYYY-MM-DD/YYYY-MM-DD
+```
+
+Single `/` separator, both endpoints inclusive, `start <= end`. Shape-checked only (reused from
+`date`'s `YYYY-MM-DD` check — no calendar validation), compared lexically per endpoint (fixed-width
+dates compare calendar-correctly lexically, exactly like the point `date` type). `/` is not reserved
+punctuation in the grammar, so `start/end` parses as one ordinary literal token — no grammar change
+is needed to write it as a facet value, range bound, or comparison operand.
+
+A file matches a `date-interval` predicate iff **any** of its interval values matches:
+
+| Matcher | Query example | Condition (stored interval `[s0, s1]`) |
+|---|---|---|
+| `Range{lo,hi}` | `period:[2026-04-01 TO 2026-06-30]` | Overlap: `s0 <= hi and lo <= s1` (`*` on either side is open/unbounded; `[* TO *]` matches every well-formed stored value) |
+| `Term` = single date `D` | `period:2026-05-15` | `s0 <= D <= s1` |
+| `Term` = interval `A/B` | `period:2026-04-01/2026-06-30` | Overlap against `[A, B]` |
+| `Cmp >D` | `period:>2026-01-01` | `s1 > D` |
+| `Cmp >=D` | `period:>=2026-01-01` | `s1 >= D` |
+| `Cmp <D` | `period:<2026-01-01` | `s0 < D` |
+| `Cmp <=D` | `period:<=2026-01-01` | `s0 <= D` |
+| `Set{terms,join}` | `period:(2026-01-15 OR 2026-08-01)` | Per-member overlap, combined by `join` |
+| `Exists` | `period:*` | Facet has >= 1 value (unchanged from every other type) |
+
+Worked example: `period:>2026-01-01` matches a stored value `2025-12-01/2026-02-01` — the interval
+started before the operand, but its end (`2026-02-01`) is past it, which is what `Cmp` against the
+far endpoint captures.
+
+**A `Term` on a `date-interval` facet is date/interval-parsed, not glob-matched** — deliberately
+different from the point `date` type, whose `Term` matcher glob-matches the raw stored text. A
+wildcard term (`period:2026-*`) is neither a bare date nor an `A/B` interval, so it fails to parse
+into a window and is a no-match, never a partial/prefix hit.
+
+**Malformed input is always a silent no-match, never a diagnostic or panic:**
+
+- A malformed **stored** value — not `date/date` shaped, missing or extra `/`-separated parts,
+  a non-date-shaped endpoint, or `start > end` — is a no-match for that value; no `EvalDiagnostic`
+  is raised (same treatment as an unparseable point-`date` value today).
+- A malformed **query operand** — a `Cmp`/`Range`-bound scalar that isn't a shape-valid date, or a
+  `Term`/`Set` member that's neither a bare date nor an `A/B` interval — is a no-match; no new
+  `ParseError` and no `EvalDiagnostic`.
 
 ## Exists / not-exists
 
@@ -175,6 +223,8 @@ one of the following is a **defined**, specified outcome — never an implementa
 | Reference to a facet the evaluator's facet source doesn't know | Eval-time | `UnknownFacet` diagnostic (warning). That predicate is a no-match; query still runs. |
 | Range or comparison against a `string`-typed facet | Eval-time | `RangeOnNonOrdered` diagnostic (warning). That predicate is a no-match; query still runs. |
 | Reserved word (`AND`/`OR`/`NOT`/`TO`) written unescaped, unquoted, standing alone where a term/bareword is expected | Parse-time | Not treated as a bareword — `ParseError` (unexpected token / incomplete operator). Quote or escape to search the literal word. |
+| Malformed `date-interval` stored value (not `date/date` shaped, wrong endpoint count, `start > end`, non-date-shaped endpoint) | Eval-time | Silent no-match for that value — no diagnostic (same treatment as an unparseable point-`date` value). |
+| Malformed `date-interval` query operand (a `Cmp`/`Range`-bound scalar or `Term`/`Set` member that isn't a shape-valid date or `A/B` interval, e.g. a wildcard) | Eval-time | No-match — no new `ParseError`, no diagnostic. |
 
 ## Conformance
 
@@ -186,4 +236,6 @@ one of the following is a **defined**, specified outcome — never an implementa
   conformance test suite asserts crate ⟺ spec/grammar agreement — treat a divergence as a crate bug.
 - **Versioning:** any change that alters accepted syntax or a defined behavior above bumps the
   version tag (`facetquery@2`, ...). This document and the paired grammar describe `facetquery@1`
-  only, throughout.
+  only, throughout. `date-interval` (see "Date intervals" above) is additive under `facetquery@1`:
+  it introduces no new syntax (`/` was already unreserved punctuation) and changes no existing
+  type's behavior, so it does not bump the version tag.
