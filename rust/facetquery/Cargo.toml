@@ -1,0 +1,18 @@
+[package]
+name = "facetquery"
+version = "0.1.0"
+edition = "2021"
+description = "Frontmatter-agnostic boolean facet-query language — parses a query string to an AST, evaluates it against a generic facet source."
+license = "MIT"
+publish = false
+
+[dependencies]
+# Operator-approved: MIT license, actively maintained (1.x, 2026), pure-Rust
+# (no CGO), combinator parser with in-core positioned error reporting — this
+# crate's query-string parser (a later task) builds on it directly.
+winnow = "1.0.3"
+
+[dev-dependencies]
+
+[lints]
+workspace = true

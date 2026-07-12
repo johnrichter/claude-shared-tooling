@@ -1,0 +1,170 @@
+(* ==========================================================================
+   facetquery@1 -- formal grammar for the facetquery boolean facet-query
+   language. Normative together with facetquery-language.spec.md (same
+   directory) -- this file is the syntax, the spec is the prose companion
+   (semantics, escaping table, type-gating, edge cases). Reference
+   implementation: ai-shared-lib-public/rust/facetquery (winnow parser); a
+   conformance test in that crate asserts crate <-> this grammar agreement.
+
+   Notation: ISO/IEC 14977 EBNF. "=" defines a production, ";" ends it,
+   "," is sequence, "|" is alternation, "{ }" is zero-or-more, "[ ]" is
+   optional, "( )" groups, 'x' or "x" is a literal, "?...?" is a special
+   side-condition on a terminal (plain English, not itself a terminal),
+   "A - B" is "A but not B" (except).
+
+   Alternation is PEG-style ordered choice: for any "|", the first
+   alternative that matches wins -- no backtracking past a committed
+   choice. This is a deliberate, documented resolution of the few surface
+   overlaps below (e.g. `set_value`/`range_value`/`cmp_value`/`term` all
+   start on a distinct leading character, so dispatch is unambiguous by
+   construction) and matches the combinator-parser reference
+   implementation exactly.
+
+   Entry point: `query`. A conforming parse consumes the ENTIRE input up
+   to `eoi`; any unconsumed remainder is a positioned ParseError at the
+   first unconsumed character (this is how a trailing/dangling operator,
+   a stray closing paren, etc. are diagnosed -- see the spec's edge-case
+   table, not a separate grammar rule).
+   ========================================================================== *)
+
+(* ---------------------------------------------------------------------------
+   Entry point
+   --------------------------------------------------------------------------- *)
+
+query               = ws , [ expr ] , ws , eoi ;
+(* [expr] absent (empty or all-whitespace input) => match-all, at evaluation
+   time -- the grammar accepts it; "match everything" is not a syntax form. *)
+
+(* ---------------------------------------------------------------------------
+   Boolean structure. Precedence NOT > AND > OR, left-to-right; parentheses
+   override -- encoded directly by this production nesting (NOT binds to a
+   single primary; AND chains not_exprs; OR chains and_exprs, loosest).
+   --------------------------------------------------------------------------- *)
+
+expr                = or_expr ;
+
+or_expr             = and_expr , { ws1 , "OR" , ws1 , and_expr } ;
+
+and_expr            = not_expr , { and_op , not_expr } ;
+and_op              = ws1 , [ "AND" , ws1 ] ;
+(* Mandatory whitespace always separates two adjacent predicates/terms; the
+   "AND" keyword itself is optional -- its absence is implicit-AND-by-
+   adjacency. There is exactly one AND_op shape whether the keyword is
+   written or not. *)
+
+not_expr            = [ negation ] , primary ;
+negation            = ( "NOT" , ws1 ) | "-" ;
+(* "NOT" is a word operator and needs trailing whitespace before its operand;
+   "-" attaches with NO whitespace directly to the primary that follows.
+   Canonical token + documented alias; both produce the same single negation
+   node in the AST -- never two negation concepts. *)
+
+primary             = group | predicate | term ;
+
+group               = "(" , ws , expr , ws , ")" ;
+
+(* ---------------------------------------------------------------------------
+   Predicates: facet_key ":" predicate_value. Each alternative below starts
+   on a distinct leading character/token, so ordered choice never needs to
+   backtrack across them.
+   --------------------------------------------------------------------------- *)
+
+predicate           = facet_key , ":" , predicate_value ;
+
+predicate_value     = set_value | range_value | cmp_value | term ;
+(* No separate "exists" syntax -- facet:* / NOT facet:* / -facet:* parse as
+   an ordinary `term` (the single wildcard segment "*"); existence is a
+   semantic reading of that term shape, applied by the reference AST, not a
+   distinct production. See the spec's "Exists / not-exists" section. *)
+
+set_value           = "(" , ws , term , { ws1 , set_op , ws1 , term } , ws , ")" ;
+set_op              = "OR" | "AND" ;
+(* Every set_op inside one set_value must be the SAME keyword -- a set
+   shorthand carries exactly one join for the whole group (one AST
+   Matcher::Set{terms, join}), never a mix. Nest separate predicates
+   (not a set group) to mix AND/OR across facets or across groups. *)
+
+range_value         = "[" , ws , bound , ws1 , "TO" , ws1 , bound , ws , "]" ;
+bound               = "*" | scalar ;
+(* "*" on either side means that side is unbounded. Whether a given facet
+   is ELIGIBLE for range_value/cmp_value at all is an eval-time check
+   against the facet's type (from the facet source) -- not expressible in,
+   or constrained by, this grammar. See the spec's type-gating section. *)
+
+cmp_value           = cmp_op , scalar ;
+cmp_op              = ">=" | "<=" | ">" | "<" ;
+
+(* ---------------------------------------------------------------------------
+   Terms: equality values, full-text/bareword search, and quoted phrases.
+   --------------------------------------------------------------------------- *)
+
+term                = quoted_phrase | wildcard_term ;
+
+wildcard_term       = wild_segment , { wild_segment } ;
+wild_segment        = "*" | "?" | literal_run ;
+(* "*" = zero-or-more of any character; "?" = exactly one of any character.
+   Both are wildcard operators ONLY here (outside a quoted_phrase); inside
+   a quoted_phrase every character, including "*" and "?", is literal --
+   see `phrase_char`. *)
+
+literal_run         = reserved_free_run - reserved_word ;
+reserved_free_run   = bare_char , { bare_char } ;
+reserved_word       = "AND" | "OR" | "NOT" | "TO" ;
+(* An exact, case-sensitive, WHOLE-run match against a reserved word is
+   excluded from bareword text -- AND/OR/NOT/TO are always operators when
+   they appear unescaped and unquoted. Escaping any single character of
+   the run (e.g. \AND) removes it from this exclusion and searches the
+   literal word; quoting ("AND") always works too. This exclusion does NOT
+   apply to `facet_key` (already unambiguous: a facet key is always
+   followed immediately by ":") and does not apply inside a quoted_phrase
+   (quoting disables it entirely). *)
+
+(* ---------------------------------------------------------------------------
+   Scalars: range-bound / comparison operands. Exact tokens -- no wildcard
+   segments (a bound/comparison value is compared for order, not pattern-
+   matched), reusing the same literal-text rules as a bareword.
+   --------------------------------------------------------------------------- *)
+
+scalar              = quoted_phrase | literal_run ;
+
+(* ---------------------------------------------------------------------------
+   Facet keys.
+   --------------------------------------------------------------------------- *)
+
+facet_key           = key_head , { key_tail } ;
+key_head            = letter | digit | "_" ;
+key_tail            = letter | digit | "_" | "-" | "." ;
+
+(* ---------------------------------------------------------------------------
+   Quoting / escaping.
+   --------------------------------------------------------------------------- *)
+
+quoted_phrase       = '"' , { phrase_char } , '"' ;
+phrase_char         = escape_seq | ?any character except '"' and '\'? ;
+escape_seq          = "\" , ?any single character? ;
+(* The single escape character \ makes the NEXT character literal, both
+   inside and outside a quoted_phrase. Inside quotes, only '"' and '\'
+   ever need it -- every other character, including * ? : ( ) [ ] < >, is
+   already literal there. Outside quotes it escapes any reserved
+   character (see `bare_char`), including a leading '-'. *)
+
+bare_char           = escape_seq
+                     | ?any character except whitespace, '"', '\', ':',
+                                              '(', ')', '[', ']', '*', '?',
+                                              '<', '>'? ;
+(* The reserved-character set a bareword/scalar must escape or quote to
+   use literally: whitespace, " \ : ( ) [ ] * ? < >, plus -- only as the
+   FIRST character of a not_expr's primary -- a leading '-' (see
+   `negation`; a hyphen elsewhere in a token, e.g. facet:abc-123, is
+   always literal). *)
+
+(* ---------------------------------------------------------------------------
+   Lexical primitives.
+   --------------------------------------------------------------------------- *)
+
+ws                  = { wschar } ;              (* zero or more: cosmetic padding *)
+ws1                 = wschar , { wschar } ;      (* one or more: mandatory separator *)
+wschar              = ' ' | '\t' | '\n' | '\r' ;
+letter              = 'A' … 'Z' | 'a' … 'z' ;
+digit               = '0' … '9' ;
+eoi                 = ?end of input -- not a character? ;

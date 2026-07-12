@@ -3,7 +3,8 @@ resolver = "2"
 members = [
     "bm25",
     "frontmatter",
-    # M2.*: navigator symbol crate (tree-sitter-based) joins here as a third member.
+    "facetquery",
+    # M2.*: navigator symbol crate (tree-sitter-based) joins here as a fourth member.
 ]
 
 # Shared lints enforced across every workspace member — each member's
