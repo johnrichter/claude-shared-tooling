@@ -1,14 +1,13 @@
 //! `facetquery` — a pure, frontmatter-agnostic boolean facet-query language.
 //!
-//! # Scope (this task — parser + AST, `facetquery@1`)
-//! Parses a query string into the AST defined in [`ast`] via [`parse`].
-//! **Parse-time only**: every error [`parse`] can return is a syntax
-//! violation the query string alone determines — see [`ParseError`]'s doc
-//! comment for the parse-time/eval-time boundary this crate observes
-//! throughout. Evaluating a parsed [`Query`] against a facet source (and
-//! the eval-time diagnostics that come with that — unknown facet, range
-//! against a non-ordered facet type) is a separate, later task; no
-//! evaluator lives in this crate yet.
+//! # Scope (`facetquery@1`)
+//! Parses a query string into the AST defined in [`ast`] via [`parse`], and
+//! evaluates a parsed [`Query`] against any [`FacetSource`] via [`evaluate`]
+//! (see [`eval`]). **Parse-time vs eval-time**: every error [`parse`] can
+//! return is a syntax violation the query string alone determines; every
+//! [`EvalDiagnostic`] instead needs the facet source too (a facet's
+//! existence, a facet's type) — see [`ParseError`]'s and [`eval`]'s doc
+//! comments for that boundary.
 //!
 //! Normative spec: `schemas/facetquery/facetquery-language.spec.md` +
 //! `facetquery.ebnf` (same directory), both in this repo. Any divergence
@@ -34,10 +33,12 @@
 
 pub mod ast;
 mod error;
+pub mod eval;
 mod parser;
 
 pub use ast::{Bound, CmpOp, Expr, Matcher, Predicate, Query, Seg, SetJoin, Term};
 pub use error::{Location, ParseError, ParseErrorKind};
+pub use eval::{evaluate, EvalDiagnostic, FacetLookup, FacetSource, FacetType, MatchResult};
 pub use parser::parse;
 
 /// Returns this crate's semantic version, read from `Cargo.toml` at compile
