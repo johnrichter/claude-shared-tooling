@@ -332,6 +332,41 @@ impl Profile {
     }
 }
 
+/// The bundled core profile (`core@1`) JSON text, for feeding
+/// [`Profile::from_packs`]. The same text [`Profile::bundled_psa_apm`] and
+/// [`Profile::from_pack_json`] already embed internally -- exposed here so
+/// a caller orchestrating its own `from_packs` call (interleaving named
+/// bundles with its own committed-path packs) never needs a second copy of
+/// this crate's schema data.
+#[must_use]
+pub fn embedded_core_json() -> &'static str {
+    EMBEDDED_CORE_JSON
+}
+
+/// Resolves a named bundle to its embedded extension-pack JSON text, for
+/// feeding [`Profile::from_packs`] alongside committed-path packs a caller
+/// reads itself. `name` is matched against the embedded psa-apm pack's own
+/// declared `version` field (e.g. `"psa-apm@1"`), read from the pack's JSON
+/// at call time rather than duplicated as a separate literal -- so the
+/// resolver key can never drift from the pack it returns. Returns `None`
+/// for any unrecognized name.
+///
+/// # Panics
+/// Never: the embedded pack JSON is this crate's own committed schema
+/// file, whose shape (a JSON object with a string `version` field) this
+/// crate's own tests pin -- see [`Profile::bundled_psa_apm`]'s panic-safety
+/// argument.
+#[must_use]
+pub fn embedded_pack_json(name: &str) -> Option<&'static str> {
+    let declared: serde_json::Value = serde_json::from_str(EMBEDDED_PSA_APM_PACK_JSON)
+        .expect("EMBEDDED_PSA_APM_PACK_JSON must deserialize; see profile::tests");
+    let declared_name = declared
+        .get("version")
+        .and_then(serde_json::Value::as_str)
+        .expect("embedded psa-apm pack JSON must declare a string 'version'");
+    (name == declared_name).then_some(EMBEDDED_PSA_APM_PACK_JSON)
+}
+
 // ---------------------------------------------------------------------------
 // Core profile (mechanisms + message templates)
 // ---------------------------------------------------------------------------
@@ -1370,6 +1405,81 @@ mod tests {
     fn invalid_pack_json_is_a_typed_error_not_a_panic() {
         let result = Profile::from_pack_json("{ not json");
         assert!(matches!(result, Err(ProfileError::InvalidPack(_))));
+    }
+
+    // -- embedded_core_json / embedded_pack_json (navigator's orchestration
+    // -- entry points) -------------------------------------------------------
+
+    #[test]
+    fn embedded_core_json_is_non_empty_and_parses_as_a_json_object() {
+        let json = embedded_core_json();
+        assert!(!json.is_empty());
+        let value: serde_json::Value = serde_json::from_str(json).expect("must parse as JSON");
+        assert!(value.is_object());
+    }
+
+    #[test]
+    fn embedded_pack_json_resolves_the_psa_apm_name_and_rejects_unknown_names() {
+        assert!(embedded_pack_json("does-not-exist@9").is_none());
+        let pack_json = embedded_pack_json("psa-apm@1").expect("psa-apm@1 must resolve");
+        assert_eq!(pack_json, EMBEDDED_PSA_APM_PACK_JSON);
+    }
+
+    #[test]
+    fn embedded_pack_json_resolver_key_matches_the_pack_own_declared_identity() {
+        // Drift guard: the name embedded_pack_json resolves for must be
+        // exactly the pack's own declared `version`, not a separately
+        // maintained literal that could fall out of sync.
+        let declared = bundled_pack_as_value_standalone();
+        let declared_name = declared["version"]
+            .as_str()
+            .expect("bundled pack must declare a string version");
+        assert!(embedded_pack_json(declared_name).is_some());
+    }
+
+    #[test]
+    fn embedded_pack_json_rejects_empty_name() {
+        assert!(embedded_pack_json("").is_none());
+    }
+
+    #[test]
+    fn embedded_pack_json_rejects_whitespace_padded_valid_name() {
+        // Exact match only -- no trimming of the caller-supplied name.
+        assert!(embedded_pack_json(" psa-apm@1 ").is_none());
+        assert!(embedded_pack_json("psa-apm@1 ").is_none());
+        assert!(embedded_pack_json(" psa-apm@1").is_none());
+    }
+
+    #[test]
+    fn embedded_pack_json_rejects_prefix_or_substring_of_valid_name() {
+        // No partial/prefix match -- a substring of the declared version is
+        // not the declared version.
+        assert!(embedded_pack_json("psa-apm").is_none());
+        assert!(embedded_pack_json("psa-apm@").is_none());
+        assert!(embedded_pack_json("sa-apm@1").is_none());
+        assert!(embedded_pack_json("psa-apm@11").is_none());
+    }
+
+    #[test]
+    fn embedded_pack_json_is_case_sensitive() {
+        assert!(embedded_pack_json("PSA-APM@1").is_none());
+        assert!(embedded_pack_json("Psa-Apm@1").is_none());
+    }
+
+    #[test]
+    fn embedded_accessors_round_trip_through_from_packs_matching_bundled_psa_apm() {
+        let core_json = embedded_core_json();
+        let pack_json = embedded_pack_json("psa-apm@1").expect("psa-apm@1 must resolve");
+        let (profile, warnings) = Profile::from_packs(core_json, &[pack_json])
+            .expect("embedded core + pack must merge cleanly");
+        assert!(warnings.is_empty());
+
+        let bundled = Profile::bundled_psa_apm();
+        assert_eq!(profile.core.version, bundled.core.version);
+        assert_eq!(
+            profile.required_fields().collect::<Vec<_>>(),
+            bundled.required_fields().collect::<Vec<_>>()
+        );
     }
 
     // -- SDET: never-panic on malformed/empty/wrong-shape profile JSON -----

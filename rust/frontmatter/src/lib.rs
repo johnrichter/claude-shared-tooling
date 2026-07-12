@@ -73,7 +73,10 @@ mod value;
 pub use error::FrontmatterParseError;
 pub use fix::{propose_fix, propose_skeleton, render, FixProposal};
 pub use parse::parse;
-pub use profile::{Dimension, FacetType, MergeWarning, Profile, ProfileError};
+pub use profile::{
+    embedded_core_json, embedded_pack_json, Dimension, FacetType, MergeWarning, Profile,
+    ProfileError,
+};
 pub use query::{matches, FrontmatterFacetSource};
 pub use validate::{validate, CoverageRollup, FrontmatterEntry, ScanOutcome, Violation};
 pub use value::{FrontmatterValue, RawFields};
