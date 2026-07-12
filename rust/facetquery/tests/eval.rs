@@ -250,6 +250,19 @@ fn not_exists_matches_when_facet_absent() {
     );
 }
 
+#[test]
+fn exists_does_not_match_a_schema_known_facet_with_zero_values() {
+    // Present-but-valueless is a real source shape (a schema-known facet
+    // the current document just doesn't set) — pins that Exists requires
+    // an actual value, not merely a `Present` lookup result, and that this
+    // case raises no `UnknownFacet` diagnostic (the source did know the
+    // name).
+    let source = FixtureSource::new("").with("owner", FacetType::String, &[]);
+    let result = run(pred("owner", Matcher::Exists), &source);
+    assert!(!result.matched);
+    assert!(result.diagnostics.is_empty());
+}
+
 // ===========================================================================
 // Range / comparison — type-gated
 // ===========================================================================

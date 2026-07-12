@@ -178,17 +178,17 @@ const CODE_DESCRIPTION_NOT_TOP_LEVEL: &str = "DESCRIPTION_NOT_TOP_LEVEL";
 /// OVERRIDING the top-level one. Skills/Agents/Rules nest their
 /// id/tags/links/updated/description under `workspace:`; validation always
 /// runs against this merged view so one rule set covers both styles.
-struct Effective<'a> {
+pub(crate) struct Effective<'a> {
     pairs: Vec<(String, &'a FrontmatterValue)>,
 }
 
 impl<'a> Effective<'a> {
-    fn get(&self, key: &str) -> Option<&'a FrontmatterValue> {
+    pub(crate) fn get(&self, key: &str) -> Option<&'a FrontmatterValue> {
         self.pairs.iter().find(|(k, _)| k == key).map(|(_, v)| *v)
     }
 }
 
-fn flatten(raw: &RawFields) -> Effective<'_> {
+pub(crate) fn flatten(raw: &RawFields) -> Effective<'_> {
     let mut pairs: Vec<(String, &FrontmatterValue)> = raw
         .iter()
         .filter(|(k, _)| *k != "workspace")
@@ -212,7 +212,7 @@ fn flatten(raw: &RawFields) -> Effective<'_> {
 /// -- a YAML explicit null (`key:` with nothing after it) -- also counts as
 /// missing, since "key present but carrying no value" is the same as
 /// absence for a required-field check.
-fn is_missing_value(value: Option<&FrontmatterValue>) -> bool {
+pub(crate) fn is_missing_value(value: Option<&FrontmatterValue>) -> bool {
     match value {
         Some(FrontmatterValue::Scalar(s)) => s.trim().is_empty(),
         Some(FrontmatterValue::Sequence(_) | FrontmatterValue::Mapping(_)) => false,
@@ -229,7 +229,7 @@ fn is_missing_value(value: Option<&FrontmatterValue>) -> bool {
 /// `file_class.note`). Matching itself is `profile.globs`' pre-compiled
 /// `GlobSet` (see `crate::profile::CompiledGlobs`); this function only
 /// resolves the winning rule's `class`.
-fn classify_file_class(rel_path: &str, profile: &Profile) -> String {
+pub(crate) fn classify_file_class(rel_path: &str, profile: &Profile) -> String {
     match profile.globs.file_class_rule_index(rel_path) {
         Some(index) => profile.pack.file_class.rules[index].class.clone(),
         None => profile.pack.file_class.default.clone(),

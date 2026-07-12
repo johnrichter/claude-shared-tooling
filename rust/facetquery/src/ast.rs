@@ -95,8 +95,11 @@ pub enum Matcher {
         term: Term,
     },
     /// `facet:*` (or its negation, `NOT facet:*` / `-facet:*`, via the
-    /// surrounding `Expr::Not`) — matches when the facet is present on the
-    /// document, with any value. Not a distinct grammar production: a term
+    /// surrounding `Expr::Not`) — matches when the facet has at least one
+    /// value on the document (a schema-known facet the document simply
+    /// doesn't set is `Present` with empty `values`, per
+    /// [`crate::eval::FacetLookup::Present`]'s doc, and does NOT satisfy
+    /// this). Not a distinct grammar production: a term
     /// of exactly one segment, `Seg::StarWild`, written as a facet's value,
     /// is reclassified from `Matcher::Term` to this variant by the parser.
     /// A bareword (no `facet:` prefix) that is the single wildcard segment

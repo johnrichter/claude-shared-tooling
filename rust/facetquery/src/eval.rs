@@ -38,8 +38,12 @@ pub enum FacetLookup {
     /// The facet source has never heard of this facet name.
     Unknown,
     /// The facet is known, with its declared type and every value the
-    /// current document/entity has for it (possibly empty — a facet can be
-    /// present-but-valueless and still satisfy `Exists`).
+    /// current document/entity has for it. `values` may be empty — a
+    /// schema-known facet the current document simply doesn't set is still
+    /// `Present` (never `Unknown`, which is reserved for a facet name the
+    /// source's schema has no entry for at all); see [`Matcher::Exists`]
+    /// for why "present" and "exists" are deliberately NOT the same
+    /// question.
     Present {
         /// The facet's declared type — governs range/comparison eligibility.
         ty: FacetType,
@@ -269,9 +273,19 @@ fn eval_present(facet: &str, ty: FacetType, values: &[String], matcher: &Matcher
                 no_match()
             }
         }
-        // Presence with any value is exactly what this branch already
-        // established by reaching `FacetLookup::Present` at all.
-        Matcher::Exists => hit(),
+        // "Exists" means at least one value, not merely a schema-known
+        // facet name: a source may return `Present` with an empty `values`
+        // for a facet its schema knows but this document doesn't set (so a
+        // lookup by that name is never spuriously `UnknownFacet`), and
+        // `Exists` must not treat that as a hit -- otherwise every
+        // schema-known-but-absent facet would satisfy `facet:*`.
+        Matcher::Exists => {
+            if values.is_empty() {
+                no_match()
+            } else {
+                hit()
+            }
+        }
         Matcher::Range { lo, hi } => {
             if ty == FacetType::String {
                 return non_ordered(facet, ty);

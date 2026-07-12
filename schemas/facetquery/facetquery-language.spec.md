@@ -137,8 +137,13 @@ diagnostic (warning); that predicate is a no-match, and the query still runs.
 
 ## Exists / not-exists
 
-- `facet:*` — **exists**: matches when the facet is present on the document, with any value.
-- `NOT facet:*` / `-facet:*` — **not-exists**: matches when the facet is absent.
+- `facet:*` — **exists**: matches when the facet has at least one value on the document (any
+  value, whatever it is).
+- `NOT facet:*` / `-facet:*` — **not-exists**: matches when the facet has zero values — either
+  the source's schema has no such facet at all, or the schema knows the facet but this document
+  doesn't set it. Both are "no values", so both fail exists the same way; the eval-time
+  distinction between them is `UnknownFacet` (schema doesn't know the name) vs. no diagnostic at
+  all (schema knows it, this document just has none) — see `FacetLookup::Present`'s doc.
 
 Not separate syntax. `facet:*` parses as an ordinary predicate whose value is the single wildcard
 segment `*` — a ordinary `term`, matching any value the facet has. The reference AST recognizes a
@@ -161,8 +166,8 @@ one of the following is a **defined**, specified outcome — never an implementa
 | Unexpected/stray token (stray `)`, two operators back to back, adjacent atoms with no separating whitespace, e.g. `facet:a(b)`) | Parse-time | `ParseError`, positioned. Query does not run. |
 | Unterminated quoted phrase | Parse-time | `ParseError`, positioned. Query does not run. |
 | Malformed range (missing `TO`, missing `[`/`]`) | Parse-time | `ParseError`, positioned. Query does not run. |
-| `facet:*` | — | **Exists** — matches when the facet is present, any value. |
-| `NOT facet:*` / `-facet:*` | — | **Not-exists** — matches when the facet is absent. |
+| `facet:*` | — | **Exists** — matches when the facet has at least one value (any value). |
+| `NOT facet:*` / `-facet:*` | — | **Not-exists** — matches when the facet has zero values (schema-unknown, or schema-known but unset on this document). |
 | Wildcard (`*`/`?`) inside a quoted phrase | — | Literal character — no wildcard expansion. |
 | Unescaped leading `-` before a value (e.g. searching for the literal text `-5`) | — | Parses as **negation** of the term that follows, not a literal leading dash. Quote (`"-5"`) or escape (`\-5`) to get the literal value. |
 | Mixed `AND`/`OR` inside one `facet:( ... )` set group | Parse-time | `ParseError` — a set group carries exactly one join; nest predicates to mix joins. |

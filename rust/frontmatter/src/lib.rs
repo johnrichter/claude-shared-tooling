@@ -48,6 +48,10 @@
 //!   schema-checked [`validate::FrontmatterEntry`] shape. It needs nothing
 //!   from `parse` beyond the already-public [`ParsedFrontmatter`] type, so
 //!   it slots in as a new sibling module with no change to this task's code.
+//! - `query` -- [`query::FrontmatterFacetSource`] and [`query::matches`],
+//!   bridging `ParsedFrontmatter` + `Profile` to the `facetquery` crate's
+//!   generic `FacetSource` trait, so a `facetquery@1` query string can be
+//!   matched against a frontmatter file.
 //!
 //! # Determinism
 //! [`parse::parse`] is a pure function of its `&str` input: identical input
@@ -59,14 +63,18 @@
 #![deny(unsafe_code)]
 
 mod error;
+mod fix;
 mod parse;
 mod profile;
+mod query;
 pub mod validate;
 mod value;
 
 pub use error::FrontmatterParseError;
+pub use fix::{propose_fix, propose_skeleton, render, FixProposal};
 pub use parse::parse;
-pub use profile::{Profile, ProfileError};
+pub use profile::{Dimension, FacetType, MergeWarning, Profile, ProfileError};
+pub use query::{matches, FrontmatterFacetSource};
 pub use validate::{validate, CoverageRollup, FrontmatterEntry, ScanOutcome, Violation};
 pub use value::{FrontmatterValue, RawFields};
 

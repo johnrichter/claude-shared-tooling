@@ -37,7 +37,7 @@
     { "name": "product", "cardinality": "optional", "parents": ["suite"], "source": "schema.py:78-81 NAMESPACE_PARENTS (product→(suite,)); CLAUDE.md product requires suite." },
     { "name": "suite", "cardinality": "optional", "source": "CLAUDE.md `suite:` optional (parent of product/feature)." },
     { "name": "source", "cardinality": "optional", "report_only": true, "source": "schema.py:84 REPORT_ONLY_NAMESPACES; CLAUDE.md `source:` report-only + report-required." },
-    { "name": "period", "cardinality": "optional", "report_only": true, "source": "schema.py:84 REPORT_ONLY_NAMESPACES; CLAUDE.md `period:` report-only + report-required, format-validated." },
+    { "name": "period", "cardinality": "optional", "report_only": true, "type": "date", "source": "schema.py:84 REPORT_ONLY_NAMESPACES; CLAUDE.md `period:` report-only + report-required, format-validated. `type: date` — a downstream range-eligibility consumer (facetquery) treats this facet as comparable/orderable, not just equality-matchable." },
     { "name": "audience", "cardinality": "optional", "report_only": true, "source": "schema.py:84 REPORT_ONLY_NAMESPACES; CLAUDE.md `audience:` report-only, optional." },
     { "name": "cadence", "cardinality": "optional", "report_only": true, "source": "schema.py:84 REPORT_ONLY_NAMESPACES; CLAUDE.md `cadence:` report-only, defaults to on-demand when unspecified (NOT report-required)." },
     { "name": "team", "cardinality": "optional", "source": "CLAUDE.md `team:` optional (zero or more)." }
