@@ -66,7 +66,7 @@ mod value;
 
 pub use error::FrontmatterParseError;
 pub use parse::parse;
-pub use profile::{Profile, ProfileError};
+pub use profile::{FacetType, Profile, ProfileError};
 pub use validate::{validate, CoverageRollup, FrontmatterEntry, ScanOutcome, Violation};
 pub use value::{FrontmatterValue, RawFields};
 

@@ -111,6 +111,15 @@
       "properties": {
         "kind": { "const": "extension-pack" },
         "extends": { "type": "string", "pattern": "^[a-z0-9-]+@[0-9]+$" },
+        "removes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(namespace|required_field|description_cap|file_class_rule|report_required|exempt_filename|exempt_dir|exempt_glob):.+$"
+          },
+          "uniqueItems": true,
+          "description": "Typed references to mechanisms/vocabulary a merged pack removes from its base, e.g. `namespace:team`. Declared here so a pack can be authored/validated against this shape; a later merge task applies it (removal is not performed by this crate's validator today)."
+        },
         "required_fields": {
           "type": "array",
           "minItems": 1,
@@ -167,6 +176,7 @@
               "cardinality": { "type": "string", "enum": ["singleton", "at_least_one", "optional"] },
               "parents": { "type": "array", "items": { "type": "string" } },
               "report_only": { "type": "boolean" },
+              "type": { "type": "string", "enum": ["string", "date", "numeric"] },
               "source": { "type": "string" }
             }
           }

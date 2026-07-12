@@ -293,6 +293,18 @@ pub(crate) struct NamespaceSpec {
     pub(crate) parents: Vec<String>,
     #[serde(default)]
     pub(crate) report_only: bool,
+    /// This facet's value type -- will drive range-eligibility for a
+    /// downstream query consumer (facetquery): `String` supports
+    /// equality/wildcard only, `Date`/`Numeric` are also
+    /// range/comparison-eligible. Parsed here for that future consumer and
+    /// for the future merge task; no public accessor exists yet (`field`
+    /// and `NamespaceSpec` are `pub(crate)`) and this crate's own
+    /// `validate` does not read it (see module doc) -- hence
+    /// `#[allow(dead_code)]`. A pack that omits `type` gets
+    /// `FacetType::String` via `#[serde(default)]`.
+    #[allow(dead_code)]
+    #[serde(rename = "type", default)]
+    pub(crate) facet_type: FacetType,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -301,6 +313,24 @@ pub(crate) enum Cardinality {
     Singleton,
     AtLeastOne,
     Optional,
+}
+
+/// A namespace's value type, per the pack's optional per-namespace `type`
+/// (see `frontmatter-psa-apm.pack.json`'s `namespaces[].type` and the
+/// meta-schema's `namespaces.items.properties.type`). `String` is the
+/// default for a pack that omits `type` -- every namespace predates this
+/// field and must keep deserializing unchanged.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FacetType {
+    /// Equality/wildcard-eligible only. The default for a pack that omits
+    /// `type`.
+    #[default]
+    String,
+    /// Range/comparison-eligible (e.g. `period`).
+    Date,
+    /// Range/comparison-eligible.
+    Numeric,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -567,6 +597,188 @@ mod tests {
             "the shipped ASCII-only `[0-9]` pattern must reject Arabic-Indic \
              digits, even though Python's default (non-ASCII-flagged) \\d \
              would accept them -- deliberate, documented divergence"
+        );
+    }
+
+    // -- facet type (`namespaces[].type`) -----------------------------------
+
+    fn namespace<'a>(profile: &'a Profile, name: &str) -> &'a NamespaceSpec {
+        profile
+            .pack
+            .namespaces
+            .iter()
+            .find(|n| n.name == name)
+            .expect("namespace must exist in the bundled pack")
+    }
+
+    #[test]
+    fn bundled_period_namespace_is_facet_type_date() {
+        let profile = Profile::bundled_psa_apm();
+        assert_eq!(namespace(&profile, "period").facet_type, FacetType::Date);
+    }
+
+    #[test]
+    fn a_namespace_omitting_type_defaults_to_facet_type_string() {
+        let profile = Profile::bundled_psa_apm();
+        // `topic` carries no `type` in the pack file.
+        assert_eq!(namespace(&profile, "topic").facet_type, FacetType::String);
+    }
+
+    #[test]
+    fn an_unknown_facet_type_value_is_a_typed_error_not_a_panic() {
+        let mut pack = bundled_pack_as_value_standalone();
+        pack["namespaces"][0]["type"] = serde_json::json!("not-a-real-type");
+        let result = Profile::from_pack_json(&pack.to_string());
+        assert!(matches!(result, Err(ProfileError::InvalidPack(_))));
+    }
+
+    #[test]
+    fn bundled_psa_apm_has_the_expected_per_namespace_facet_types() {
+        // Additive check: `period` is the only namespace this task types as
+        // non-`String` -- every other namespace keeps the implicit default.
+        let profile = Profile::bundled_psa_apm();
+        for spec in &profile.pack.namespaces {
+            let expected = if spec.name == "period" {
+                FacetType::Date
+            } else {
+                FacetType::String
+            };
+            assert_eq!(
+                spec.facet_type, expected,
+                "namespace '{}' has unexpected facet type",
+                spec.name
+            );
+        }
+    }
+
+    // -- SDET: meta-schema conformance (SE-flagged automation gap) --------
+    //
+    // `frontmatter-profile.meta.schema.json` is not wired into this crate's
+    // load/validate path (that's the later merge task), and pulling in a
+    // full JSON-Schema-2020-12 validator crate just to assert this in
+    // isolation would be a heavy dep for one test. So this section pins
+    // what IS mechanically checkable today without one:
+    //   1. the meta-schema's own `removes` pattern and `namespaces[].type`
+    //      enum, read live off the checked-in meta-schema JSON (not
+    //      hand-copied), behave as documented;
+    //   2. the bundled core/pack JSON satisfy the meta-schema's top-level
+    //      `required` shape for their `kind`;
+    //   3. `type`'s serde enum enforcement is the one piece of the pack
+    //      shape actually enforced by this crate today (see the
+    //      `an_unknown_facet_type_value_is_a_typed_error_not_a_panic` test
+    //      above) -- `removes` is NOT yet enforced by this crate (Pack
+    //      doesn't deserialize it at all, so a malformed entry is silently
+    //      ignored); that gap closes with the merge task that wires
+    //      `removes` semantics in, not here.
+    const META_SCHEMA_JSON: &str =
+        include_str!("../../../schemas/frontmatter/frontmatter-profile.meta.schema.json");
+
+    fn meta_schema() -> serde_json::Value {
+        serde_json::from_str(META_SCHEMA_JSON).expect("meta-schema JSON must parse")
+    }
+
+    fn removes_pattern() -> Regex {
+        let schema = meta_schema();
+        let pattern = schema["$defs"]["extensionPack"]["properties"]["removes"]["items"]["pattern"]
+            .as_str()
+            .expect("meta-schema must declare removes.items.pattern");
+        Regex::new(pattern).expect("removes.items.pattern must itself be a valid regex")
+    }
+
+    #[test]
+    fn meta_schema_removes_pattern_accepts_every_documented_typed_reference_kind() {
+        let pattern = removes_pattern();
+        for kind in [
+            "namespace",
+            "required_field",
+            "description_cap",
+            "file_class_rule",
+            "report_required",
+            "exempt_filename",
+            "exempt_dir",
+            "exempt_glob",
+        ] {
+            let reference = format!("{kind}:team");
+            assert!(
+                pattern.is_match(&reference),
+                "removes pattern must accept '{reference}'"
+            );
+        }
+    }
+
+    #[test]
+    fn meta_schema_removes_pattern_rejects_an_unknown_kind_or_a_missing_target() {
+        let pattern = removes_pattern();
+        assert!(
+            !pattern.is_match("bogus_kind:team"),
+            "an unrecognized typed-reference kind must not match"
+        );
+        assert!(
+            !pattern.is_match("namespace"),
+            "a bare kind with no ':target' must not match"
+        );
+        assert!(
+            !pattern.is_match("namespace:"),
+            "an empty target after the colon must not match (pattern requires '.+' after ':')"
+        );
+    }
+
+    #[test]
+    fn meta_schema_namespaces_type_enum_matches_the_facet_type_variants() {
+        // Cross-check the meta-schema's `namespaces[].type` enum against
+        // this crate's `FacetType` variants (via their serde
+        // `rename_all = "snake_case"` spellings) -- if either side gains a
+        // variant/enum value without the other, this test catches the drift
+        // instead of it surfacing as a silent-ignore in production.
+        let schema = meta_schema();
+        let enum_values: Vec<&str> = schema["$defs"]["extensionPack"]["properties"]["namespaces"]
+            ["items"]["properties"]["type"]["enum"]
+            .as_array()
+            .expect("meta-schema must declare namespaces[].type.enum")
+            .iter()
+            .map(|v| v.as_str().expect("enum entries must be strings"))
+            .collect();
+        assert_eq!(
+            enum_values,
+            vec!["string", "date", "numeric"],
+            "meta-schema's type enum must match FacetType's String/Date/Numeric variants"
+        );
+    }
+
+    #[test]
+    fn bundled_core_and_pack_json_satisfy_the_meta_schemas_top_level_kind_discriminant() {
+        // Lightweight structural stand-in for full meta-schema validation:
+        // the meta-schema's top-level `oneOf` discriminates core-profile vs
+        // extension-pack purely on `kind`, and both are in the meta-schema's
+        // required top-level key list -- pin that the two bundled files each
+        // declare the `kind` their own struct expects to embed successfully.
+        let core: serde_json::Value =
+            serde_json::from_str(EMBEDDED_CORE_JSON).expect("bundled core JSON must parse");
+        assert_eq!(core["kind"], "core-profile");
+
+        let pack: serde_json::Value =
+            serde_json::from_str(EMBEDDED_PSA_APM_PACK_JSON).expect("bundled pack JSON must parse");
+        assert_eq!(pack["kind"], "extension-pack");
+    }
+
+    #[test]
+    fn a_malformed_removes_entry_is_not_yet_rejected_by_this_crate_pins_the_open_gap() {
+        // Documents, rather than closes, the SE-flagged gap: `Pack` does not
+        // model `removes` at all (no field on the struct), so serde simply
+        // ignores it -- a value that violates the meta-schema's
+        // `removes.items.pattern` deserializes without error today. Full
+        // enforcement (via meta-schema validation or a typed `removes`
+        // field) is the later merge task's job; this test exists so that
+        // task's own regression suite has a documented "was broken, now
+        // fixed" pin instead of discovering the gap by surprise.
+        let mut pack = bundled_pack_as_value_standalone();
+        pack["removes"] = serde_json::json!(["not-a-valid-typed-reference"]);
+        let result = Profile::from_pack_json(&pack.to_string());
+        assert!(
+            result.is_ok(),
+            "current behavior: a malformed `removes` entry is silently ignored, not rejected \
+             (see this test's doc comment) -- if this now fails, the merge task has wired \
+             `removes` enforcement in and this test should be deleted, not fixed to pass"
         );
     }
 }
