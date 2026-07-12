@@ -85,7 +85,13 @@ pub use value::{FrontmatterValue, RawFields};
 /// document had, in source order, typed enough to distinguish
 /// scalar/sequence/other -- everything the validator will need that the
 /// four convenience fields don't carry.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Serialize`/`Deserialize` are derived so a consumer (e.g. navigator's
+/// freshness cache) can persist a parsed result and read it back losslessly
+/// instead of re-parsing. `Deserialize` here is for round-tripping the
+/// cache's own previously-written output -- [`parse`] remains the only
+/// entry point for parsing untrusted frontmatter.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParsedFrontmatter {
     /// `tags:` when present and a sequence; empty otherwise (absent, or
     /// present but not a sequence -- e.g. a bare scalar).
@@ -912,6 +918,99 @@ mod sdet_adversarial_tests {
         let input = "---\nid: first\nid: second\n---\nbody\n";
         let first = parse(input);
         let second = parse(input);
+        assert_eq!(first, second);
+    }
+}
+
+/// Round-trip coverage for the cache-persistence `Serialize`/`Deserialize`
+/// derives on [`ParsedFrontmatter`] and its constituents.
+#[cfg(test)]
+mod cache_round_trip_tests {
+    use super::*;
+
+    #[test]
+    fn parsed_frontmatter_with_all_convenience_fields_present_round_trips() {
+        // Exercises scalars (name/id/description), a present Option, and a
+        // Sequence (tags), plus body_text.
+        let input = "---\nname: \"Doc\"\nid: \"doc-1\"\ndescription: \"desc\"\ntags:\n  - a\n  - b\n---\nbody\n";
+        let parsed = parse(input).unwrap();
+        let json = serde_json::to_string(&parsed).unwrap();
+        let restored: ParsedFrontmatter = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, parsed);
+    }
+
+    #[test]
+    fn parsed_frontmatter_with_absent_optional_fields_round_trips() {
+        // Exercises the None side of every Option convenience field.
+        let input = "---\ntags:\n  - only-a-tag\n---\nbody\n";
+        let parsed = parse(input).unwrap();
+        assert_eq!(parsed.name, None);
+        assert_eq!(parsed.id, None);
+        assert_eq!(parsed.description, None);
+        let json = serde_json::to_string(&parsed).unwrap();
+        let restored: ParsedFrontmatter = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, parsed);
+    }
+
+    #[test]
+    fn parsed_frontmatter_with_nested_mapping_and_other_round_trips() {
+        // Exercises a recursive Mapping (workspace:) and an explicit null
+        // (Other), both reachable only through raw_fields.
+        let input = "---\nworkspace:\n  id: \"w-1\"\n  updated: null\n---\nbody\n";
+        let parsed = parse(input).unwrap();
+        let json = serde_json::to_string(&parsed).unwrap();
+        let restored: ParsedFrontmatter = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, parsed);
+        let FrontmatterValue::Mapping(inner) = parsed.raw_fields.get("workspace").unwrap() else {
+            panic!("expected workspace: to be a Mapping");
+        };
+        assert_eq!(inner.get("updated"), Some(&FrontmatterValue::Other));
+    }
+
+    #[test]
+    fn parsed_frontmatter_raw_fields_order_survives_round_trip() {
+        let input = "---\nzeta: 1\nalpha: 2\nname: \"n\"\n---\nbody\n";
+        let parsed = parse(input).unwrap();
+        let json = serde_json::to_string(&parsed).unwrap();
+        let restored: ParsedFrontmatter = serde_json::from_str(&json).unwrap();
+        let keys: Vec<&str> = restored.raw_fields.iter().map(|(k, _)| k).collect();
+        assert_eq!(
+            keys,
+            vec!["zeta", "alpha", "name"],
+            "a cache round trip must not resort raw_fields"
+        );
+    }
+
+    #[test]
+    fn deserializing_corrupt_cache_bytes_errs_instead_of_panicking_or_guessing() {
+        // `Deserialize` is scoped to reading back this cache's own prior
+        // output (see the type's doc comment) -- it is not a second parse
+        // entry point for arbitrary/untrusted input. Pin that boundary: a
+        // plausible corruption (foreign-shaped JSON, same top-level type)
+        // must be rejected as an error, never silently coerced into a
+        // wrong-but-valid-looking ParsedFrontmatter, and never panic.
+        let foreign_json = r#"{"tags":"not-a-sequence","name":123}"#;
+        let result: Result<ParsedFrontmatter, _> = serde_json::from_str(foreign_json);
+        assert!(
+            result.is_err(),
+            "corrupted/foreign JSON must fail to deserialize, not produce a value"
+        );
+
+        // Also cover byte-garbage (not even valid JSON), the more likely
+        // real-world corruption shape (truncated write, disk bitrot).
+        let garbage = "{not json at all";
+        let result: Result<ParsedFrontmatter, _> = serde_json::from_str(garbage);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn serializing_the_same_value_twice_is_byte_identical() {
+        // Determinism: a consumer that re-serializes to compare/cache-key
+        // must get the same bytes every time for the same value.
+        let input = "---\nname: \"Doc\"\ntags:\n  - a\n  - b\n---\nbody\n";
+        let parsed = parse(input).unwrap();
+        let first = serde_json::to_string(&parsed).unwrap();
+        let second = serde_json::to_string(&parsed).unwrap();
         assert_eq!(first, second);
     }
 }
