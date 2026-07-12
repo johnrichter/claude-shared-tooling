@@ -176,7 +176,7 @@
               "cardinality": { "type": "string", "enum": ["singleton", "at_least_one", "optional"] },
               "parents": { "type": "array", "items": { "type": "string" } },
               "report_only": { "type": "boolean" },
-              "type": { "type": "string", "enum": ["string", "date", "numeric"] },
+              "type": { "type": "string", "enum": ["string", "date", "numeric", "date_interval"] },
               "source": { "type": "string" }
             }
           }

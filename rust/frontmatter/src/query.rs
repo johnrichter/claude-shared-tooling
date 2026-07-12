@@ -7,9 +7,9 @@
 //! tag NAMESPACE -- the part of a `namespace:value` tag before the colon
 //! (e.g. `topic` in `topic:apm`). [`Profile::namespace_facet_type`] answers
 //! whether the schema knows that namespace at all, and if so, its
-//! [`FacetType`] (`String`/`Date`/`Numeric`); the namespace's values are
-//! every `namespace:value` tag on the file, value-only (the namespace
-//! prefix stripped), in tag order.
+//! [`FacetType`] (`String`/`Date`/`Numeric`/`DateInterval`); the
+//! namespace's values are every `namespace:value` tag on the file,
+//! value-only (the namespace prefix stripped), in tag order.
 //!
 //! # Exists / unknown / known-but-absent
 //! [`facetquery::FacetLookup::Present`] is returned for every
@@ -100,13 +100,14 @@ impl FacetSource for FrontmatterFacetSource<'_> {
 
 /// Maps this crate's schema-declared [`SchemaFacetType`] to `facetquery`'s
 /// own [`QueryFacetType`] -- two independent enums (this crate's has no
-/// `facetquery` dependency of its own to reuse) with the same three
-/// variants, kept in lockstep by the exhaustive match below.
+/// `facetquery` dependency of its own to reuse) with the same variants,
+/// kept in lockstep by the exhaustive match below.
 fn to_query_facet_type(ty: SchemaFacetType) -> QueryFacetType {
     match ty {
         SchemaFacetType::String => QueryFacetType::String,
         SchemaFacetType::Date => QueryFacetType::Date,
         SchemaFacetType::Numeric => QueryFacetType::Numeric,
+        SchemaFacetType::DateInterval => QueryFacetType::DateInterval,
     }
 }
 
@@ -255,15 +256,15 @@ mod tests {
     }
 
     #[test]
-    fn facet_lookup_for_date_typed_namespace_maps_to_query_date_type() {
+    fn facet_lookup_for_interval_typed_namespace_maps_to_query_date_interval_type() {
         let profile = Profile::bundled_psa_apm();
-        let parsed = parsed_with(&["period:2026-06-15"], None, "");
+        let parsed = parsed_with(&["period:2026-04-01/2026-06-30"], None, "");
         let source = FrontmatterFacetSource::new(&parsed, &profile);
         assert_eq!(
             source.facet("period"),
             FacetLookup::Present {
-                ty: QueryFacetType::Date,
-                values: vec!["2026-06-15".to_string()],
+                ty: QueryFacetType::DateInterval,
+                values: vec!["2026-04-01/2026-06-30".to_string()],
             }
         );
     }
@@ -319,13 +320,35 @@ mod tests {
         );
     }
 
-    // -- period range (Date-typed) --------------------------------------------
+    // -- period range (DateInterval-typed, overlap semantics) ----------------
 
     #[test]
-    fn period_range_matches_a_date_typed_facet() {
+    fn period_range_matches_an_interval_wholly_inside_the_query_window() {
         let profile = Profile::bundled_psa_apm();
-        let parsed = parsed_with(&["period:2026-06-15"], None, "");
+        let parsed = parsed_with(&["period:2026-04-01/2026-06-30"], None, "");
         assert!(run("period:[2026-01-01 TO 2026-12-31]", &parsed, &profile).matched);
+    }
+
+    #[test]
+    fn period_range_matches_a_single_day_within_the_stored_interval() {
+        let profile = Profile::bundled_psa_apm();
+        let parsed = parsed_with(&["period:2026-04-01/2026-06-30"], None, "");
+        assert!(run("period:2026-05-15", &parsed, &profile).matched);
+    }
+
+    #[test]
+    fn period_range_matches_a_partially_overlapping_window() {
+        let profile = Profile::bundled_psa_apm();
+        let parsed = parsed_with(&["period:2026-04-01/2026-06-30"], None, "");
+        // The window starts before the stored interval ends and ends after
+        // it starts -- a partial overlap, not containment either way.
+        assert!(run("period:[2026-06-01 TO 2026-09-30]", &parsed, &profile).matched);
+    }
+
+    #[test]
+    fn period_range_does_not_match_a_disjoint_window() {
+        let profile = Profile::bundled_psa_apm();
+        let parsed = parsed_with(&["period:2026-04-01/2026-06-30"], None, "");
         assert!(!run("period:[2027-01-01 TO 2027-12-31]", &parsed, &profile).matched);
     }
 

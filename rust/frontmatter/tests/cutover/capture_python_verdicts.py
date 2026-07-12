@@ -39,6 +39,16 @@ from the manifest) before capturing; otherwise every exempt file becomes a
 false divergence -- the per-function oracle emits violations the real gate
 never surfaces. The frozen fixture set contains no exempt paths, so this
 does not affect the committed golden.
+
+`period` interval migration (interval-stage-2): the psa-apm pack's `period`
+regex moved from the legacy `YYYY-MM-DD..YYYY-MM-DD` form to the ISO 8601
+`YYYY-MM-DD/YYYY-MM-DD` form. This script still calls the CURRENT live
+Python oracle, which has not moved yet -- the committed golden's `period`
+fixture/message text was hand-updated to the post-migration `/` form to
+stay internally consistent with the Rust pack's new regex, NOT captured
+from a live run. Re-running this script today would regenerate a
+`period`-stale golden until the Python gate adopts the same `/` form
+(interval-stage-3).
 """
 
 from __future__ import annotations

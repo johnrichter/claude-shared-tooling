@@ -579,10 +579,14 @@ pub enum FacetType {
     /// `type`.
     #[default]
     String,
-    /// Range/comparison-eligible (e.g. `period`).
+    /// Range/comparison-eligible.
     Date,
     /// Range/comparison-eligible.
     Numeric,
+    /// Range/overlap-eligible: a stored value is a closed date interval
+    /// (e.g. `period`), matched against a query window by overlap rather
+    /// than single-point comparison.
+    DateInterval,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1592,37 +1596,37 @@ mod tests {
 
     #[test]
     fn period_pattern_matches_the_canonical_shape() {
-        assert!(psa_apm_pattern().is_match("2026-04-01..2026-06-30"));
+        assert!(psa_apm_pattern().is_match("2026-04-01/2026-06-30"));
     }
 
     #[test]
     fn period_pattern_rejects_tricky_non_matches() {
         let p = psa_apm_pattern();
         // Extra/missing digits.
-        assert!(!p.is_match("2026-4-01..2026-06-30"), "short month");
+        assert!(!p.is_match("2026-4-01/2026-06-30"), "short month");
         assert!(
-            !p.is_match("2026-04-01..2026-06-300"),
+            !p.is_match("2026-04-01/2026-06-300"),
             "extra trailing digit"
         );
-        assert!(
-            !p.is_match("02026-04-01..2026-06-30"),
-            "extra leading digit"
-        );
+        assert!(!p.is_match("02026-04-01/2026-06-30"), "extra leading digit");
         // Missing/wrong separator.
-        assert!(!p.is_match("2026-04-01.2026-06-30"), "single dot");
-        assert!(!p.is_match("2026-04-01...2026-06-30"), "triple dot");
+        assert!(!p.is_match("2026-04-01.2026-06-30"), "dot, not slash");
+        assert!(
+            !p.is_match("2026-04-01..2026-06-30"),
+            "legacy double-dot separator"
+        );
+        assert!(!p.is_match("2026-04-01//2026-06-30"), "double slash");
         // Leading/trailing junk (implicit `^`/`$` anchoring).
-        assert!(!p.is_match(" 2026-04-01..2026-06-30"), "leading space");
-        assert!(!p.is_match("2026-04-01..2026-06-30 "), "trailing space");
-        assert!(!p.is_match("x2026-04-01..2026-06-30"), "leading junk char");
+        assert!(!p.is_match(" 2026-04-01/2026-06-30"), "leading space");
+        assert!(!p.is_match("2026-04-01/2026-06-30 "), "trailing space");
+        assert!(!p.is_match("x2026-04-01/2026-06-30"), "leading junk char");
         assert!(!p.is_match(""), "empty string");
     }
 
-    /// RESOLVED (was a TE Unicode-digit escalation, M2.P2.T1b finalization):
     /// Python's `re` module matches `\d` against any Unicode decimal-digit
     /// codepoint by default (no `re.ASCII` flag on `schema.py`'s
     /// `PERIOD_RE`), so a period value built from Arabic-Indic digits
-    /// (`٢٠٢٦-٠٤-٠١..٢٠٢٦-٠٦-٣٠`) matches Python's regex. The shipped pack
+    /// (`٢٠٢٦-٠٤-٠١/٢٠٢٦-٠٦-٣٠`) matches Python's regex. The shipped pack
     /// regex deliberately uses `[0-9]`, not `\d` -- a character class is
     /// ASCII-only regardless of the `regex` crate's Unicode mode, so the
     /// same string does NOT match here. This is a DELIBERATE, documented
@@ -1634,7 +1638,7 @@ mod tests {
     fn shipped_period_regex_rejects_unicode_digits_that_pythons_d_would_accept() {
         let p = psa_apm_pattern();
         assert!(
-            !p.is_match("\u{0662}\u{0660}\u{0662}\u{0666}-04-01..2026-06-30"),
+            !p.is_match("\u{0662}\u{0660}\u{0662}\u{0666}-04-01/2026-06-30"),
             "the shipped ASCII-only `[0-9]` pattern must reject Arabic-Indic \
              digits, even though Python's default (non-ASCII-flagged) \\d \
              would accept them -- deliberate, documented divergence"
@@ -1653,9 +1657,12 @@ mod tests {
     }
 
     #[test]
-    fn bundled_period_namespace_is_facet_type_date() {
+    fn bundled_period_namespace_is_facet_type_date_interval() {
         let profile = Profile::bundled_psa_apm();
-        assert_eq!(namespace(&profile, "period").facet_type, FacetType::Date);
+        assert_eq!(
+            namespace(&profile, "period").facet_type,
+            FacetType::DateInterval
+        );
     }
 
     #[test]
@@ -1680,7 +1687,7 @@ mod tests {
         let profile = Profile::bundled_psa_apm();
         for spec in &profile.pack.namespaces {
             let expected = if spec.name == "period" {
-                FacetType::Date
+                FacetType::DateInterval
             } else {
                 FacetType::String
             };
@@ -1764,11 +1771,15 @@ mod tests {
 
     #[test]
     fn meta_schema_namespaces_type_enum_matches_the_facet_type_variants() {
-        // Cross-check the meta-schema's `namespaces[].type` enum against
-        // this crate's `FacetType` variants (via their serde
-        // `rename_all = "snake_case"` spellings) -- if either side gains a
-        // variant/enum value without the other, this test catches the drift
-        // instead of it surfacing as a silent-ignore in production.
+        // Pin the meta-schema's `namespaces[].type` enum against the
+        // hardcoded list of `FacetType` variants' serde
+        // `rename_all = "snake_case"` spellings. LIMITATION: this compares
+        // the meta-schema enum to a literal expectation below, NOT via
+        // reflection over `FacetType` -- so it catches the meta-schema enum
+        // drifting from this list, but a NEW `FacetType` variant added
+        // without updating this list would slip through. Keep the literal
+        // in lockstep when adding a variant (the `to_query_facet_type`
+        // match is the compile-enforced backstop).
         let schema = meta_schema();
         let enum_values: Vec<&str> = schema["$defs"]["extensionPack"]["properties"]["namespaces"]
             ["items"]["properties"]["type"]["enum"]
@@ -1779,8 +1790,8 @@ mod tests {
             .collect();
         assert_eq!(
             enum_values,
-            vec!["string", "date", "numeric"],
-            "meta-schema's type enum must match FacetType's String/Date/Numeric variants"
+            vec!["string", "date", "numeric", "date_interval"],
+            "meta-schema's type enum must match FacetType's String/Date/Numeric/DateInterval variants"
         );
     }
 
