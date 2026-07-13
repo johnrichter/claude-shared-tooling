@@ -248,40 +248,36 @@ fn report_file_with_period_range_and_type_report_matches_end_to_end() {
 }
 
 // -- Interval Stage 2 hardening: end-to-end schema/query interaction -------
-// The pack's `period.regex` is a pure digit/slash shape check -- it has no
+// The pack's `period.regex` is a pure digit/slash shape check with no
 // ordering constraint, so an inverted interval (`end/start`) or a legacy
 // `..`-separated value interact with schema validation and query overlap
 // in ways worth pinning explicitly at the crate's public API, not just
 // inside facetquery's own unit tests.
 //
-// KNOWN LIMITATION (deliberate, Decision 10): the validator does NOT
-// reject a shape-valid-but-inverted interval (`end/start`). Adding a
-// `start <= end` well-formedness lint is a deferred FUTURE enhancement,
-// kept out of the validator now so it need not be mirrored in the live
-// Python gate to preserve SC6 parity. Until then the behavior below is
-// the contract: schema-valid, silently unmatchable, no panic, no
-// diagnostic.
+// `validate()` now closes the shape-only gap with a real-calendar second
+// gate (`is_real_calendar_interval`): a shape-valid but inverted interval
+// is `INVALID_PERIOD_FORMAT`, matching what the query side already treated
+// as unmatchable.
 
 #[test]
-fn inverted_period_value_passes_schema_validation_but_never_matches_a_query() {
+fn inverted_period_value_fails_schema_validation_and_never_matches_a_query() {
     let profile = Profile::bundled_psa_apm();
-    // Regex is shape-only (four digits, dash, two digits, dash, two digits,
-    // slash, repeat) -- it does not check start <= end, so this shape-valid
-    // but logically-inverted interval is NOT flagged by validate().
     let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-06-30/2026-04-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
     let parsed = frontmatter::parse(input).unwrap();
     let entry = frontmatter::validate(&parsed, "some/report.md", &profile);
     assert!(
-        entry.is_valid,
-        "schema regex is shape-only; an inverted interval is not caught here: {:?}",
-        entry.violations
+        !entry.is_valid,
+        "a shape-valid but inverted interval must fail the real-calendar gate"
     );
+    assert!(entry
+        .violations
+        .iter()
+        .any(|v| v.code == "INVALID_PERIOD_FORMAT" && v.field == "period"));
 
-    // But the same value is silently unmatchable by ANY query -- overlap
+    // The same value is also silently unmatchable by ANY query -- overlap
     // evaluation rejects start > end, so a file with only this period value
-    // can never surface under a period query, without any diagnostic to
-    // explain why. This is the sanity gap: shape-valid-but-unusable data
-    // that validate() waves through.
+    // can never surface under a period query, consistent with it also now
+    // being flagged invalid at validation time.
     let result = run("period:[2026-01-01 TO 2026-12-31]", &parsed, &profile);
     assert!(
         !result.matched,

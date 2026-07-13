@@ -31,6 +31,7 @@
 use crate::profile::{Cardinality, Profile};
 use crate::value::{FrontmatterValue, RawFields};
 use crate::ParsedFrontmatter;
+use time::Date;
 
 /// One frontmatter schema violation: a stable `code`, the `field` it's
 /// about, and a human-readable `message`. This three-field shape is the
@@ -527,19 +528,56 @@ fn report_period_format_phase(
     let period_ns = &profile.pack.report.period.namespace;
     for period_tag in group_get(groups, period_ns) {
         let value = period_tag.split_once(':').map_or("", |(_, v)| v);
-        if !profile.period_pattern.is_match(value) {
+        // Two gates on a period value: the pack's regex is the fast shape
+        // check (digits + '/'), and a shape-valid value still needs its two
+        // endpoints to be a real, non-inverted calendar interval -- a
+        // regex alone can't reject `2026-13-45` or `end < start`.
+        let shape_valid = profile.period_pattern.is_match(value);
+        if !shape_valid || !is_real_calendar_interval(value) {
             if let Some(emit) = step.emit(0) {
+                let message = if shape_valid {
+                    format!("'{period_tag}' is not a real YYYY-MM-DD/YYYY-MM-DD calendar interval")
+                } else {
+                    render(
+                        &emit.message,
+                        &[("period_namespace", period_ns), ("period_tag", period_tag)],
+                    )
+                };
                 violations.push(Violation {
                     code: emit.code.clone(),
                     field: period_ns.clone(),
-                    message: render(
-                        &emit.message,
-                        &[("period_namespace", period_ns), ("period_tag", period_tag)],
-                    ),
+                    message,
                 });
             }
         }
     }
+}
+
+/// Whether `value` (already shape-valid: `YYYY-MM-DD/YYYY-MM-DD`) names a
+/// real, non-inverted calendar interval -- both endpoints parse as real
+/// `time::Date`s (rejecting e.g. month 13, February 30th, a non-leap-year
+/// February 29th, or a signed year) and `start <= end`.
+fn is_real_calendar_interval(value: &str) -> bool {
+    let Some((start, end)) = value.split_once('/') else {
+        return false;
+    };
+    let (Some(start), Some(end)) = (parse_calendar_date(start), parse_calendar_date(end)) else {
+        return false;
+    };
+    start <= end
+}
+
+/// Parses `s` as a real `YYYY-MM-DD` civil date, `None` if it names a date
+/// that doesn't exist on the calendar. `time`'s `[year]` component permits
+/// an optional leading sign regardless of representation; the workspace's
+/// `period:` values are always unsigned, so a leading non-digit is rejected
+/// before the calendar-validating parse runs.
+fn parse_calendar_date(s: &str) -> Option<Date> {
+    use time::macros::format_description;
+    if !s.starts_with(|c: char| c.is_ascii_digit()) {
+        return None;
+    }
+    Date::parse(s, format_description!("[year]-[month]-[day]")).ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -915,6 +953,185 @@ body\n"
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/report.md", &profile());
         assert!(entry.is_valid, "violations: {:?}", entry.violations);
+    }
+
+    #[test]
+    fn report_file_with_leap_day_period_endpoint_has_no_period_violation() {
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2024-02-29/2024-03-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/report.md", &profile());
+        assert!(entry.is_valid, "violations: {:?}", entry.violations);
+    }
+
+    /// Shape-valid but calendar-impossible endpoints (month 13, day 45,
+    /// non-leap Feb 29th) each fire `INVALID_PERIOD_FORMAT` with a message
+    /// distinguishing them from a plain shape failure.
+    #[test]
+    fn report_file_with_calendar_invalid_period_endpoint_fires_invalid_period_format() {
+        for period in [
+            "period:2026-13-45/2026-14-99",
+            "period:2026-02-30/2026-03-01",
+            "period:2025-02-29/2025-03-01",
+        ] {
+            let input = format!(
+                "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - {period}\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n"
+            );
+            let parsed = parse::parse(&input).unwrap();
+            let entry = validate(&parsed, "some/report.md", &profile());
+            let violation = entry
+                .violations
+                .iter()
+                .find(|v| v.code == "INVALID_PERIOD_FORMAT")
+                .unwrap_or_else(|| panic!("expected a period violation for {period}"));
+            assert_eq!(violation.field, "period");
+            assert_eq!(
+                violation.message,
+                format!("'{period}' is not a real YYYY-MM-DD/YYYY-MM-DD calendar interval")
+            );
+        }
+    }
+
+    /// A shape-valid, calendar-valid, but inverted interval (start > end)
+    /// is also `INVALID_PERIOD_FORMAT` -- real `Date` comparison catches
+    /// what the shape regex can't.
+    #[test]
+    fn report_file_with_inverted_period_fires_invalid_period_format() {
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-12-31/2026-01-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/report.md", &profile());
+        let violation = entry
+            .violations
+            .iter()
+            .find(|v| v.code == "INVALID_PERIOD_FORMAT")
+            .expect("expected a period violation for an inverted interval");
+        assert_eq!(violation.field, "period");
+        assert_eq!(
+            violation.message,
+            "'period:2026-12-31/2026-01-01' is not a real YYYY-MM-DD/YYYY-MM-DD calendar interval"
+        );
+    }
+
+    /// A signed-year endpoint fails the pack's digits-only shape regex
+    /// before the calendar gate ever runs -- `time::Date::parse` would
+    /// otherwise accept a signed year (`sign:automatic` on `[year]`), so
+    /// `is_real_calendar_interval` never sees an unsigned-only violation
+    /// like this one; it's caught at the existing shape gate instead.
+    #[test]
+    fn report_file_with_signed_year_period_endpoint_fires_invalid_period_format() {
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:+2026-04-01/2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/report.md", &profile());
+        let violation = entry
+            .violations
+            .iter()
+            .find(|v| v.code == "INVALID_PERIOD_FORMAT")
+            .expect("expected a period violation for a signed-year endpoint");
+        assert_eq!(violation.field, "period");
+        assert_eq!(
+            violation.message,
+            "'period:+2026-04-01/2026-06-30' is not YYYY-MM-DD/YYYY-MM-DD"
+        );
+    }
+
+    /// SDET (Time-B harden #2): a same-day interval (`start == end`) is
+    /// VALID -- the gate is `start <= end`, inclusive, not a strict `<`.
+    #[test]
+    fn report_file_with_same_day_period_interval_has_no_period_violation() {
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-05-15/2026-05-15\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/report.md", &profile());
+        assert!(entry.is_valid, "violations: {:?}", entry.violations);
+    }
+
+    /// SDET (Time-B harden #1): century-rule leap years. Feb 29 exists in
+    /// a year divisible by 400 (2000) but NOT in a century year that is
+    /// divisible by 100 but not 400 (2100) -- a naive "divisible by 4"
+    /// check would get both wrong; `time::Date` must get both right.
+    #[test]
+    fn report_file_with_century_leap_rule_period_endpoints() {
+        let valid_400_rule =
+            "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2000-02-29/2000-03-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let parsed = parse::parse(valid_400_rule).unwrap();
+        let entry = validate(&parsed, "some/report.md", &profile());
+        assert!(
+            entry.is_valid,
+            "2000-02-29 is a real leap day (400-rule); violations: {:?}",
+            entry.violations
+        );
+
+        let invalid_100_rule = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2100-02-29/2100-03-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let parsed = parse::parse(invalid_100_rule).unwrap();
+        let entry = validate(&parsed, "some/report.md", &profile());
+        let violation = entry
+            .violations
+            .iter()
+            .find(|v| v.code == "INVALID_PERIOD_FORMAT")
+            .expect("2100-02-29 is not a real date (century non-leap); expected a violation");
+        assert_eq!(violation.field, "period");
+        assert_eq!(
+            violation.message,
+            "'period:2100-02-29/2100-03-01' is not a real YYYY-MM-DD/YYYY-MM-DD calendar interval"
+        );
+    }
+
+    /// SDET (Time-B harden #1): month 0 and day 0 -- both below-range, the
+    /// polar opposite of the above-range cases already covered
+    /// (`report_file_with_calendar_invalid_period_endpoint_fires_invalid_period_format`).
+    #[test]
+    fn report_file_with_zero_month_or_zero_day_period_endpoint_fires_invalid_period_format() {
+        for period in [
+            "period:2026-00-05/2026-01-06",
+            "period:2026-01-00/2026-01-06",
+        ] {
+            let input = format!(
+                "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - {period}\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n"
+            );
+            let parsed = parse::parse(&input).unwrap();
+            let entry = validate(&parsed, "some/report.md", &profile());
+            assert!(
+                entry
+                    .violations
+                    .iter()
+                    .any(|v| v.code == "INVALID_PERIOD_FORMAT" && v.field == "period"),
+                "expected a period violation for {period}"
+            );
+        }
+    }
+
+    /// SDET (Time-B harden #3): the shape-gate message and the
+    /// calendar-gate message are textually distinct, both under
+    /// `INVALID_PERIOD_FORMAT` -- a caller can tell WHICH gate rejected a
+    /// value from the message text alone.
+    #[test]
+    fn shape_gate_and_calendar_gate_period_messages_are_distinguishable() {
+        let shape_input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:not-a-range\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let parsed = parse::parse(shape_input).unwrap();
+        let entry = validate(&parsed, "some/report.md", &profile());
+        let shape_message = entry
+            .violations
+            .iter()
+            .find(|v| v.code == "INVALID_PERIOD_FORMAT")
+            .expect("shape failure")
+            .message
+            .clone();
+
+        let calendar_input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-02-30/2026-03-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let parsed = parse::parse(calendar_input).unwrap();
+        let entry = validate(&parsed, "some/report.md", &profile());
+        let calendar_message = entry
+            .violations
+            .iter()
+            .find(|v| v.code == "INVALID_PERIOD_FORMAT")
+            .expect("calendar failure")
+            .message
+            .clone();
+
+        assert_ne!(
+            shape_message, calendar_message,
+            "shape-gate and calendar-gate rejections must produce distinct messages"
+        );
+        assert!(shape_message.contains("is not YYYY-MM-DD/YYYY-MM-DD"));
+        assert!(calendar_message.contains("is not a real YYYY-MM-DD/YYYY-MM-DD calendar interval"));
     }
 
     #[test]

@@ -28,3 +28,9 @@ globset,https://github.com/BurntSushi/ripgrep/tree/master/crates/globset,Unlicen
 bstr,https://github.com/BurntSushi/bstr,MIT OR Apache-2.0,Andrew Gallant <jamslam@gmail.com>
 log,https://github.com/rust-lang/log,MIT OR Apache-2.0,The Rust Project Developers
 winnow,https://github.com/winnow-rs/winnow,MIT,Ed Page and winnow-rs contributors
+time,https://github.com/time-rs/time,MIT OR Apache-2.0,Jacob Pratt <open-source@jhpratt.dev> and Time contributors
+time-core,https://github.com/time-rs/time,MIT OR Apache-2.0,Jacob Pratt <open-source@jhpratt.dev> and Time contributors
+time-macros,https://github.com/time-rs/time,MIT OR Apache-2.0,Jacob Pratt <open-source@jhpratt.dev> and Time contributors
+deranged,https://github.com/jhpratt/deranged,MIT OR Apache-2.0,Jacob Pratt <jacob@jhpratt.dev>
+num-conv,https://github.com/jhpratt/num-conv,MIT OR Apache-2.0,Jacob Pratt <jacob@jhpratt.dev>
+powerfmt,https://github.com/jhpratt/powerfmt,MIT OR Apache-2.0,Jacob Pratt <jacob@jhpratt.dev>
