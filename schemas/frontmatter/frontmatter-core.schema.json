@@ -123,7 +123,7 @@
       "guard": "report",
       "iterate": "each raw tag in the `report.period.namespace` group, in file order",
       "emit": [
-        { "when": "tag value does NOT match report.period.regex", "code": "INVALID_PERIOD_FORMAT", "field": "{period_namespace}", "message": "'{period_tag}' is not YYYY-MM-DD..YYYY-MM-DD" }
+        { "when": "tag value does NOT match report.period.regex", "code": "INVALID_PERIOD_FORMAT", "field": "{period_namespace}", "message": "'{period_tag}' is not YYYY-MM-DD/YYYY-MM-DD" }
       ],
       "source": "schema.py:186-191"
     }
@@ -141,7 +141,7 @@
     { "code": "MULTIPLE_SINGLE_VALUE_TAGS", "meaning": "a singleton namespace appears more than once", "source": "schema.py:150" },
     { "code": "ORPHAN_NAMESPACE_TAG", "meaning": "a child namespace is used without a required parent namespace", "source": "schema.py:166" },
     { "code": "REPORT_ONLY_TAG_MISUSED", "meaning": "a report-only namespace appears on a non-report file", "source": "schema.py:177" },
-    { "code": "INVALID_PERIOD_FORMAT", "meaning": "a period tag value is not YYYY-MM-DD..YYYY-MM-DD", "source": "schema.py:190" },
+    { "code": "INVALID_PERIOD_FORMAT", "meaning": "a period tag value is not YYYY-MM-DD/YYYY-MM-DD", "source": "schema.py:190" },
     { "code": "MISSING_REQUIRED_FIELD", "meaning": "a required top-level frontmatter field is absent (checked outside the tag cascade)", "source": "schema.py:60-62 (field tuple) + live emitter frontmatter.py:362; code string CONFIRMED against live. See DIVERGENCES.md D5." },
     { "code": "DESCRIPTION_OVER_CAP", "meaning": "the `description` field exceeds the character cap for the file's file_class", "source": "NEW mechanism vs schema.py, but CONFIRMED against the live emitter frontmatter.py:370 (`DESCRIPTION_OVER_CAP`). See DIVERGENCES.md D2." }
   ]

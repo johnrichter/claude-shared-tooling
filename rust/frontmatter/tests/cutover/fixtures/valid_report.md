@@ -9,7 +9,7 @@ tags:
   - owner:datadog
   - topic:tooling
   - source:slack
-  - period:2026-04-01..2026-06-30
+  - period:2026-04-01/2026-06-30
 links:
   - knowledge-base:tooling:frontmatter-fixtures
 updated: 2026-07-01T00:00:00Z

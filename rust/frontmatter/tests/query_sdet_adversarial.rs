@@ -238,11 +238,84 @@ fn unknown_facet_inside_and_composition_is_a_no_match_with_diagnostic_but_query_
 #[test]
 fn report_file_with_period_range_and_type_report_matches_end_to_end() {
     let profile = Profile::bundled_psa_apm();
-    let file = parsed(&["type:report", "period:2026-06-15"], None, "");
+    let file = parsed(&["type:report", "period:2026-04-01/2026-06-30"], None, "");
     let result = run(
         "type:report AND period:[2026-01-01 TO 2026-12-31]",
         &file,
         &profile,
     );
     assert!(result.matched);
+}
+
+// -- Interval Stage 2 hardening: end-to-end schema/query interaction -------
+// The pack's `period.regex` is a pure digit/slash shape check -- it has no
+// ordering constraint, so an inverted interval (`end/start`) or a legacy
+// `..`-separated value interact with schema validation and query overlap
+// in ways worth pinning explicitly at the crate's public API, not just
+// inside facetquery's own unit tests.
+//
+// KNOWN LIMITATION (deliberate, Decision 10): the validator does NOT
+// reject a shape-valid-but-inverted interval (`end/start`). Adding a
+// `start <= end` well-formedness lint is a deferred FUTURE enhancement,
+// kept out of the validator now so it need not be mirrored in the live
+// Python gate to preserve SC6 parity. Until then the behavior below is
+// the contract: schema-valid, silently unmatchable, no panic, no
+// diagnostic.
+
+#[test]
+fn inverted_period_value_passes_schema_validation_but_never_matches_a_query() {
+    let profile = Profile::bundled_psa_apm();
+    // Regex is shape-only (four digits, dash, two digits, dash, two digits,
+    // slash, repeat) -- it does not check start <= end, so this shape-valid
+    // but logically-inverted interval is NOT flagged by validate().
+    let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-06-30/2026-04-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+    let parsed = frontmatter::parse(input).unwrap();
+    let entry = frontmatter::validate(&parsed, "some/report.md", &profile);
+    assert!(
+        entry.is_valid,
+        "schema regex is shape-only; an inverted interval is not caught here: {:?}",
+        entry.violations
+    );
+
+    // But the same value is silently unmatchable by ANY query -- overlap
+    // evaluation rejects start > end, so a file with only this period value
+    // can never surface under a period query, without any diagnostic to
+    // explain why. This is the sanity gap: shape-valid-but-unusable data
+    // that validate() waves through.
+    let result = run("period:[2026-01-01 TO 2026-12-31]", &parsed, &profile);
+    assert!(
+        !result.matched,
+        "inverted interval must never satisfy any period query"
+    );
+    assert!(result.diagnostics.is_empty());
+}
+
+#[test]
+fn legacy_dotdot_period_value_is_rejected_by_the_pack_regex() {
+    let profile = Profile::bundled_psa_apm();
+    let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-04-01..2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+    let parsed = frontmatter::parse(input).unwrap();
+    let entry = frontmatter::validate(&parsed, "some/report.md", &profile);
+    assert!(
+        !entry.is_valid,
+        "legacy `..` separator must now fail validation"
+    );
+    assert!(entry
+        .violations
+        .iter()
+        .any(|v| v.code == "INVALID_PERIOD_FORMAT"));
+}
+
+#[test]
+fn one_side_malformed_period_value_is_rejected_by_the_pack_regex() {
+    let profile = Profile::bundled_psa_apm();
+    for bad in ["2026-04-01/bad", "2026-04-01/2026-06-30/2026-07-01"] {
+        let input = format!("---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:{bad}\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n");
+        let parsed = frontmatter::parse(&input).unwrap();
+        let entry = frontmatter::validate(&parsed, "some/report.md", &profile);
+        assert!(
+            !entry.is_valid,
+            "malformed period {bad:?} must fail validation"
+        );
+    }
 }

@@ -194,7 +194,7 @@
       {
         "code": "INVALID_PERIOD_FORMAT",
         "field": "period",
-        "message": "'period:bad-format' is not YYYY-MM-DD..YYYY-MM-DD"
+        "message": "'period:bad-format' is not YYYY-MM-DD/YYYY-MM-DD"
       }
     ]
   },
@@ -205,7 +205,7 @@
       {
         "code": "INVALID_PERIOD_FORMAT",
         "field": "period",
-        "message": "'period:bad-format' is not YYYY-MM-DD..YYYY-MM-DD"
+        "message": "'period:bad-format' is not YYYY-MM-DD/YYYY-MM-DD"
       }
     ]
   },

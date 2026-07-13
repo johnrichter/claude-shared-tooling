@@ -352,16 +352,16 @@ fn add_required_placeholders(
 }
 
 /// A best-effort, schema-valid placeholder for the report's `period`
-/// namespace: a same-day range derived from `now`'s date portion (the
-/// merged pack's shipped period format is `YYYY-MM-DD..YYYY-MM-DD`, so
+/// namespace: a same-day interval derived from `now`'s date portion (the
+/// merged pack's shipped period format is `YYYY-MM-DD/YYYY-MM-DD`, so
 /// duplicating `now`'s first 10 characters produces a syntactically valid,
-/// zero-length range). Verified against `profile.period_pattern` before
+/// single-day interval). Verified against `profile.period_pattern` before
 /// use -- a foreign pack with an incompatible period format falls back to
 /// a bare `TODO` marker rather than guessing a value that wouldn't match.
 fn period_placeholder(profile: &Profile, now: &str) -> String {
     let period_ns = &profile.pack.report.period.namespace;
     if let Some(date) = now.get(..10) {
-        let candidate = format!("{date}..{date}");
+        let candidate = format!("{date}/{date}");
         if profile.period_pattern.is_match(&candidate) {
             return format!("{period_ns}:{candidate}");
         }
@@ -623,7 +623,7 @@ mod tests {
             .iter()
             .find(|t| t.starts_with("period:"))
             .expect("a period: placeholder must be added on a report file");
-        assert_eq!(period, "period:2026-07-11..2026-07-11");
+        assert_eq!(period, "period:2026-07-11/2026-07-11");
         assert!(proposal.human_authored_fields.contains(&"tags".to_string()));
     }
 
@@ -811,7 +811,7 @@ mod sdet_adversarial {
     const NOW: &str = "2026-07-11T00:00:00Z";
 
     /// A foreign pack whose `report.period.regex` cannot match a
-    /// `YYYY-MM-DD..YYYY-MM-DD` candidate (e.g. it demands a `Q<n>` marker
+    /// `YYYY-MM-DD/YYYY-MM-DD` candidate (e.g. it demands a `Q<n>` marker
     /// this fixer has no way to synthesize). `period_placeholder` must fall
     /// back to a bare `period:TODO` marker rather than emitting a value that
     /// LOOKS schema-valid but silently isn't -- and that fallback is a
@@ -843,7 +843,7 @@ mod sdet_adversarial {
         // Known Tier-1 limitation, pinned loudly: this placeholder does NOT
         // re-validate clean. A caller must not treat propose_fix's output as
         // unconditionally schema-valid when the pack's period format is
-        // incompatible with the fixer's own YYYY-MM-DD..YYYY-MM-DD synthesis.
+        // incompatible with the fixer's own YYYY-MM-DD/YYYY-MM-DD synthesis.
         let rendered = render(&proposal.fields);
         let reparsed = parse::parse(&rendered).unwrap();
         let entry = validate(&reparsed, "some/report.md", &profile);

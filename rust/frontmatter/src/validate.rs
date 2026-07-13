@@ -905,13 +905,13 @@ body\n"
         assert_eq!(violation.field, "period");
         assert_eq!(
             violation.message,
-            "'period:not-a-range' is not YYYY-MM-DD..YYYY-MM-DD"
+            "'period:not-a-range' is not YYYY-MM-DD/YYYY-MM-DD"
         );
     }
 
     #[test]
     fn report_file_with_valid_period_format_has_no_period_violation() {
-        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-04-01..2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-04-01/2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/report.md", &profile());
         assert!(entry.is_valid, "violations: {:?}", entry.violations);
@@ -1135,7 +1135,7 @@ body\n"
                 (
                     "INVALID_PERIOD_FORMAT",
                     "period",
-                    "'period:bad-format' is not YYYY-MM-DD..YYYY-MM-DD"
+                    "'period:bad-format' is not YYYY-MM-DD/YYYY-MM-DD"
                 ),
             ]
         );
@@ -1178,7 +1178,7 @@ body\n"
 
     #[test]
     fn spot_parity_report_with_good_period_has_only_the_owner_divergence() {
-        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - topic:t\n  - source:slack\n  - period:2026-04-01..2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - topic:t\n  - source:slack\n  - period:2026-04-01/2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/report.md", &profile());
         assert_eq!(entry.violations.len(), 1, "{:?}", entry.violations);
@@ -1444,7 +1444,7 @@ body\n"
         pack["report"]["required_namespaces"] = serde_json::json!(["source", "period", "audience"]);
         let profile =
             Profile::from_pack_json(&pack.to_string()).expect("edited pack must still deserialize");
-        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-04-01..2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-04-01/2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/report.md", &profile);
         assert!(
