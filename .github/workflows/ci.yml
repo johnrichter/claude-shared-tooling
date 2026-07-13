@@ -1,0 +1,114 @@
+# CI for ai-shared-lib-public (the authority layer of the privacy guardrail).
+# Replaces the removed .gitlab-ci.yml — same shape: guardrail gates unit-tests
+# and the Rust arch matrix, which run independently of each other.
+#
+# Rust workspace (rust/) — arch matrix: {linux, macos} x {x86_64, aarch64}. Each
+# cell runs cargo fmt --check + cargo clippy -D warnings (zero-warnings lint
+# bar) + cargo doc -D warnings (doc-gate: broken intra-doc links / doc lints
+# fail red) + cargo test, native where a GitHub-hosted runner exists for that
+# {os, arch} pair, build+lint only (test execution skipped, called out inline)
+# where none does:
+#   linux-x86_64   -> ubuntu-latest, native test.
+#   linux-aarch64  -> ubuntu-24.04-arm (free arm64-Linux hosted runner for public
+#                     repos), native test.
+#   macos-aarch64  -> macos-latest is arm64-hosted, native test.
+#   macos-x86_64   -> no hosted native runner; cross-compiled on macos-latest,
+#                     fmt+clippy only (doc build is host-target and arch-independent
+#                     for this pure crate, already covered by macos-aarch64).
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize]
+
+# Least privilege: every job here only reads the repo (checkout, scan, build, test).
+# No job writes to the repo or calls the GitHub API, so contents:read is sufficient.
+permissions:
+  contents: read
+
+jobs:
+  # Privacy guardrail — authority-layer tier: no --tier flag (this repo IS the
+  # authority the tiered scans in the other repos defer to).
+  guardrail:
+    name: privacy-guardrail
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Privacy + owner-tag scan (authority layer)
+        run: python3 scripts/check_privacy.py --root .
+      - name: No-raw-binary scan (tracked tree, authoritative)
+        run: python3 scripts/check_no_raw_binary.py --tracked --root .
+
+  unit-tests:
+    name: unit-tests
+    runs-on: ubuntu-latest
+    needs: guardrail
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package
+        run: pip install -e .
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+
+  rust:
+    name: rust-${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    needs: guardrail
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            test_native: true
+          - name: linux-aarch64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            test_native: true
+          - name: macos-aarch64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            test_native: true
+          - name: macos-x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            test_native: false
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: ${{ matrix.target }}
+      - name: cargo fmt --check
+        run: cargo fmt --manifest-path rust/Cargo.toml --check
+      - name: cargo clippy
+        run: cargo clippy --manifest-path rust/Cargo.toml --target "${{ matrix.target }}" --all-targets --all-features -- -D warnings
+      # Doc-gate: warnings-as-errors doc build (host-target; rustdoc output is arch-independent for
+      # this pure crate). Catches broken/private intra-doc links and doc lints that neither fmt nor
+      # clippy sees. Skipped on the macos-x86_64 cross cell — already covered on macos-aarch64.
+      - name: cargo doc (warnings as errors)
+        if: matrix.name != 'macos-x86_64'
+        run: cargo doc --manifest-path rust/Cargo.toml --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - name: cargo test (native only)
+        if: matrix.test_native
+        run: cargo test --manifest-path rust/Cargo.toml --target "${{ matrix.target }}"
+      - name: Skip test execution (cross target, no native runner)
+        if: ${{ !matrix.test_native }}
+        run: echo "cross target ${{ matrix.target }} - fmt+clippy only (no hosted runner to execute the test binary natively)"
+
+  # GH-specific caveat, no GitLab equivalent needed here: GitHub Advanced Security secret
+  # scanning is a repo/org SETTING, not a workflow step — it cannot be replicated as a job
+  # in this file. Confirm secret scanning is enabled at the ai-shared-lib-public repo level;
+  # it runs independently of this CI and replaces GitLab's Security/Secret-Detection template.
