@@ -40,6 +40,15 @@ regex = "1.13.0"
 # (`profile::CompiledGlobs`) -- `literal_separator` left at its default
 # (`false`) so `*` crosses `/`, matching Python `fnmatch.fnmatch` parity.
 globset = "0.4.18"
+# Operator-approved (see facetquery's Cargo.toml for the full rationale):
+# dual MIT/Apache-2.0, actively maintained, pure-Rust civil-calendar-date
+# type. `validate`'s `report_period_format` phase uses it to calendar-check
+# a shape-valid `period:` tag's two endpoints (real month/day, real leap
+# year, start <= end) -- a real-calendar gate the shape regex alone can't
+# express. `parsing` + `macros` only, `default-features = false`: no
+# clock/`now`, matching this crate's pure, deterministic validation
+# contract.
+time = { version = "0.3.53", default-features = false, features = ["parsing", "macros"] }
 # Workspace path dependency (facetquery <- frontmatter, per the crate
 # boundary doc): the `query` module bridges `ParsedFrontmatter` + `Profile`
 # to facetquery's generic `FacetSource` trait, so a caller parses a
