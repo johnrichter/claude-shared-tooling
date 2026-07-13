@@ -685,6 +685,78 @@ fn wildcard_term_is_a_no_match_not_a_glob_match() {
 }
 
 // ===========================================================================
+// Calendar validation — a shape-valid but impossible date (endpoint or
+// operand) parses as a real `time::Date`, so it's rejected the same way any
+// malformed value is: silent no-match, no diagnostic, no panic.
+// ===========================================================================
+
+const CALENDAR_INVALID_DATES: &[&str] = &[
+    "2026-13-01", // month 13
+    "2026-00-01", // month 0
+    "2026-01-32", // day 32
+    "2026-01-00", // day 0
+    "2026-02-30", // no such day in February
+    "2025-02-29", // 2025 is not a leap year
+];
+
+/// `2026-01-01/<invalid>` for each [`CALENDAR_INVALID_DATES`] entry, in the
+/// same order -- a stored interval whose end endpoint is calendar-invalid.
+const CALENDAR_INVALID_STORED_ENDS: &[&str] = &[
+    "2026-01-01/2026-13-01",
+    "2026-01-01/2026-00-01",
+    "2026-01-01/2026-01-32",
+    "2026-01-01/2026-01-00",
+    "2026-01-01/2026-02-30",
+    "2025-01-01/2025-02-29",
+];
+
+#[test]
+fn calendar_invalid_stored_endpoint_is_no_match() {
+    for (invalid, stored) in CALENDAR_INVALID_DATES
+        .iter()
+        .zip(CALENDAR_INVALID_STORED_ENDS)
+    {
+        let source = period_source(&[stored]);
+        let matcher = Matcher::Range {
+            lo: Bound::Unbounded,
+            hi: Bound::Unbounded,
+        };
+        let result = run(pred("period", matcher), &source);
+        assert!(!result.matched, "invalid={invalid:?}");
+        assert!(result.diagnostics.is_empty(), "invalid={invalid:?}");
+    }
+}
+
+#[test]
+fn calendar_invalid_query_operand_is_no_match_for_term_and_cmp() {
+    let source = period_source(&["2026-04-01/2026-06-30"]);
+    for invalid in CALENDAR_INVALID_DATES {
+        let term_result = run(pred("period", Matcher::Term(lit(invalid))), &source);
+        assert!(!term_result.matched, "invalid={invalid:?}");
+        assert!(term_result.diagnostics.is_empty(), "invalid={invalid:?}");
+
+        let cmp_result = run(
+            pred(
+                "period",
+                Matcher::Cmp {
+                    op: CmpOp::Gt,
+                    term: lit(invalid),
+                },
+            ),
+            &source,
+        );
+        assert!(!cmp_result.matched, "invalid={invalid:?}");
+        assert!(cmp_result.diagnostics.is_empty(), "invalid={invalid:?}");
+    }
+}
+
+#[test]
+fn leap_day_on_a_leap_year_is_a_valid_interval_endpoint_and_matches() {
+    let source = period_source(&["2024-01-01/2024-02-29"]);
+    assert!(run(pred("period", Matcher::Term(lit("2024-02-29"))), &source).matched);
+}
+
+// ===========================================================================
 // No panic on arbitrary stored + query strings
 // ===========================================================================
 

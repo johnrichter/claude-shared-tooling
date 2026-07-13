@@ -281,7 +281,7 @@ fn range_on_numeric_facet_is_eligible() {
 }
 
 #[test]
-fn range_on_date_facet_compares_lexically() {
+fn range_on_date_facet_compares_as_real_dates() {
     let source = FixtureSource::new("").with("created", FacetType::Date, &["2026-06-15"]);
     let matcher = Matcher::Range {
         lo: Bound::Value(lit("2026-01-01")),
@@ -963,6 +963,105 @@ fn date_value_that_does_not_parse_is_no_match_not_panic() {
     let result = std::panic::catch_unwind(|| run(pred("created", matcher), &source));
     assert!(result.is_ok());
     assert!(!result.unwrap().matched);
+}
+
+// ===========================================================================
+// Calendar validation — a shape-valid but impossible date parses as a real
+// `time::Date`, so it must be rejected the same way a malformed value is:
+// silent no-match, no diagnostic, no panic. Covers a point `Date` facet, a
+// `DateInterval` endpoint, and a `DateInterval` query operand.
+// ===========================================================================
+
+const CALENDAR_INVALID_DATES: &[&str] = &[
+    "2026-13-01", // month 13
+    "2026-00-01", // month 0
+    "2026-01-32", // day 32
+    "2026-01-00", // day 0
+    "2026-02-30", // no such day in February
+    "2025-02-29", // 2025 is not a leap year
+];
+
+#[test]
+fn calendar_invalid_point_date_value_is_no_match() {
+    for invalid in CALENDAR_INVALID_DATES {
+        let source = FixtureSource::new("").with("created", FacetType::Date, &[invalid]);
+        let matcher = Matcher::Range {
+            lo: Bound::Unbounded,
+            hi: Bound::Unbounded,
+        };
+        let result = run(pred("created", matcher), &source);
+        assert!(!result.matched, "invalid={invalid:?}");
+        assert!(result.diagnostics.is_empty(), "invalid={invalid:?}");
+    }
+}
+
+#[test]
+fn calendar_invalid_point_date_query_operand_is_no_match() {
+    let source = FixtureSource::new("").with("created", FacetType::Date, &["2026-06-15"]);
+    for invalid in CALENDAR_INVALID_DATES {
+        let matcher = Matcher::Cmp {
+            op: CmpOp::Gt,
+            term: lit(invalid),
+        };
+        let result = run(pred("created", matcher), &source);
+        assert!(!result.matched, "invalid={invalid:?}");
+        assert!(result.diagnostics.is_empty(), "invalid={invalid:?}");
+    }
+}
+
+#[test]
+fn leap_day_on_a_leap_year_is_a_valid_date_and_matches() {
+    let source = FixtureSource::new("").with("created", FacetType::Date, &["2024-02-29"]);
+    let matcher = Matcher::Range {
+        lo: Bound::Value(lit("2024-01-01")),
+        hi: Bound::Value(lit("2024-12-31")),
+    };
+    assert!(run(pred("created", matcher), &source).matched);
+}
+
+#[test]
+fn real_calendar_ordering_across_year_and_month_boundaries() {
+    let source = FixtureSource::new("").with(
+        "created",
+        FacetType::Date,
+        &["2026-01-01", "2026-02-01", "2026-12-31"],
+    );
+    assert!(
+        run(
+            pred(
+                "created",
+                Matcher::Cmp {
+                    op: CmpOp::Lt,
+                    term: lit("2026-02-01")
+                }
+            ),
+            &source
+        )
+        .matched
+    );
+    assert!(
+        run(
+            pred(
+                "created",
+                Matcher::Cmp {
+                    op: CmpOp::Gt,
+                    term: lit("2026-02-01")
+                }
+            ),
+            &source
+        )
+        .matched
+    );
+    // Every stored value satisfies this range -- proves the endpoints
+    // compare as real dates spanning a year and a month boundary, not as
+    // lexical strings that happen to agree with calendar order here.
+    let all_in_range = Matcher::Range {
+        lo: Bound::Value(lit("2026-01-01")),
+        hi: Bound::Value(lit("2026-12-31")),
+    };
+    let result = run(pred("created", all_in_range), &source);
+    assert!(result.matched);
+    assert!(result.diagnostics.is_empty());
 }
 
 // ===========================================================================

@@ -9,7 +9,7 @@ tags:
   - privacy:public
   - owner:public
 links: []
-updated: 2026-07-12T00:00:00Z
+updated: 2026-07-13T00:00:00Z
 ---
 
 # facetquery — boolean facet-query language (`facetquery@1`)
@@ -136,6 +136,12 @@ A range or comparison predicate targeting a `string`-typed facet is a `RangeOnNo
 diagnostic (warning); that predicate is a no-match, and the query still runs. `date-interval` is
 ordered and never raises this diagnostic — see "Date intervals" below for its own matching rules.
 
+**`date` is a real, calendar-validated `YYYY-MM-DD` date, not a shape check.** A value or operand
+that isn't that exact `YYYY-MM-DD` shape, or names a date that doesn't exist on the calendar (month
+13, day 32, a February 30th, a non-leap year's February 29th, ...), fails to parse — same silent
+no-match treatment as any other unparseable ordered-type value, no `EvalDiagnostic` and no panic.
+Comparison and range ordering are real calendar order.
+
 ## Date intervals
 
 `date-interval` is an ordered facet type (additive as of this section — `facetquery@1` is unchanged;
@@ -145,11 +151,11 @@ no grammar or version bump). A stored value is a closed date range:
 YYYY-MM-DD/YYYY-MM-DD
 ```
 
-Single `/` separator, both endpoints inclusive, `start <= end`. Shape-checked only (reused from
-`date`'s `YYYY-MM-DD` check — no calendar validation), compared lexically per endpoint (fixed-width
-dates compare calendar-correctly lexically, exactly like the point `date` type). `/` is not reserved
-punctuation in the grammar, so `start/end` parses as one ordinary literal token — no grammar change
-is needed to write it as a facet value, range bound, or comparison operand.
+Single `/` separator, both endpoints inclusive, `start <= end`. Each endpoint is a real,
+calendar-validated `YYYY-MM-DD` date (the same validation as the point `date` type, above),
+compared as a real date, not lexically. `/` is not reserved punctuation in the grammar, so
+`start/end` parses as one ordinary literal token — no grammar change is needed to write it as a
+facet value, range bound, or comparison operand.
 
 A file matches a `date-interval` predicate iff **any** of its interval values matches:
 
@@ -177,9 +183,10 @@ into a window and is a no-match, never a partial/prefix hit.
 **Malformed input is always a silent no-match, never a diagnostic or panic:**
 
 - A malformed **stored** value — not `date/date` shaped, missing or extra `/`-separated parts,
-  a non-date-shaped endpoint, or `start > end` — is a no-match for that value; no `EvalDiagnostic`
-  is raised (same treatment as an unparseable point-`date` value today).
-- A malformed **query operand** — a `Cmp`/`Range`-bound scalar that isn't a shape-valid date, or a
+  a non-date endpoint (including one that's shape-valid but calendar-invalid, e.g. `2026-02-30`),
+  or `start > end` — is a no-match for that value; no `EvalDiagnostic` is raised (same treatment as
+  an unparseable point-`date` value today).
+- A malformed **query operand** — a `Cmp`/`Range`-bound scalar that isn't a real date, or a
   `Term`/`Set` member that's neither a bare date nor an `A/B` interval — is a no-match; no new
   `ParseError` and no `EvalDiagnostic`.
 
@@ -223,8 +230,9 @@ one of the following is a **defined**, specified outcome — never an implementa
 | Reference to a facet the evaluator's facet source doesn't know | Eval-time | `UnknownFacet` diagnostic (warning). That predicate is a no-match; query still runs. |
 | Range or comparison against a `string`-typed facet | Eval-time | `RangeOnNonOrdered` diagnostic (warning). That predicate is a no-match; query still runs. |
 | Reserved word (`AND`/`OR`/`NOT`/`TO`) written unescaped, unquoted, standing alone where a term/bareword is expected | Parse-time | Not treated as a bareword — `ParseError` (unexpected token / incomplete operator). Quote or escape to search the literal word. |
-| Malformed `date-interval` stored value (not `date/date` shaped, wrong endpoint count, `start > end`, non-date-shaped endpoint) | Eval-time | Silent no-match for that value — no diagnostic (same treatment as an unparseable point-`date` value). |
-| Malformed `date-interval` query operand (a `Cmp`/`Range`-bound scalar or `Term`/`Set` member that isn't a shape-valid date or `A/B` interval, e.g. a wildcard) | Eval-time | No-match — no new `ParseError`, no diagnostic. |
+| A `date`/`date-interval` value or operand that is shape-valid but calendar-invalid (`2026-13-01`, `2026-02-30`, `2025-02-29` in a non-leap year, ...) | Eval-time | Fails to parse as a real date — silent no-match, same treatment as any other unparseable value; no diagnostic. |
+| Malformed `date-interval` stored value (not `date/date` shaped, wrong endpoint count, `start > end`, non-date endpoint) | Eval-time | Silent no-match for that value — no diagnostic (same treatment as an unparseable point-`date` value). |
+| Malformed `date-interval` query operand (a `Cmp`/`Range`-bound scalar or `Term`/`Set` member that isn't a real date or `A/B` interval, e.g. a wildcard) | Eval-time | No-match — no new `ParseError`, no diagnostic. |
 
 ## Conformance
 
