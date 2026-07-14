@@ -5,7 +5,6 @@ This file lists the third-party code bundled into this repository's distributed 
 Scope:
 
 - Python side: zero third-party runtime dependencies (stdlib only).
-- Go side: zero third-party dependencies.
 - All third-party code is the 35 Rust crates below, statically linked into the distributed binary.
 
 The MIT, BSD-3-Clause, Zlib, and Unicode-3.0 licenses relied on below each require their copyright notice and permission/license text to travel with any binary that includes the licensed code. This file reproduces that attribution and license text for the statically-linked components, satisfying those obligations.

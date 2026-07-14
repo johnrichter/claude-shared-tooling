@@ -15,8 +15,6 @@
 #
 # Knowledge-agent `ka` binaries (one per OS/arch)
 .bin/ka-* filter=lfs diff=lfs merge=lfs -text
-# README-manifest CLI binaries (one per OS/arch)
-.bin/jr-readme-manifest-* filter=lfs diff=lfs merge=lfs -text
 
 #
 # Line endings — auto-detect text vs binary, normalize text to LF; a few
@@ -206,7 +204,7 @@
 #
 # Language & compiler build artifacts — compiled/packaged toolchain outputs.
 # Source and manifest files stay text; only binary artifacts are listed here.
-# Go/Rust/Zig native binaries carry no extension and are caught by content via
+# Rust/Zig native binaries carry no extension and are caught by content via
 # scripts/check_no_raw_binary.py, not by an extension rule.
 #
 # Python compiled bytecode
@@ -268,9 +266,6 @@
 # Binary .mod file — overloaded extension: an Amiga/ProTracker music module
 # or a 3D-model format (the binary meanings this rule targets).
 *.mod filter=lfs diff=lfs merge=lfs -text
-# Go's go.mod is a text manifest — override the *.mod rule above so it is never
-# LFS-routed (normal text diff/merge, at any directory depth).
-go.mod text=auto eol=lf diff merge -filter
 
 #
 # Mobile & app packages — built application bundles/packages (binary).
