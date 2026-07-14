@@ -36,7 +36,7 @@ together — flag it, state why, and get sign-off.
 Workspace-wide lints live once in `rust/Cargo.toml` (`[workspace.lints]`) and every member opts in
 via `[lints] workspace = true` — never repeated per-crate. `unsafe_code` is forbidden workspace-
 wide; `clippy::all` + `clippy::pedantic` are warned locally (fast local dev loop) and enforced as
-hard failures in CI via `-D warnings` (see `.gitlab-ci.yml`), not as a crate-level `#![deny(...)]`
+hard failures in CI via `-D warnings` (see `.github/workflows/ci.yml`), not as a crate-level `#![deny(...)]`
 that would fight local iteration.
 
 ## Development
@@ -51,6 +51,6 @@ cargo test
 
 ## CI
 
-`.gitlab-ci.yml` runs the above commands per member crate across the
+`.github/workflows/ci.yml` runs the above commands per member crate across the
 `{linux, macos} x {x86_64, aarch64}` arch matrix (cross-compiled where a runner can't execute the
 target natively) — see the `rust-*` jobs. Independent of the existing Go/Python/guardrail jobs.

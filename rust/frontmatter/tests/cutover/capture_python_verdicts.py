@@ -17,11 +17,11 @@ script calls that function directly, once per fixture, rather than going
 through the package CLI (which also walks scope/refs/metrics -- concerns
 outside this differential's scope).
 
-Environment: point PYTHONPATH (or edit AUDIT_HELPER_DIR below) at the
-audit-helper package directory, and run with that package's own venv --
-e.g.:
+Environment: set AUDIT_HELPER_DIR to the audit-helper package directory,
+and run with that package's own venv -- e.g.:
 
-    <audit-helper>/.venv/bin/python tests/cutover/capture_python_verdicts.py
+    AUDIT_HELPER_DIR=<path-to-audit-helper> \
+        <audit-helper>/.venv/bin/python tests/cutover/capture_python_verdicts.py
 
 Regeneration: re-run this script whenever a fixture or the manifest
 changes; it always overwrites `expected_verdicts.json` from scratch. At the
@@ -54,15 +54,22 @@ from a live run. Re-running this script today would regenerate a
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
-# Adjust if the audit-helper package moves; matches the path recorded in
-# this task's ground-truth notes.
-AUDIT_HELPER_DIR = Path(
-    "/Users/john.richter/Development/workspaces/psa-platform/marketplace-public/"
-    "plugins/rule-tooling/skills/workspace-audit/audit-helper"
-)
+# AUDIT_HELPER_DIR must point at the audit-helper package directory (the
+# one containing the `audit_helper` module); it is caller-supplied since
+# that package lives outside this repo.
+_AUDIT_HELPER_DIR_ENV = os.environ.get("AUDIT_HELPER_DIR")
+if not _AUDIT_HELPER_DIR_ENV:
+    sys.exit(
+        "capture_python_verdicts.py: set AUDIT_HELPER_DIR to the audit-helper "
+        "package directory before running this script, e.g.:\n"
+        "  AUDIT_HELPER_DIR=/path/to/audit-helper python3 "
+        "tests/cutover/capture_python_verdicts.py"
+    )
+AUDIT_HELPER_DIR = Path(_AUDIT_HELPER_DIR_ENV)
 
 TESTS_DIR = Path(__file__).resolve().parent
 MANIFEST_PATH = TESTS_DIR / "manifest.json"
