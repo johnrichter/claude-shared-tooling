@@ -8,7 +8,9 @@ The single, data-only source of the workspace frontmatter tagging rules — exte
 |---|---|---|---|
 | `frontmatter-core.schema.json` | **Core profile** — MECHANISMS only (cardinality vocabulary, the ordered tag-rule cascade + violation codes/fields/message templates, the required-field / description-cap / file-class / exempt mechanisms). Workspace-agnostic; no concrete names/caps/globs. | `core@1` | Adopt unchanged; embedded in the navigator binary at build (M2.P2.T1b) as the bundled default. |
 | `frontmatter-psa-apm.pack.json` | **Extension pack** — the psa-apm CONCRETE vocabulary (the six required fields + authorship, caps, ordered namespaces, report rules + period regex, file-class globs, exempt taxonomy). `extends: core@1`. | `psa-apm@1` | Replace with your own pack; declare it in `navigator.toml` (M3.P2.T1). |
-| `frontmatter-profile.meta.schema.json` | **Meta-schema** (JSON Schema 2020-12) — both files validate against it (the M2.P1.T1 acceptance). | — | Reused as-is. |
+| `frontmatter-default.pack.json` | **Extension pack** — a generic, workspace-agnostic vocabulary (six required fields, description caps, `type`/`status`/`topic`, file-class globs, a small exempt taxonomy). Generic-minus-report: carries an INERT report placeholder, overridden by `reports@1` when layered on top. `extends: core@1`. | `default@1` | Adopt as-is, or replace with your own generic pack. |
+| `frontmatter-reports.pack.json` | **Extension pack** — the opt-in, isolated report bundle: the four report namespaces (`source`/`period`/`audience`/`cadence`) + the `type:report` rule requiring `source`/`period`. Layer on top of a base pack that supplies `type` (e.g. `default@1`); omit if a repo needs no report semantics. `extends: core@1`. | `reports@1` | Layer after your base pack, or omit entirely. |
+| `frontmatter-profile.meta.schema.json` | **Meta-schema** (JSON Schema 2020-12) — every pack/profile file validates against it (the M2.P1.T1 acceptance). | — | Reused as-is. |
 | `DIVERGENCES.md` | The reviewed deltas vs `schema.py` (owner-singleton, description_caps, file_class, authorship; all code strings now confirmed against the live emitter). Input to the M2.P2.T2 frozen-fixture baseline. | — | — |
 
 **Why split core/pack:** the validator logic (cascade order, codes) is universal; only the vocabulary is workspace-specific. A foreign repo adopts `core@N` (bundled, unchanged) and ships its own `<name>@1` pack — no fork of the mechanisms. The `version`/`extends` strings (`core@1`, `psa-apm@1`) let the M3 sentinel pin a profile+pack pair.
@@ -17,11 +19,13 @@ The single, data-only source of the workspace frontmatter tagging rules — exte
 
 ## Self-validation
 
-Both data files validate against the meta-schema with any JSON Schema 2020-12 validator:
+Every profile/pack file validates against the meta-schema with any JSON Schema 2020-12 validator:
 
 ```
 python -m jsonschema -i frontmatter-core.schema.json      frontmatter-profile.meta.schema.json
 python -m jsonschema -i frontmatter-psa-apm.pack.json      frontmatter-profile.meta.schema.json
+python -m jsonschema -i frontmatter-default.pack.json      frontmatter-profile.meta.schema.json
+python -m jsonschema -i frontmatter-reports.pack.json      frontmatter-profile.meta.schema.json
 ```
 
 Well-formedness (valid JSON) is checkable with zero deps: `python3 -m json.tool <file> >/dev/null`.

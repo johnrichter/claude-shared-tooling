@@ -1,0 +1,38 @@
+{
+  "kind": "extension-pack",
+  "profile": "reports",
+  "version": "reports@1",
+  "extends": "core@1",
+  "description": "The embedded REPORTS extension pack -- the opt-in, isolated report bundle: the four report namespaces (`source`/`period`/`audience`/`cadence`) plus the `type:report` rule that requires `source`/`period` on any document tagged `type:report`. Carries NO generic vocabulary (no required fields, no description caps, no file_class rules, no exempt entries) -- it is meant to be layered ON TOP of a base pack that supplies the `type` namespace (e.g. `default@1`), never used standalone. Layering this pack after that base pack overrides the base's inert report placeholder with this pack's real trigger/period -- a repo that does not need report semantics simply omits this pack from its `navigator.toml` extensions.",
+  "required_fields": [],
+  "description_caps": {
+    "source": "This pack adds no description-cap classes -- classification is `default@1`'s job."
+  },
+  "file_class": {
+    "default": "context",
+    "rules": [],
+    "note": "Matches `default@1`'s own `default` value so layering never triggers a spurious override warning; this pack adds no file_class rules of its own -- classification is `default@1`'s job."
+  },
+  "namespaces": [
+    { "name": "source", "cardinality": "optional", "report_only": true, "source": "The report's data-source axis -- report-only, required whenever `type:report` fires (see `report.required_namespaces`)." },
+    { "name": "period", "cardinality": "optional", "report_only": true, "type": "date_interval", "source": "The report's covered calendar window -- report-only, required whenever `type:report` fires. `type: date_interval` -- a downstream range-eligibility consumer (facetquery) treats this facet's value as a closed date range and matches on OVERLAP against a query window, not equality." },
+    { "name": "audience", "cardinality": "optional", "report_only": true, "source": "The report's intended consumer -- report-only, optional even when `type:report` fires." },
+    { "name": "cadence", "cardinality": "optional", "report_only": true, "source": "The report's refresh frequency -- report-only, optional; defaults to on-demand when unspecified (NOT report-required)." }
+  ],
+  "report": {
+    "trigger": { "namespace": "type", "value": "report" },
+    "required_namespaces": ["source", "period"],
+    "period": {
+      "namespace": "period",
+      "regex": "^[0-9]{4}-[0-9]{2}-[0-9]{2}/[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "notes": "`cadence` defaults to on-demand when unspecified and is NOT required; `audience` is optional. `period` is `type: date_interval`, ISO 8601 interval form (`YYYY-MM-DD/YYYY-MM-DD`, single `/` separator, both endpoints inclusive). Uses explicit ASCII `[0-9]` rather than `\\d`, because the Rust validator compiles this string with the `regex` crate, whose `\\d` matches any Unicode decimal digit by default -- `[0-9]` is ASCII-only regardless of that flag, rejecting e.g. Arabic-Indic digits that an un-flagged Python `\\d` would otherwise accept. This block expresses `report` in the current `core@1` shape (trigger/required_namespaces/period); `core@2` (M1.P3.T1) re-expresses it as a general `{match, apply}` rule-set with no code change here.",
+    "source": "Salvaged from `frontmatter-psa-apm.pack.json`'s `report`/`namespaces` blocks (originally `schema.py:83-91` + `is_report:122-128` + `tag_rule_violations:180-191`) -- the real report semantics that pack's inert placeholder in `default@1` defers to this pack for."
+  },
+  "exempt": {
+    "filenames": [],
+    "dir_components": [],
+    "path_globs": [],
+    "source": "This pack adds no exemptions -- the generated/exempt taxonomy is `default@1`'s job."
+  }
+}

@@ -33,13 +33,19 @@ const EMBEDDED_PSA_APM_PACK_JSON: &str =
     include_str!("../../../schemas/frontmatter/frontmatter-psa-apm.pack.json");
 const EMBEDDED_DEFAULT_PACK_JSON: &str =
     include_str!("../../../schemas/frontmatter/frontmatter-default.pack.json");
+const EMBEDDED_REPORTS_PACK_JSON: &str =
+    include_str!("../../../schemas/frontmatter/frontmatter-reports.pack.json");
 
 /// Every extension pack this crate embeds at compile time, resolvable by
 /// name through [`embedded_pack_json`]. Adding a new embedded pack is a
 /// one-line addition here -- [`embedded_pack_json`] never branches on which
 /// pack it is, only on whether the requested name matches the pack's own
 /// declared `version`.
-const EMBEDDED_PACKS: &[&str] = &[EMBEDDED_PSA_APM_PACK_JSON, EMBEDDED_DEFAULT_PACK_JSON];
+const EMBEDDED_PACKS: &[&str] = &[
+    EMBEDDED_PSA_APM_PACK_JSON,
+    EMBEDDED_DEFAULT_PACK_JSON,
+    EMBEDDED_REPORTS_PACK_JSON,
+];
 
 /// Why a [`Profile`] could not be built from supplied JSON text.
 ///
@@ -1453,7 +1459,7 @@ mod tests {
     #[test]
     fn default_pack_carries_no_report_vocabulary() {
         // SC6: default@1 is generic-minus-report -- the report namespaces
-        // live only in the (not-yet-authored) reports@1 pack.
+        // live only in the isolated reports@1 pack.
         let default_pack: serde_json::Value = serde_json::from_str(EMBEDDED_DEFAULT_PACK_JSON)
             .expect("default@1 pack JSON must parse");
         let namespace_names: Vec<&str> = default_pack["namespaces"]
@@ -1485,11 +1491,14 @@ mod tests {
     #[test]
     fn default_pack_layers_cleanly_with_a_synthetic_pack_supplying_report_vocabulary() {
         // default@1 is designed to be layered with a report-bearing pack
-        // (reports@1, authored separately), not used standalone for report
-        // enforcement. A synthetic conforming companion pack (not a
-        // specific named instance) proves the layering mechanism accepts
-        // default@1's generic vocabulary and merges in a later layer's
-        // report trigger/period cleanly.
+        // (e.g. reports@1), not used standalone for report enforcement. A
+        // synthetic conforming companion pack (not a specific named
+        // instance) proves the layering MECHANISM -- independent of any
+        // one pack's concrete vocabulary -- accepts default@1's generic
+        // vocabulary and merges in a later layer's report trigger/period
+        // cleanly; see
+        // `default_pack_layered_with_reports_pack_overrides_the_placeholder_with_real_report_semantics`
+        // for the concrete reports@1 integration assertion.
         let synthetic_report_layer = r#"{
             "kind": "extension-pack",
             "profile": "synthetic-reports",
@@ -1521,6 +1530,104 @@ mod tests {
             profile.pack.report.required_namespaces,
             vec!["source", "period"]
         );
+    }
+
+    #[test]
+    fn embedded_pack_json_resolves_the_reports_name_as_a_distinct_bundle() {
+        let pack_json = embedded_pack_json("reports@1").expect("reports@1 must resolve");
+        assert_eq!(pack_json, EMBEDDED_REPORTS_PACK_JSON);
+        assert_ne!(
+            pack_json, EMBEDDED_DEFAULT_PACK_JSON,
+            "reports@1 and default@1 must be distinct embedded bundles"
+        );
+        assert_ne!(
+            pack_json, EMBEDDED_PSA_APM_PACK_JSON,
+            "reports@1 and psa-apm@1 must be distinct embedded bundles"
+        );
+    }
+
+    #[test]
+    fn reports_pack_carries_only_report_vocabulary_and_a_real_trigger() {
+        // SC6: reports@1 is the isolated, opt-in report bundle -- it must
+        // declare exactly the four report namespaces (all report_only), no
+        // generic required fields/caps/exempt entries, and a REAL trigger
+        // (not default@1's inert placeholder value).
+        let reports_pack: serde_json::Value = serde_json::from_str(EMBEDDED_REPORTS_PACK_JSON)
+            .expect("reports@1 pack JSON must parse");
+        let namespace_names: Vec<&str> = reports_pack["namespaces"]
+            .as_array()
+            .expect("namespaces must be an array")
+            .iter()
+            .map(|ns| {
+                ns["name"]
+                    .as_str()
+                    .expect("namespace name must be a string")
+            })
+            .collect();
+        assert_eq!(
+            namespace_names,
+            vec!["source", "period", "audience", "cadence"]
+        );
+        assert!(
+            reports_pack["namespaces"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|ns| ns["report_only"].as_bool() == Some(true)),
+            "every reports@1 namespace must be report_only"
+        );
+        assert_eq!(
+            reports_pack["required_fields"].as_array().map(Vec::len),
+            Some(0),
+            "reports@1 adds no required fields"
+        );
+        assert_eq!(
+            reports_pack["report"]["trigger"]["value"].as_str(),
+            Some("report"),
+            "reports@1's trigger must be the real 'type:report' value, not default@1's placeholder"
+        );
+        assert_eq!(
+            reports_pack["report"]["required_namespaces"]
+                .as_array()
+                .map(|ns| ns.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>()),
+            Some(vec!["source", "period"])
+        );
+    }
+
+    #[test]
+    fn default_pack_layered_with_reports_pack_overrides_the_placeholder_with_real_report_semantics()
+    {
+        // Integration assertion (M1.P1.T2 acceptance): layering the shipped
+        // default@1 then the shipped reports@1 must yield a merged profile
+        // whose report trigger/required_namespaces are reports@1's REAL
+        // values, not default@1's inert `__reports_pack_required__`
+        // placeholder -- and the four report namespaces must be present.
+        let core_json = embedded_core_json();
+        let default_json = embedded_pack_json("default@1").expect("default@1 must resolve");
+        let reports_json = embedded_pack_json("reports@1").expect("reports@1 must resolve");
+        let (profile, _warnings) = Profile::from_packs(core_json, &[default_json, reports_json])
+            .expect("default@1 layered with reports@1 must merge cleanly");
+
+        assert_eq!(profile.pack.report.trigger.namespace, "type");
+        assert_eq!(profile.pack.report.trigger.value, "report");
+        assert_ne!(
+            profile.pack.report.trigger.value, "__reports_pack_required__",
+            "reports@1 must override default@1's inert placeholder trigger"
+        );
+        assert_eq!(
+            profile.pack.report.required_namespaces,
+            vec!["source", "period"]
+        );
+        assert_eq!(profile.pack.report.period.namespace, "period");
+
+        for report_namespace in ["source", "period", "audience", "cadence"] {
+            assert!(
+                profile.namespace_facet_type(report_namespace).is_some(),
+                "merged profile must carry report namespace '{report_namespace}'"
+            );
+        }
+        // default@1's own generic vocabulary survives the layering.
+        assert_eq!(profile.required_fields().count(), 6);
     }
 
     #[test]
