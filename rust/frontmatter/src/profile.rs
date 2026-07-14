@@ -9,10 +9,10 @@
 //! file).
 //!
 //! # Construction paths
-//! - [`Profile::bundled_psa_apm`] -- embedded core (`core@1`) + embedded
-//!   psa-apm pack (`psa-apm@1`), both via `include_str!`. Zero filesystem
-//!   reads; this is what the crate's own tests use, and what a psa-apm
-//!   consumer uses by default.
+//! - [`Profile::core_only`] -- caller-supplied core JSON, zero packs: a
+//!   valid `Profile` with no namespace vocabulary, no required fields, no
+//!   report rules. Every caller reaches this vocabulary-free state the same
+//!   way; the library never surfaces a specific pack as *the* default.
 //! - [`Profile::from_pack_json`] -- embedded core + a caller-supplied pack
 //!   JSON string. This is the path a foreign repo takes: it ships its own
 //!   pack (its own required fields, namespaces, caps, ...) but adopts
@@ -20,7 +20,11 @@
 //!   (a `navigator.toml` sentinel) is a later task (M3.P2.T1); this
 //!   function only needs the pack's JSON text, already read by the caller.
 //! - [`Profile::from_json`] -- both core and pack supplied as JSON text.
-//!   The fully general constructor the two above wrap.
+//! - [`Profile::from_packs`] -- core plus one or more packs, layered. The
+//!   fully general constructor the paths above wrap. A named pack (e.g. the
+//!   shipped `psa-apm@1`) is available only as an opt-in bundle a caller
+//!   fetches by name via [`embedded_pack_json`] and feeds in itself -- the
+//!   library never constructs a `Profile` from a bundled pack on its own.
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use regex::Regex;
@@ -159,19 +163,61 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// Builds a `Profile` from the embedded core (`core@1`) and the
-    /// embedded psa-apm pack (`psa-apm@1`) -- no filesystem access.
+    /// Builds a `Profile` from caller-supplied core JSON with zero packs --
+    /// a valid `Profile` carrying no namespace vocabulary, no required
+    /// fields, and no report rules. `validate`/`fix`/`query` all run
+    /// against it without error; every namespace-driven check simply has
+    /// nothing to check.
     ///
-    /// # Panics
-    /// Never: both embedded JSON strings are this crate's own committed
-    /// schema files, validated by this crate's own tests -- an error here
-    /// would mean the checked-in schema itself is broken, which the test
-    /// suite (`profile::tests::bundled_psa_apm_profile_builds`) catches at
-    /// build time, not at a caller's runtime.
-    #[must_use]
-    pub fn bundled_psa_apm() -> Self {
-        Self::from_json(EMBEDDED_CORE_JSON, EMBEDDED_PSA_APM_PACK_JSON)
-            .expect("bundled core + psa-apm pack JSON must deserialize; see profile::tests")
+    /// This is the neutral floor every caller starts from: layering a pack
+    /// (via [`Profile::from_pack_json`]/[`Profile::from_json`]/
+    /// [`Profile::from_packs`]) is always the caller's own opt-in choice,
+    /// never something the library does on its own.
+    ///
+    /// # Errors
+    /// [`ProfileError::InvalidCore`] if `core_json` does not deserialize
+    /// into this crate's `Core`.
+    pub fn core_only(core_json: &str) -> Result<Self, ProfileError> {
+        let core: Core = serde_json::from_str(core_json).map_err(ProfileError::InvalidCore)?;
+        let pack = Pack {
+            required_fields: Vec::new(),
+            description_caps: DescriptionCaps::from_entries(&[]),
+            file_class: FileClassRules {
+                default: String::new(),
+                rules: Vec::new(),
+            },
+            namespaces: Vec::new(),
+            report: ReportSpec {
+                trigger: ReportTrigger {
+                    namespace: String::new(),
+                    value: String::new(),
+                },
+                required_namespaces: Vec::new(),
+                period: ReportPeriod {
+                    namespace: String::new(),
+                    regex: String::new(),
+                },
+            },
+            exempt: ExemptSpec {
+                filenames: Vec::new(),
+                dir_components: Vec::new(),
+                path_globs: Vec::new(),
+            },
+        };
+        // No vocabulary means nothing to cross-reference -- `check_integrity`
+        // exists to catch a pack's OWN dangling references, which an empty
+        // pack cannot have, so this path skips it rather than working around
+        // checks written for a non-empty vocabulary.
+        let period_pattern = Regex::new(&pack.report.period.regex).map_err(|err| {
+            ProfileError::InvalidPeriodRegex(pack.report.period.regex.clone(), err)
+        })?;
+        let globs = CompiledGlobs::compile(&pack)?;
+        Ok(Self {
+            core,
+            pack,
+            period_pattern,
+            globs,
+        })
     }
 
     /// Builds a `Profile` from the embedded core (`core@1`) plus a
@@ -348,11 +394,11 @@ impl Profile {
 }
 
 /// The bundled core profile (`core@1`) JSON text, for feeding
-/// [`Profile::from_packs`]. The same text [`Profile::bundled_psa_apm`] and
-/// [`Profile::from_pack_json`] already embed internally -- exposed here so
-/// a caller orchestrating its own `from_packs` call (interleaving named
-/// bundles with its own committed-path packs) never needs a second copy of
-/// this crate's schema data.
+/// [`Profile::from_packs`]. The same text [`Profile::from_pack_json`]
+/// already embeds internally -- exposed here so a caller orchestrating its
+/// own `from_packs` call (interleaving named bundles with its own
+/// committed-path packs) never needs a second copy of this crate's schema
+/// data.
 #[must_use]
 pub fn embedded_core_json() -> &'static str {
     EMBEDDED_CORE_JSON
@@ -369,8 +415,7 @@ pub fn embedded_core_json() -> &'static str {
 /// # Panics
 /// Never: every embedded pack JSON is this crate's own committed schema
 /// file, whose shape (a JSON object with a string `version` field) this
-/// crate's own tests pin -- see [`Profile::bundled_psa_apm`]'s panic-safety
-/// argument.
+/// crate's own tests pin (see `profile::tests`).
 #[must_use]
 pub fn embedded_pack_json(name: &str) -> Option<&'static str> {
     EMBEDDED_PACKS.iter().copied().find(|pack_json| {
@@ -1411,8 +1456,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bundled_psa_apm_profile_builds() {
-        let _profile = Profile::bundled_psa_apm();
+    fn core_only_profile_builds_with_no_vocabulary() {
+        let profile =
+            Profile::core_only(EMBEDDED_CORE_JSON).expect("core-only construction must succeed");
+        assert!(profile.pack.namespaces.is_empty());
+        assert!(profile.pack.required_fields.is_empty());
+        assert_eq!(profile.namespace_facet_type("type"), None);
+        assert_eq!(profile.description_cap("context"), None);
+    }
+
+    #[test]
+    fn core_only_rejects_malformed_core_json_as_a_typed_error() {
+        let result = Profile::core_only("{ not json");
+        assert!(matches!(result, Err(ProfileError::InvalidCore(_))));
     }
 
     #[test]
@@ -1672,18 +1728,19 @@ mod tests {
     }
 
     #[test]
-    fn embedded_accessors_round_trip_through_from_packs_matching_bundled_psa_apm() {
+    fn embedded_accessors_round_trip_through_from_packs_matching_from_pack_json() {
         let core_json = embedded_core_json();
         let pack_json = embedded_pack_json("psa-apm@1").expect("psa-apm@1 must resolve");
         let (profile, warnings) = Profile::from_packs(core_json, &[pack_json])
             .expect("embedded core + pack must merge cleanly");
         assert!(warnings.is_empty());
 
-        let bundled = Profile::bundled_psa_apm();
-        assert_eq!(profile.core.version, bundled.core.version);
+        let via_from_pack_json =
+            Profile::from_pack_json(pack_json).expect("from_pack_json must build the same pack");
+        assert_eq!(profile.core.version, via_from_pack_json.core.version);
         assert_eq!(
             profile.required_fields().collect::<Vec<_>>(),
-            bundled.required_fields().collect::<Vec<_>>()
+            via_from_pack_json.required_fields().collect::<Vec<_>>()
         );
     }
 
@@ -1792,7 +1849,9 @@ mod tests {
     // -- SDET: shipped period regex vs Python PERIOD_RE semantics ----------
 
     fn psa_apm_pattern() -> Regex {
-        Profile::bundled_psa_apm().period_pattern
+        Profile::from_pack_json(EMBEDDED_PSA_APM_PACK_JSON)
+            .expect("bundled pack JSON must build a Profile")
+            .period_pattern
     }
 
     #[test]
@@ -1859,7 +1918,8 @@ mod tests {
 
     #[test]
     fn bundled_period_namespace_is_facet_type_date_interval() {
-        let profile = Profile::bundled_psa_apm();
+        let profile = Profile::from_pack_json(EMBEDDED_PSA_APM_PACK_JSON)
+            .expect("bundled pack JSON must build a Profile");
         assert_eq!(
             namespace(&profile, "period").facet_type,
             FacetType::DateInterval
@@ -1868,7 +1928,8 @@ mod tests {
 
     #[test]
     fn a_namespace_omitting_type_defaults_to_facet_type_string() {
-        let profile = Profile::bundled_psa_apm();
+        let profile = Profile::from_pack_json(EMBEDDED_PSA_APM_PACK_JSON)
+            .expect("bundled pack JSON must build a Profile");
         // `topic` carries no `type` in the pack file.
         assert_eq!(namespace(&profile, "topic").facet_type, FacetType::String);
     }
@@ -1885,7 +1946,8 @@ mod tests {
     fn bundled_psa_apm_has_the_expected_per_namespace_facet_types() {
         // Additive check: `period` is the only namespace this task types as
         // non-`String` -- every other namespace keeps the implicit default.
-        let profile = Profile::bundled_psa_apm();
+        let profile = Profile::from_pack_json(EMBEDDED_PSA_APM_PACK_JSON)
+            .expect("bundled pack JSON must build a Profile");
         for spec in &profile.pack.namespaces {
             let expected = if spec.name == "period" {
                 FacetType::DateInterval
@@ -2180,6 +2242,84 @@ mod tests {
         assert_eq!(profile.namespace_facet_type("no-such-namespace"), None);
     }
 
+    /// SC4: a synthetic pack that REMOVES a facet and OVERRIDES another
+    /// facet's type changes both `validate`'s and `namespace_facet_type`'s
+    /// (the read path a query consumer types a facet through) output --
+    /// with no change to `validate.rs`, `query.rs`, or this file's non-test
+    /// code. The schema edit alone is what moves the verdict.
+    #[test]
+    fn removing_a_facet_and_overriding_anothers_type_changes_validate_and_query_typing() {
+        const BASE: &str = r#"{
+            "kind": "extension-pack",
+            "version": "sc4-base@1",
+            "extends": "core@1",
+            "required_fields": [],
+            "description_caps": {"context": 100},
+            "file_class": {"default": "context", "rules": []},
+            "namespaces": [
+                {"name": "type", "cardinality": "singleton"},
+                {"name": "topic", "cardinality": "at_least_one"},
+                {"name": "period", "cardinality": "optional", "type": "date"}
+            ],
+            "report": {
+                "trigger": {"namespace": "type", "value": "report"},
+                "required_namespaces": [],
+                "period": {"namespace": "period", "regex": "^.*$"}
+            },
+            "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
+        }"#;
+        const EXT: &str = r#"{
+            "kind": "extension-pack",
+            "version": "sc4-ext@1",
+            "extends": "core@1",
+            "removes": ["namespace:topic"],
+            "required_fields": [],
+            "description_caps": {},
+            "file_class": {"default": "context", "rules": []},
+            "namespaces": [
+                {"name": "period", "cardinality": "optional", "type": "numeric"}
+            ],
+            "report": {
+                "trigger": {"namespace": "type", "value": "report"},
+                "required_namespaces": [],
+                "period": {"namespace": "period", "regex": "^.*$"}
+            },
+            "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
+        }"#;
+
+        let doc = crate::parse::parse("---\nname: \"x\"\ntags:\n  - type:knowledge\n---\nbody\n")
+            .unwrap();
+
+        // Before the ext layer: `topic` is required, `period` is date-typed.
+        let (before, _) =
+            Profile::from_packs(EMBEDDED_CORE_JSON, &[BASE]).expect("base alone must merge");
+        let before_entry = crate::validate::validate(&doc, "some/doc.md", &before);
+        assert!(
+            before_entry
+                .violations
+                .iter()
+                .any(|v| v.code == "MISSING_REQUIRED_TAG" && v.field == "topic"),
+            "base pack requires at least one topic tag"
+        );
+        assert_eq!(before.namespace_facet_type("period"), Some(FacetType::Date));
+
+        // After layering the ext pack: `topic` is gone (removed), `period`
+        // is now numeric-typed -- both from the schema edit alone.
+        let (after, _) =
+            Profile::from_packs(EMBEDDED_CORE_JSON, &[BASE, EXT]).expect("base + ext must merge");
+        let after_entry = crate::validate::validate(&doc, "some/doc.md", &after);
+        assert!(
+            !after_entry.violations.iter().any(|v| v.field == "topic"),
+            "removing the topic namespace must drop its violation with no code change: {:?}",
+            after_entry.violations
+        );
+        assert_eq!(
+            after.namespace_facet_type("period"),
+            Some(FacetType::Numeric),
+            "overriding period's type must retype it with no code change"
+        );
+    }
+
     #[test]
     fn merge_is_a_pure_function_of_its_ordered_inputs() {
         let (profile_a, warnings_a) = Profile::from_packs(
@@ -2229,11 +2369,10 @@ mod tests {
     }
 
     #[test]
-    fn from_pack_json_and_bundled_psa_apm_are_unaffected_by_from_packs() {
+    fn from_pack_json_is_unaffected_by_from_packs() {
         // Single-pack special cases must keep behaving exactly as before --
         // no warnings surface (there is nothing to override or remove
         // against with only one pack) and the profile is unchanged.
-        let _bundled = Profile::bundled_psa_apm();
         let via_from_pack_json = Profile::from_pack_json(EMBEDDED_PSA_APM_PACK_JSON)
             .expect("bundled pack JSON must still build a Profile");
         assert_eq!(via_from_pack_json.pack.required_fields.len(), 6);

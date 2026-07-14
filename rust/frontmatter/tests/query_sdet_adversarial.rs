@@ -8,6 +8,54 @@
 
 use frontmatter::{matches, Profile, RawFields};
 
+/// A self-authored extension pack -- not a shipped bundle -- carrying the
+/// generic namespace/report shape this file's adversarial cases need
+/// (`type`/`status`/`privacy`/`owner`/`topic`/`source`/`period`), so the
+/// query/validate compositions under test never couple to a specific
+/// real pack's vocabulary. Deliberately omits `bogus`, the undeclared
+/// facet several cases below query on purpose.
+const SYNTHETIC_PACK_JSON: &str = r#"{
+  "kind": "extension-pack",
+  "profile": "synthetic-adversarial-test",
+  "version": "synthetic-adversarial-test@1",
+  "extends": "core@1",
+  "description": "Self-authored test fixture pack for query/validate adversarial coverage.",
+  "required_fields": [
+    { "field": "name", "authorship": "human_authored", "source": "test fixture" },
+    { "field": "description", "authorship": "human_authored", "source": "test fixture" },
+    { "field": "id", "authorship": "human_authored", "source": "test fixture" },
+    { "field": "tags", "authorship": "human_authored", "source": "test fixture" },
+    { "field": "links", "authorship": "human_authored", "source": "test fixture" },
+    { "field": "updated", "authorship": "machine_derivable", "source": "test fixture" }
+  ],
+  "description_caps": { "context": 350, "skill": 500, "agent": 750, "source": "test fixture" },
+  "file_class": { "default": "context", "rules": [], "note": "test fixture" },
+  "namespaces": [
+    { "name": "type", "cardinality": "singleton", "source": "test fixture" },
+    { "name": "status", "cardinality": "singleton", "source": "test fixture" },
+    { "name": "privacy", "cardinality": "singleton", "source": "test fixture" },
+    { "name": "owner", "cardinality": "singleton", "source": "test fixture" },
+    { "name": "topic", "cardinality": "at_least_one", "source": "test fixture" },
+    { "name": "source", "cardinality": "optional", "report_only": true, "source": "test fixture" },
+    { "name": "period", "cardinality": "optional", "report_only": true, "type": "date_interval", "source": "test fixture" }
+  ],
+  "report": {
+    "trigger": { "namespace": "type", "value": "report" },
+    "required_namespaces": ["source", "period"],
+    "period": {
+      "namespace": "period",
+      "regex": "^[0-9]{4}-[0-9]{2}-[0-9]{2}/[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "source": "test fixture"
+  },
+  "exempt": { "filenames": [], "dir_components": [], "path_globs": [], "source": "test fixture" }
+}"#;
+
+fn profile() -> Profile {
+    Profile::from_pack_json(SYNTHETIC_PACK_JSON)
+        .expect("SYNTHETIC_PACK_JSON must deserialize into a valid Profile")
+}
+
 fn parsed(tags: &[&str], name: Option<&str>, body: &str) -> frontmatter::ParsedFrontmatter {
     frontmatter::ParsedFrontmatter {
         tags: tags.iter().map(ToString::to_string).collect(),
@@ -35,7 +83,7 @@ fn run(q: &str, p: &frontmatter::ParsedFrontmatter, profile: &Profile) -> facetq
 // already be correct inside `Exists` before negation is applied.
 #[test]
 fn not_topic_star_matches_a_file_with_no_topic_tag() {
-    let profile = Profile::bundled_psa_apm();
+    let profile = profile();
     let no_topic = parsed(&["type:knowledge"], None, "");
     let result = run("NOT topic:*", &no_topic, &profile);
     assert!(
@@ -50,7 +98,7 @@ fn not_topic_star_matches_a_file_with_no_topic_tag() {
 
 #[test]
 fn not_topic_star_does_not_match_a_file_with_a_topic_tag() {
-    let profile = Profile::bundled_psa_apm();
+    let profile = profile();
     let with_topic = parsed(&["topic:apm"], None, "");
     let result = run("NOT topic:*", &with_topic, &profile);
     assert!(
@@ -61,7 +109,7 @@ fn not_topic_star_does_not_match_a_file_with_a_topic_tag() {
 
 #[test]
 fn dash_prefixed_not_exists_is_equivalent_to_the_not_keyword_form() {
-    let profile = Profile::bundled_psa_apm();
+    let profile = profile();
     let no_topic = parsed(&["type:knowledge"], None, "");
     let with_topic = parsed(&["topic:apm"], None, "");
     assert_eq!(
@@ -78,11 +126,10 @@ fn dash_prefixed_not_exists_is_equivalent_to_the_not_keyword_form() {
 
 #[test]
 fn and_of_exists_over_present_and_absent_facet_requires_both() {
-    let profile = Profile::bundled_psa_apm();
-    // has topic, no status -- status is not a bundled_psa_apm namespace
-    // in every pack; use type (present) and topic (present) vs a genuinely
-    // absent-but-known namespace. period is schema-known and commonly
-    // unset on a non-report file.
+    let profile = profile();
+    // has topic, no period -- use type (present) and topic (present) vs a
+    // genuinely absent-but-known namespace. period is schema-known and
+    // commonly unset on a non-report file.
     let has_topic_no_period = parsed(&["topic:apm", "type:knowledge"], None, "");
     let both_present = parsed(&["topic:apm", "period:2026-01-01"], None, "");
 
@@ -101,7 +148,7 @@ fn and_of_exists_over_present_and_absent_facet_requires_both() {
 
 #[test]
 fn or_of_exists_over_present_and_absent_facet_needs_only_one() {
-    let profile = Profile::bundled_psa_apm();
+    let profile = profile();
     let only_topic = parsed(&["topic:apm"], None, "");
     let neither = parsed(&["type:knowledge"], None, "");
 
@@ -111,7 +158,7 @@ fn or_of_exists_over_present_and_absent_facet_needs_only_one() {
 
 #[test]
 fn not_exists_composed_with_and_isolates_the_negated_side() {
-    let profile = Profile::bundled_psa_apm();
+    let profile = profile();
     // topic present, period absent: `topic:* AND NOT period:*` should
     // match (has topic, and truthfully lacks period).
     let file = parsed(&["topic:apm"], None, "");
@@ -125,7 +172,7 @@ fn not_exists_composed_with_and_isolates_the_negated_side() {
 
 #[test]
 fn multi_valued_namespace_preserves_file_tag_order_in_values() {
-    let profile = Profile::bundled_psa_apm();
+    let profile = profile();
     let file = parsed(&["topic:tracing", "topic:apm", "topic:profiling"], None, "");
     let source = frontmatter::FrontmatterFacetSource::new(&file, &profile);
     match facetquery::FacetSource::facet(&source, "topic") {
@@ -140,7 +187,7 @@ fn multi_valued_namespace_preserves_file_tag_order_in_values() {
 
 #[test]
 fn multibyte_bareword_matches_inside_multibyte_body_text() {
-    let profile = Profile::bundled_psa_apm();
+    let profile = profile();
     // Body contains multibyte (Japanese) text with the target term
     // embedded mid-string, flanked by other multibyte characters on both
     // sides -- exercises char-index (not byte-index) substring walking.
@@ -150,7 +197,7 @@ fn multibyte_bareword_matches_inside_multibyte_body_text() {
 
 #[test]
 fn multibyte_bareword_with_question_wildcard_matches_one_char_gap() {
-    let profile = Profile::bundled_psa_apm();
+    let profile = profile();
     let file = parsed(&[], None, "トレース の 話");
     // "?" must consume exactly one multibyte char, not one byte.
     assert!(run("トレ?ス", &file, &profile).matched);
@@ -158,14 +205,14 @@ fn multibyte_bareword_with_question_wildcard_matches_one_char_gap() {
 
 #[test]
 fn bareword_with_star_wildcard_matches_across_a_gap_in_body() {
-    let profile = Profile::bundled_psa_apm();
+    let profile = profile();
     let file = parsed(&[], None, "the rollout of the new tracing feature");
     assert!(run("rollout*tracing", &file, &profile).matched);
 }
 
 #[test]
 fn bareword_case_sensitivity_is_consistent_with_facet_matching() {
-    let profile = Profile::bundled_psa_apm();
+    let profile = profile();
     let file = parsed(&["topic:apm"], None, "Rollout Plan");
     // Facet matching is documented case-sensitive; text_matches must not
     // silently diverge into case-insensitive behavior.
@@ -178,7 +225,7 @@ fn bareword_case_sensitivity_is_consistent_with_facet_matching() {
 
 #[test]
 fn many_star_bareword_pattern_does_not_hang_on_a_non_matching_long_text() {
-    let profile = Profile::bundled_psa_apm();
+    let profile = profile();
     // A long text with no `z` at all, against a many-`*` pattern that
     // ultimately requires a `z` -- classic catastrophic-backtrack bait for
     // a naive backtracking glob. The two-pointer/star-checkpoint algorithm
@@ -198,7 +245,7 @@ fn many_star_bareword_pattern_does_not_hang_on_a_non_matching_long_text() {
 
 #[test]
 fn matches_is_deterministic_across_repeated_calls_on_the_same_inputs() {
-    let profile = Profile::bundled_psa_apm();
+    let profile = profile();
     let file = parsed(
         &["topic:apm", "topic:tracing", "type:knowledge"],
         Some("APM Doc"),
@@ -217,7 +264,7 @@ fn matches_is_deterministic_across_repeated_calls_on_the_same_inputs() {
 
 #[test]
 fn unknown_facet_inside_and_composition_is_a_no_match_with_diagnostic_but_query_still_evaluates() {
-    let profile = Profile::bundled_psa_apm();
+    let profile = profile();
     let file = parsed(&["topic:apm"], None, "");
     let result = run("topic:apm AND bogus:x", &file, &profile);
     assert!(!result.matched);
@@ -237,7 +284,7 @@ fn unknown_facet_inside_and_composition_is_a_no_match_with_diagnostic_but_query_
 
 #[test]
 fn report_file_with_period_range_and_type_report_matches_end_to_end() {
-    let profile = Profile::bundled_psa_apm();
+    let profile = profile();
     let file = parsed(&["type:report", "period:2026-04-01/2026-06-30"], None, "");
     let result = run(
         "type:report AND period:[2026-01-01 TO 2026-12-31]",
@@ -261,7 +308,7 @@ fn report_file_with_period_range_and_type_report_matches_end_to_end() {
 
 #[test]
 fn inverted_period_value_fails_schema_validation_and_never_matches_a_query() {
-    let profile = Profile::bundled_psa_apm();
+    let profile = profile();
     let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-06-30/2026-04-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
     let parsed = frontmatter::parse(input).unwrap();
     let entry = frontmatter::validate(&parsed, "some/report.md", &profile);
@@ -288,7 +335,7 @@ fn inverted_period_value_fails_schema_validation_and_never_matches_a_query() {
 
 #[test]
 fn legacy_dotdot_period_value_is_rejected_by_the_pack_regex() {
-    let profile = Profile::bundled_psa_apm();
+    let profile = profile();
     let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-04-01..2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
     let parsed = frontmatter::parse(input).unwrap();
     let entry = frontmatter::validate(&parsed, "some/report.md", &profile);
@@ -304,7 +351,7 @@ fn legacy_dotdot_period_value_is_rejected_by_the_pack_regex() {
 
 #[test]
 fn one_side_malformed_period_value_is_rejected_by_the_pack_regex() {
-    let profile = Profile::bundled_psa_apm();
+    let profile = profile();
     for bad in ["2026-04-01/bad", "2026-04-01/2026-06-30/2026-07-01"] {
         let input = format!("---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:{bad}\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n");
         let parsed = frontmatter::parse(&input).unwrap();

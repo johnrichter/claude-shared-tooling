@@ -685,7 +685,7 @@ mod tests {
     use crate::parse;
 
     fn profile() -> Profile {
-        Profile::bundled_psa_apm()
+        crate::test_support::synthetic_profile()
     }
 
     fn conformant_context_doc() -> &'static str {
@@ -1175,37 +1175,32 @@ body\n"
     }
 
     #[test]
-    fn bundled_core_path_validates_with_no_disk_read() {
-        // `Profile::bundled_psa_apm` embeds both JSON files at compile
-        // time -- this test asserts validate() works from that profile
-        // alone, i.e. with no external schema file present at runtime.
+    fn embedded_core_path_validates_with_no_disk_read() {
+        // The synthetic profile is built entirely from a compile-time
+        // string literal -- this test asserts validate() works from that
+        // profile alone, i.e. with no external schema file present at
+        // runtime.
         let parsed = parse::parse(conformant_context_doc()).unwrap();
-        let entry = validate(
-            &parsed,
-            "knowledge-base/test/doc.md",
-            &Profile::bundled_psa_apm(),
-        );
+        let entry = validate(&parsed, "knowledge-base/test/doc.md", &profile());
         assert!(entry.is_valid);
     }
 
     // -- Data-driven proof: mutating the loaded Profile changes the
     // -- verdict with NO change to this module's code. --------------------
 
-    /// The bundled pack's JSON, deserialized to a mutable [`serde_json::Value`]
+    /// The synthetic pack's JSON, deserialized to a mutable [`serde_json::Value`]
     /// so a test can edit the schema DATA and rebuild a [`Profile`] from the
     /// edited text via [`Profile::from_pack_json`] -- the strongest form of
     /// the "schema edit changes verdicts, no `validate.rs` edit" proof: these
     /// two tests below touch only JSON text, never this module's code.
-    fn bundled_pack_as_value() -> serde_json::Value {
-        serde_json::from_str(include_str!(
-            "../../../schemas/frontmatter/frontmatter-psa-apm.pack.json"
-        ))
-        .expect("bundled pack JSON must parse")
+    fn synthetic_pack_as_value() -> serde_json::Value {
+        serde_json::from_str(crate::test_support::SYNTHETIC_PACK_JSON)
+            .expect("synthetic pack JSON must parse")
     }
 
     #[test]
     fn mutating_the_loaded_description_cap_changes_the_verdict() {
-        let mut pack = bundled_pack_as_value();
+        let mut pack = synthetic_pack_as_value();
         pack["description_caps"]["context"] = serde_json::json!(5);
         let profile =
             Profile::from_pack_json(&pack.to_string()).expect("edited pack must still deserialize");
@@ -1220,7 +1215,7 @@ body\n"
 
     #[test]
     fn adding_a_required_field_to_the_loaded_profile_changes_the_verdict() {
-        let mut pack = bundled_pack_as_value();
+        let mut pack = synthetic_pack_as_value();
         pack["required_fields"]
             .as_array_mut()
             .expect("required_fields must be a JSON array")
@@ -1634,7 +1629,7 @@ body\n"
 
     #[test]
     fn mutating_a_singleton_namespace_to_optional_removes_its_violation() {
-        let mut pack = bundled_pack_as_value();
+        let mut pack = synthetic_pack_as_value();
         for ns in pack["namespaces"].as_array_mut().unwrap() {
             if ns["name"] == "privacy" {
                 ns["cardinality"] = serde_json::json!("optional");
@@ -1657,7 +1652,7 @@ body\n"
 
     #[test]
     fn mutating_report_required_namespaces_changes_the_verdict() {
-        let mut pack = bundled_pack_as_value();
+        let mut pack = synthetic_pack_as_value();
         pack["report"]["required_namespaces"] = serde_json::json!(["source", "period", "audience"]);
         let profile =
             Profile::from_pack_json(&pack.to_string()).expect("edited pack must still deserialize");
@@ -1681,7 +1676,7 @@ body\n"
 
     #[test]
     fn file_class_first_matching_rule_wins_over_a_later_matching_rule() {
-        let mut pack = bundled_pack_as_value();
+        let mut pack = synthetic_pack_as_value();
         // Insert a broad `*.md` -> "agent" rule BEFORE the existing skill
         // rules -- if classify_file_class is truly first-match-wins, this
         // new rule (now first) decides, even though a later rule would

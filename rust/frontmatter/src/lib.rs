@@ -40,9 +40,11 @@
 //! `M2.P2.T1b` adds two sibling modules:
 //! - `profile` -- [`Profile`], the deserialized declarative schema (core
 //!   profile + extension pack) `validate` interprets. Embeds the core
-//!   profile and the psa-apm pack at compile time (`include_str!`); also
-//!   accepts an external pack's JSON text, for a foreign repo's own
-//!   vocabulary.
+//!   profile at compile time (`include_str!`), plus a small set of named
+//!   extension packs (e.g. `psa-apm@1`) resolvable only as opt-in bundles
+//!   via [`embedded_pack_json`] -- the library never constructs a
+//!   `Profile` from one on its own. Also accepts an external pack's JSON
+//!   text, for a foreign repo's own vocabulary.
 //! - `validate` -- [`validate::validate`], taking a `&ParsedFrontmatter`
 //!   (specifically its `raw_fields`) and a [`Profile`], producing the
 //!   schema-checked [`validate::FrontmatterEntry`] shape. It needs nothing
@@ -67,6 +69,8 @@ mod fix;
 mod parse;
 mod profile;
 mod query;
+#[cfg(test)]
+mod test_support;
 pub mod validate;
 mod value;
 

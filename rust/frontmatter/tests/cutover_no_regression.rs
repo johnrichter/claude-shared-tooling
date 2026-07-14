@@ -238,7 +238,9 @@ mod normalization_is_code_scoped {
 
 #[test]
 fn well_formed_fixtures_reproduce_the_python_golden() {
-    let profile = Profile::bundled_psa_apm();
+    let pack_json = frontmatter::embedded_pack_json("psa-apm@1").expect("psa-apm@1 must resolve");
+    let profile = Profile::from_json(frontmatter::embedded_core_json(), pack_json)
+        .expect("embedded core + psa-apm@1 pack must build a Profile");
     let golden = load_golden();
     let manifest = load_manifest();
 

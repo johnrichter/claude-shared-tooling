@@ -478,7 +478,7 @@ mod tests {
     use crate::validate::validate;
 
     fn profile() -> Profile {
-        Profile::bundled_psa_apm()
+        crate::test_support::synthetic_profile()
     }
 
     const NOW: &str = "2026-07-11T00:00:00Z";
@@ -671,10 +671,8 @@ mod tests {
         // machine_derivable must REMOVE it from the flagged set for a
         // skeleton build, proving THAT path reads the schema, not a
         // hardcoded field list.
-        let mut pack: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../schemas/frontmatter/frontmatter-psa-apm.pack.json"
-        ))
-        .unwrap();
+        let mut pack: serde_json::Value =
+            serde_json::from_str(crate::test_support::SYNTHETIC_PACK_JSON).unwrap();
         for field in pack["required_fields"].as_array_mut().unwrap() {
             if field["field"] == "name" {
                 field["authorship"] = serde_json::json!("machine_derivable");
@@ -805,7 +803,7 @@ mod sdet_adversarial {
     use crate::validate::validate;
 
     fn profile() -> Profile {
-        Profile::bundled_psa_apm()
+        crate::test_support::synthetic_profile()
     }
 
     const NOW: &str = "2026-07-11T00:00:00Z";
@@ -822,10 +820,8 @@ mod sdet_adversarial {
     /// report `invalid_period_format` on it).
     #[test]
     fn foreign_pack_incompatible_period_regex_falls_back_to_bare_todo_and_stays_invalid() {
-        let mut pack: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../schemas/frontmatter/frontmatter-psa-apm.pack.json"
-        ))
-        .unwrap();
+        let mut pack: serde_json::Value =
+            serde_json::from_str(crate::test_support::SYNTHETIC_PACK_JSON).unwrap();
         pack["report"]["period"]["regex"] = serde_json::json!(r"^Q[1-4]-[0-9]{4}$");
         let profile = Profile::from_pack_json(&pack.to_string()).unwrap();
 
