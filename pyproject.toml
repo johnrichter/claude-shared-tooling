@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -18,7 +18,8 @@ requires-python = ">=3.10"
 # why, and get sign-off.
 # Stdlib-only in fact today — no runtime dependency yet.
 dependencies = []
-# License: TODO — pick per the org OSS-licensing policy before any external publish.
+license = "MIT"
+license-files = ["LICENSE", "LICENSE-3rdparty.csv"]
 
 [project.scripts]
 jr-resign-commits = "ai_shared_lib_public.resign_commits:main"
