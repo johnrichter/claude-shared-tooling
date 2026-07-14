@@ -387,7 +387,7 @@ impl Profile {
     }
 }
 
-/// The bundled core profile (`core@1`) JSON text, for feeding
+/// The bundled core profile (`core@2`) JSON text, for feeding
 /// [`Profile::from_packs`]. The same text [`Profile::from_pack_json`]
 /// already embeds internally -- exposed here so a caller orchestrating its
 /// own `from_packs` call (interleaving named bundles with its own
@@ -1745,8 +1745,14 @@ mod tests {
         let core_json = embedded_core_json();
         let default_json = embedded_pack_json("default@1").expect("default@1 must resolve");
         let reports_json = embedded_pack_json("reports@1").expect("reports@1 must resolve");
-        let (profile, _warnings) = Profile::from_packs(core_json, &[default_json, reports_json])
+        let (profile, warnings) = Profile::from_packs(core_json, &[default_json, reports_json])
             .expect("default@1 layered with reports@1 must merge cleanly");
+        assert!(
+            warnings.is_empty(),
+            "default@1's inert report placeholder is gone, so reports@1's \
+             `type:report` rule-set introduces a new key -- no override WARN \
+             should surface: {warnings:?}"
+        );
 
         assert_eq!(profile.pack.rule_sets.len(), 1);
         let rule_set = &profile.pack.rule_sets[0];
