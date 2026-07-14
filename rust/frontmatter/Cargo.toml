@@ -24,15 +24,15 @@ yaml-rust2 = "0.11.0"
 # each, not hand-kept in sync.
 serde = { version = "1.0.228", features = ["derive"] }
 # Paired with `serde` above: the schema files are JSON, so this is the
-# natural decoder. Also used to embed the bundled core/psa-apm profiles via
-# `include_str!` + `serde_json::from_str`, so the crate's own tests and the
-# psa-apm default validate with zero filesystem reads.
+# natural decoder. Also used to embed the bundled core profile and the
+# named extension packs (default/reports) via `include_str!` +
+# `serde_json::from_str`, so the crate validates with zero filesystem reads.
 serde_json = "1.0.150"
 # M2.P2.T1b finalization (operator-approved, replacing a hand-rolled
-# restricted-subset matcher): compiles the pack's `report.period.regex`
-# into a real `regex::Regex`, once, at `Profile` construction
-# (`profile::Profile::period_pattern`) -- see that module for why `[0-9]`
-# (not `\d`) is used in the shipped pattern.
+# restricted-subset matcher): compiles each rule-set's
+# `apply.value_formats[].regex` into a real `regex::Regex`, once, at
+# `Profile` construction (`profile::Profile::rule_set_value_patterns`) -- see
+# that module for why `[0-9]` (not `\d`) is used in the shipped pattern.
 regex = "1.13.0"
 # M2.P2.T1b finalization (operator-approved, replacing a hand-rolled
 # `fnmatch`-style matcher): compiles the pack's `file_class` rule globs and
@@ -42,10 +42,10 @@ regex = "1.13.0"
 globset = "0.4.18"
 # Operator-approved (see facetquery's Cargo.toml for the full rationale):
 # dual MIT/Apache-2.0, actively maintained, pure-Rust civil-calendar-date
-# type. `validate`'s `report_period_format` phase uses it to calendar-check
-# a shape-valid `period:` tag's two endpoints (real month/day, real leap
-# year, start <= end) -- a real-calendar gate the shape regex alone can't
-# express. `parsing` + `macros` only, `default-features = false`: no
+# type. `validate`'s `rule_set_value_format` phase uses it to calendar-check
+# a shape-valid `date_interval`-typed tag's two endpoints (real month/day,
+# real leap year, start <= end) -- a real-calendar gate the shape regex
+# alone can't express. `parsing` + `macros` only, `default-features = false`: no
 # clock/`now`, matching this crate's pure, deterministic validation
 # contract.
 time = { version = "0.3.53", default-features = false, features = ["parsing", "macros"] }
