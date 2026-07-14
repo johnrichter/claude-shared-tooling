@@ -1472,6 +1472,53 @@ mod tests {
     }
 
     #[test]
+    fn core_only_rejects_empty_core_json_as_a_typed_error_not_a_panic() {
+        // `{}` is well-formed JSON but has none of `Core`'s required
+        // fields (`version`/`mechanisms`/`violation_cascade`) -- a distinct
+        // malformed-core shape from unparseable JSON, still a typed error.
+        let result = Profile::core_only("{}");
+        assert!(matches!(result, Err(ProfileError::InvalidCore(_))));
+    }
+
+    #[test]
+    fn core_only_profile_runs_validate_and_query_end_to_end_without_panic() {
+        // Gap: `core_only_profile_builds_with_no_vocabulary` only inspects
+        // struct fields directly -- it never exercises the actual
+        // `validate`/`query::matches` call paths a real caller takes. This
+        // proves the vocabulary-free Profile is usable, not just buildable:
+        // every namespace-driven check simply has nothing to check, and
+        // neither call panics on a document that carries tags/fields no
+        // empty vocabulary declares.
+        let profile =
+            Profile::core_only(EMBEDDED_CORE_JSON).expect("core-only construction must succeed");
+
+        let doc = crate::parse::parse(
+            "---\nname: \"x\"\ntags:\n  - type:knowledge\n  - topic:apm\n---\nbody\n",
+        )
+        .expect("well-formed document must parse");
+
+        let entry = crate::validate::validate(&doc, "some/doc.md", &profile);
+        assert!(
+            entry.violations.is_empty(),
+            "an empty vocabulary declares no required fields/namespaces/caps to violate: {:?}",
+            entry.violations
+        );
+
+        let query = facetquery::parse("type:knowledge").expect("test query must parse");
+        let result = crate::query::matches(&doc, &query, &profile);
+        assert!(
+            !result.matched,
+            "a facet no empty vocabulary declares must be unknown, not spuriously matched"
+        );
+
+        // Also exercise the empty-document case (no frontmatter at all) --
+        // the emptiest possible input against the emptiest possible schema.
+        let empty_doc = crate::parse::parse("").expect("empty input must parse as no-frontmatter");
+        let empty_entry = crate::validate::validate(&empty_doc, "some/doc.md", &profile);
+        assert!(empty_entry.violations.is_empty());
+    }
+
+    #[test]
     fn from_pack_json_accepts_the_bundled_pack_text_too() {
         let profile = Profile::from_pack_json(EMBEDDED_PSA_APM_PACK_JSON)
             .expect("bundled pack JSON must be a valid pack");
