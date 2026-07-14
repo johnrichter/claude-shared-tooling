@@ -122,7 +122,8 @@
         },
         "required_fields": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
+          "description": "A base pack typically requires at least one field; a purely additive pack layered on top of a base (adding namespaces/caps/exempt rules without its own required fields) may leave this empty.",
           "items": {
             "type": "object",
             "required": ["field", "authorship"],
@@ -135,7 +136,8 @@
         },
         "description_caps": {
           "type": "object",
-          "minProperties": 1,
+          "minProperties": 0,
+          "description": "A base pack typically caps at least one file class; a purely additive pack layered on top of a base may leave this empty.",
           "properties": {
             "source": { "type": "string" }
           },

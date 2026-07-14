@@ -31,6 +31,15 @@ const EMBEDDED_CORE_JSON: &str =
     include_str!("../../../schemas/frontmatter/frontmatter-core.schema.json");
 const EMBEDDED_PSA_APM_PACK_JSON: &str =
     include_str!("../../../schemas/frontmatter/frontmatter-psa-apm.pack.json");
+const EMBEDDED_DEFAULT_PACK_JSON: &str =
+    include_str!("../../../schemas/frontmatter/frontmatter-default.pack.json");
+
+/// Every extension pack this crate embeds at compile time, resolvable by
+/// name through [`embedded_pack_json`]. Adding a new embedded pack is a
+/// one-line addition here -- [`embedded_pack_json`] never branches on which
+/// pack it is, only on whether the requested name matches the pack's own
+/// declared `version`.
+const EMBEDDED_PACKS: &[&str] = &[EMBEDDED_PSA_APM_PACK_JSON, EMBEDDED_DEFAULT_PACK_JSON];
 
 /// Why a [`Profile`] could not be built from supplied JSON text.
 ///
@@ -345,26 +354,28 @@ pub fn embedded_core_json() -> &'static str {
 
 /// Resolves a named bundle to its embedded extension-pack JSON text, for
 /// feeding [`Profile::from_packs`] alongside committed-path packs a caller
-/// reads itself. `name` is matched against the embedded psa-apm pack's own
-/// declared `version` field (e.g. `"psa-apm@1"`), read from the pack's JSON
-/// at call time rather than duplicated as a separate literal -- so the
-/// resolver key can never drift from the pack it returns. Returns `None`
-/// for any unrecognized name.
+/// reads itself. `name` is matched against each embedded pack's own
+/// declared `version` field (e.g. `"psa-apm@1"`, `"default@1"`), read from
+/// the pack's JSON at call time rather than duplicated as a separate
+/// literal -- so a resolver key can never drift from the pack it returns.
+/// Returns `None` for any unrecognized name.
 ///
 /// # Panics
-/// Never: the embedded pack JSON is this crate's own committed schema
+/// Never: every embedded pack JSON is this crate's own committed schema
 /// file, whose shape (a JSON object with a string `version` field) this
 /// crate's own tests pin -- see [`Profile::bundled_psa_apm`]'s panic-safety
 /// argument.
 #[must_use]
 pub fn embedded_pack_json(name: &str) -> Option<&'static str> {
-    let declared: serde_json::Value = serde_json::from_str(EMBEDDED_PSA_APM_PACK_JSON)
-        .expect("EMBEDDED_PSA_APM_PACK_JSON must deserialize; see profile::tests");
-    let declared_name = declared
-        .get("version")
-        .and_then(serde_json::Value::as_str)
-        .expect("embedded psa-apm pack JSON must declare a string 'version'");
-    (name == declared_name).then_some(EMBEDDED_PSA_APM_PACK_JSON)
+    EMBEDDED_PACKS.iter().copied().find(|pack_json| {
+        let declared: serde_json::Value = serde_json::from_str(pack_json)
+            .expect("every embedded pack JSON must deserialize; see profile::tests");
+        let declared_name = declared
+            .get("version")
+            .and_then(serde_json::Value::as_str)
+            .expect("every embedded pack JSON must declare a string 'version'");
+        name == declared_name
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1427,6 +1438,89 @@ mod tests {
         assert!(embedded_pack_json("does-not-exist@9").is_none());
         let pack_json = embedded_pack_json("psa-apm@1").expect("psa-apm@1 must resolve");
         assert_eq!(pack_json, EMBEDDED_PSA_APM_PACK_JSON);
+    }
+
+    #[test]
+    fn embedded_pack_json_resolves_the_default_name_as_a_distinct_bundle() {
+        let pack_json = embedded_pack_json("default@1").expect("default@1 must resolve");
+        assert_eq!(pack_json, EMBEDDED_DEFAULT_PACK_JSON);
+        assert_ne!(
+            pack_json, EMBEDDED_PSA_APM_PACK_JSON,
+            "default@1 and psa-apm@1 must be distinct embedded bundles"
+        );
+    }
+
+    #[test]
+    fn default_pack_carries_no_report_vocabulary() {
+        // SC6: default@1 is generic-minus-report -- the report namespaces
+        // live only in the (not-yet-authored) reports@1 pack.
+        let default_pack: serde_json::Value = serde_json::from_str(EMBEDDED_DEFAULT_PACK_JSON)
+            .expect("default@1 pack JSON must parse");
+        let namespace_names: Vec<&str> = default_pack["namespaces"]
+            .as_array()
+            .expect("namespaces must be an array")
+            .iter()
+            .map(|ns| {
+                ns["name"]
+                    .as_str()
+                    .expect("namespace name must be a string")
+            })
+            .collect();
+        for report_namespace in ["source", "period", "audience", "cadence"] {
+            assert!(
+                !namespace_names.contains(&report_namespace),
+                "default@1 must not declare report namespace '{report_namespace}'"
+            );
+        }
+        assert!(
+            default_pack["namespaces"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|ns| ns.get("report_only").is_none()),
+            "default@1 must declare no report_only namespace"
+        );
+    }
+
+    #[test]
+    fn default_pack_layers_cleanly_with_a_synthetic_pack_supplying_report_vocabulary() {
+        // default@1 is designed to be layered with a report-bearing pack
+        // (reports@1, authored separately), not used standalone for report
+        // enforcement. A synthetic conforming companion pack (not a
+        // specific named instance) proves the layering mechanism accepts
+        // default@1's generic vocabulary and merges in a later layer's
+        // report trigger/period cleanly.
+        let synthetic_report_layer = r#"{
+            "kind": "extension-pack",
+            "profile": "synthetic-reports",
+            "version": "synthetic-reports@1",
+            "extends": "core@1",
+            "description": "Synthetic test-only pack supplying report vocabulary.",
+            "required_fields": [],
+            "description_caps": {},
+            "file_class": {"default": "context", "rules": []},
+            "namespaces": [
+                {"name": "source", "cardinality": "optional", "report_only": true},
+                {"name": "period", "cardinality": "optional", "report_only": true, "type": "date_interval"}
+            ],
+            "report": {
+                "trigger": {"namespace": "type", "value": "report"},
+                "required_namespaces": ["source", "period"],
+                "period": {"namespace": "period", "regex": "^[0-9]{4}-[0-9]{2}-[0-9]{2}/[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
+            },
+            "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
+        }"#;
+        let core_json = embedded_core_json();
+        let default_json = embedded_pack_json("default@1").expect("default@1 must resolve");
+        let (profile, _warnings) =
+            Profile::from_packs(core_json, &[default_json, synthetic_report_layer])
+                .expect("default@1 layered with a synthetic report pack must merge cleanly");
+        assert!(profile.required_fields().count() == 6);
+        assert_eq!(profile.pack.report.trigger.value, "report");
+        assert_eq!(
+            profile.pack.report.required_namespaces,
+            vec!["source", "period"]
+        );
     }
 
     #[test]

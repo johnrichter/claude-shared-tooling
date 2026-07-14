@@ -1,0 +1,52 @@
+{
+  "kind": "extension-pack",
+  "profile": "default",
+  "version": "default@1",
+  "extends": "core@1",
+  "description": "The embedded DEFAULT extension pack -- a generic, workspace-agnostic vocabulary that instantiates `frontmatter-core.schema.json` (core@1) with a minimal, broadly-applicable tagging scheme: the six required fields + their fix-tier authorship, description caps by file_class, the `type`/`status`/`topic` namespace vocabulary, the file_class classification globs, and a small generated/exempt taxonomy. Carries NO report vocabulary -- the report namespaces (`source`/`period`/`audience`/`cadence`) and the report rule-set live only in the separate, opt-in `reports@1` pack. A repo layers this pack (optionally with `reports@1` and its own domain-specific pack) via its `navigator.toml`, or replaces it outright with its own vocabulary.",
+  "required_fields": [
+    { "field": "name", "authorship": "human_authored", "source": "A semantic title -- not mechanically inferable." },
+    { "field": "description", "authorship": "human_authored", "source": "Routing prose, capped by file_class (see description_caps)." },
+    { "field": "id", "authorship": "human_authored", "source": "A stable identity string -- not mechanically inferable." },
+    { "field": "tags", "authorship": "human_authored", "source": "Classification judgement -- a fix pass can only repair structure, not choose topics." },
+    { "field": "links", "authorship": "human_authored", "source": "Relationship judgement -- which other documents this one relates to." },
+    { "field": "updated", "authorship": "machine_derivable", "source": "An ISO-8601 UTC timestamp -- stampable at fix time." }
+  ],
+  "description_caps": {
+    "context": 350,
+    "skill": 500,
+    "agent": 750,
+    "source": "Description length cap by file class: context/workspace docs stay tightest since they're read most often; Skills and Agents get progressively more room for the extra routing detail their frontmatter carries."
+  },
+  "file_class": {
+    "default": "context",
+    "rules": [
+      { "class": "skill", "match": { "glob": "*.claude/skills/*/SKILL.md" }, "source": "Each skill is a `SKILL.md` under `.claude/skills/<name>/`; the skill file-class description cap is wider than a plain context doc's." },
+      { "class": "skill", "match": { "glob": "**/SKILL.md" }, "source": "Any `SKILL.md` anywhere is a skill (broad fallback after the anchored rule)." },
+      { "class": "agent", "match": { "glob": ".claude/agents/*.md" }, "source": "One `.md` per subagent under `.claude/agents/`; the agent file-class description cap is the widest." }
+    ],
+    "note": "Rules evaluated in array order, first match wins, else `default`. Globs use fnmatch semantics (`*` spans `/`); the anchored skill rule precedes the broad `**/SKILL.md` rule so both a nested and a repo-root SKILL.md classify as skill. `default=context` covers every other document (the tightest description-cap class)."
+  },
+  "namespaces": [
+    { "name": "type", "cardinality": "singleton", "source": "Exactly one document-kind tag per file." },
+    { "name": "status", "cardinality": "singleton", "source": "Exactly one completeness tag per file." },
+    { "name": "topic", "cardinality": "at_least_one", "source": "One or more subject-area tags per file." }
+  ],
+  "namespaces_order_note": "Array order IS the cascade iteration order (core `violation_cascade`): singletons type,status; at_least_one topic. Reordering this array changes emitted violation order for a multi-violation file -- treat it as a behavior change, not a cosmetic one.",
+  "report": {
+    "trigger": { "namespace": "type", "value": "__reports_pack_required__" },
+    "required_namespaces": [],
+    "period": {
+      "namespace": "type",
+      "regex": "^.*$"
+    },
+    "notes": "Interim placeholder: `core@1`'s meta-schema/struct still require a `report` block on every pack, but this pack carries no report vocabulary (that's `reports@1`'s job, M1.P1.T2) -- so `trigger.value` names no real tag any document uses, `required_namespaces` is empty, and `period` points at an always-present namespace with a no-op regex. Dormant when this pack is layered alone; a repo that also layers `reports@1` gets that pack's real trigger/period, which wins the merge. Retired once `core@2` (M1.P3.T1) generalizes `report` into a `{match, apply}` construct with no report-named special case.",
+    "source": "Placeholder mechanics only -- see `notes`. The real report axis lives in `reports@1`."
+  },
+  "exempt": {
+    "filenames": ["plan.md", "execution.md", "CLAUDE.md"],
+    "dir_components": [".pytest_cache", "__pycache__", ".git", "node_modules"],
+    "path_globs": [],
+    "source": "A minimal generated/exempt taxonomy: common cache/VCS directories and a few conventional filenames every repo tends to have. An adopting repo's own pack typically adds path_globs for its own generated-content locations."
+  }
+}
