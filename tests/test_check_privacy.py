@@ -93,6 +93,17 @@ class ScanTests(unittest.TestCase):
         })
         self.assertEqual(failures, [])
 
+    def test_git_worktrees_skipped_but_real_leak_still_caught(self):
+        # .git-worktrees holds transient full checkouts (mirrors .gitignore) --
+        # a leak inside one must not be scanned, but a real leak elsewhere must
+        # still fail. Regression guard for the enumerator/.gitignore drift.
+        failures, _ = self._scan({
+            ".git-worktrees/claude/wt/some.md": f"---\n{_P} internal\n{_O} public\n---\n",
+            "leak.md": f"---\n{_P} internal\n{_O} public\n---\n",
+        })
+        self.assertFalse(any(".git-worktrees" in f for f in failures), msg=str(failures))
+        self.assertTrue(any(f.startswith("leak.md") for f in failures), msg=str(failures))
+
 
 class ScopeAndExemptionAdversarialTests(unittest.TestCase):
     """Adversarial coverage for the frontmatter-scoping + fixture-exemption change.
