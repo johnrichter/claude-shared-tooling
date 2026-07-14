@@ -1,8 +1,8 @@
 {
   "kind": "core-profile",
   "profile": "core",
-  "version": "core@1",
-  "description": "Workspace frontmatter validation CORE PROFILE (mechanisms only, workspace-agnostic). Declares HOW frontmatter is validated as data — the cardinality vocabulary, the ordered tag-rule cascade with its exact violation codes/fields/message templates, and the required-field / description-cap / file-class / exempt mechanisms — WITHOUT any concrete namespace names, caps, or globs (those live in an extension pack, e.g. `frontmatter-psa-apm.pack.json`, that sets `extends: core@1`). INPUTS: an extension pack (concrete vocab) + one file's parsed frontmatter (`{fields, tags[], path}`). OUTPUT: an ordered list of violations `{code, field, message}` plus a derived `file_class`, byte-identical for identical input. INVARIANTS: the `violation_cascade` array is order-significant and both the Rust validator (M2.P2.T1b) and the refitted stdlib Python gate (M2.P2.T3/T4) MUST iterate it in array order so their emitted code+field sequences match (SC6 parity); every namespace/required-field iteration follows the pack's DECLARED array order; no LLM participates in validation. This file is a faithful externalization of `audit_helper/schema.py` (see `codes[].source` for line provenance) plus four reviewed additions documented in `DIVERGENCES.md`: the `owner` singleton, `description_caps`, `file_class`, and per-field `authorship`.",
+  "version": "core@2",
+  "description": "Workspace frontmatter validation CORE PROFILE (mechanisms only, workspace-agnostic). Declares HOW frontmatter is validated as data — the cardinality vocabulary, the ordered tag-rule cascade with its exact violation codes/fields/message templates, the general conditional `rule_sets` mechanism, and the required-field / description-cap / file-class / exempt mechanisms — WITHOUT any concrete namespace names, caps, or globs (those live in an extension pack that sets `extends: core@2`). `core@2` is a BREAKING change from `core@1`: the `core@1` `report`-named construct is removed and generalized into the `rule_sets` `{match, apply}` mechanism (there is no report-named branch anywhere). INPUTS: an extension pack (concrete vocab) + one file's parsed frontmatter (`{fields, tags[], path}`). OUTPUT: an ordered list of violations `{code, field, message}` plus a derived `file_class`, byte-identical for identical input. INVARIANTS: the `violation_cascade` array is order-significant and any interpreter MUST iterate it in array order so emitted code+field sequences are stable; every namespace/required-field/rule-set iteration follows the DECLARED array order; no LLM participates in validation.",
   "spec": {
     "instance_shape": {
       "fields": "map of top-level frontmatter keys to values; a field required by the pack counts as present whether declared top-level or nested under the `workspace:` wrapper (Skills/Agents/Rules), per CLAUDE.md frontmatter table and schema.py REQUIRED_FIELDS comment (schema.py:60-62)",
@@ -28,7 +28,7 @@
     "optional": {
       "min": 0,
       "max": null,
-      "meaning": "namespace may appear zero or more times; still subject to parent-dependency and report-only rules",
+      "meaning": "namespace may appear zero or more times; still subject to parent-dependency and conditional rule-set rules",
       "codes": {},
       "source": "CLAUDE.md Tagging Strategy — namespaces marked optional/❌"
     }
@@ -52,13 +52,13 @@
       "source": "NEW mechanism — CLAUDE.md frontmatter table description-cap classes (context ≤350, skill ≤500, agent ≤750). Absent from schema.py, but LIVE in the emitter frontmatter.py:364-374: code `DESCRIPTION_OVER_CAP`, char-count `len(description) > DESCRIPTION_CAPS[file_class]`, message `description is {len} chars, over the {file_class.value} cap of {cap}`. Code string + message template pinned to live. See DIVERGENCES.md D2."
     },
     "namespaces": {
-      "meaning": "the pack supplies an ORDER-SIGNIFICANT array of `{name, cardinality, parents?, report_only?}`. Array order IS the iteration order for every cascade phase that scans namespaces, so it must mirror schema.py's constant order (see the pack's `namespaces` note). `parents` = ordered list of namespaces that must co-occur when this namespace is used. `report_only: true` = valid only on report files.",
-      "source": "schema.py:68-88 (SINGLE_VALUE/AT_LEAST_ONE/NAMESPACE_PARENTS/REPORT_ONLY) + CLAUDE.md Tagging Strategy namespaces"
+      "meaning": "the pack supplies an ORDER-SIGNIFICANT array of `{name, cardinality, parents?, type?}`. Array order IS the iteration order for every cascade phase that scans namespaces. `parents` = ordered list of namespaces that must co-occur when this namespace is used.",
+      "source": "CLAUDE.md Tagging Strategy namespaces (cardinality/parents); per-namespace `type` drives downstream range-eligibility"
     },
-    "report": {
-      "meaning": "the pack supplies `{trigger:{namespace,value}, required_namespaces[], period:{namespace,regex}}`. `trigger` (e.g. type:report) flips report-mode. In report-mode each `required_namespaces` entry must be present, and every tag in the `period` namespace must match `period.regex`.",
-      "codes": { "required_absent": "MISSING_REQUIRED_TAG", "bad_period": "INVALID_PERIOD_FORMAT" },
-      "source": "schema.py:83-91 (REPORT_ONLY/REPORT_REQUIRED/PERIOD_RE) + tag_rule_violations:172-191 + is_report:122-128"
+    "rule_sets": {
+      "meaning": "the pack supplies an ORDER-SIGNIFICANT array of general conditional rule-sets `{match:{namespace,value}, apply:{require_namespaces[], forbidden_unless_matched[], value_formats[{namespace,regex,message}]}}`. A file MATCHES a rule-set when its tags carry `match.namespace:match.value`. On a matching file, each `require_namespaces` entry must be present and each `value_formats` entry's tags must satisfy its `regex` (a `date_interval`-typed namespace is additionally calendar-checked). On a NON-matching file, each `forbidden_unless_matched` namespace must be ABSENT. The report axis is one instance (match `type:report`); this mechanism has no report-named branch.",
+      "codes": { "forbidden_present": "REPORT_ONLY_TAG_MISUSED", "required_absent": "MISSING_REQUIRED_TAG", "bad_value_format": "INVALID_PERIOD_FORMAT" },
+      "source": "Generalizes the retired `core@1` report construct (trigger/required/period + the `report_only` namespace flag) into one `{match, apply}` mechanism"
     },
     "file_class": {
       "meaning": "the pack supplies `{rules:[{class, match:{glob}}], default}`. Rules are evaluated in array order against the repo-root-relative POSIX path (glob per fnmatch semantics, `*` spans `/`); the FIRST matching rule wins; if none match, `default` is used. The derived class selects the `description_caps` entry. No violation code — classification is an input to other checks.",
@@ -96,36 +96,34 @@
       "source": "schema.py:160-170"
     },
     {
-      "step": "report_detection",
-      "action": "report = (the `report.trigger.namespace` group contains a tag whose value equals `report.trigger.value`)",
+      "step": "rule_set_match",
+      "action": "for each rule-set, matched = (the `rule_sets[].match.namespace` group contains a tag whose value equals `rule_sets[].match.value`)",
       "emit": [],
-      "source": "schema.py:172 + is_report:122-128"
+      "source": "General {match, apply} rule-set detection (generalizes the retired report trigger)"
     },
     {
-      "step": "report_only_misuse",
-      "iterate": "namespaces where report_only == true, in pack-declared array order",
+      "step": "rule_set_forbidden",
+      "iterate": "each rule-set (pack-declared order); on a NON-matching file, each `apply.forbidden_unless_matched` namespace in listed order",
       "emit": [
-        { "when": "present AND NOT report", "code": "REPORT_ONLY_TAG_MISUSED", "field": "{namespace}", "message": "'{namespace}:' tag is only valid on type:report files" }
+        { "when": "present AND NOT matched", "code": "REPORT_ONLY_TAG_MISUSED", "field": "{namespace}", "message": "'{namespace}:' tag is only valid on {match} files" }
       ],
-      "source": "schema.py:174-178"
+      "source": "Generalizes the retired report_only-misuse phase; `{match}` renders as the rule-set's `namespace:value`"
     },
     {
-      "step": "report_required",
-      "guard": "report",
-      "iterate": "report.required_namespaces, in listed order",
+      "step": "rule_set_required",
+      "iterate": "each rule-set (pack-declared order); on a MATCHING file, each `apply.require_namespaces` entry in listed order",
       "emit": [
-        { "when": "count == 0", "code": "MISSING_REQUIRED_TAG", "field": "{namespace}", "message": "type:report requires a '{namespace}:' tag, which is missing" }
+        { "when": "count == 0", "code": "MISSING_REQUIRED_TAG", "field": "{namespace}", "message": "{match} requires a '{namespace}:' tag, which is missing" }
       ],
-      "source": "schema.py:180-185"
+      "source": "Generalizes the retired report_required phase; `{match}` renders as the rule-set's `namespace:value`"
     },
     {
-      "step": "report_period_format",
-      "guard": "report",
-      "iterate": "each raw tag in the `report.period.namespace` group, in file order",
+      "step": "rule_set_value_format",
+      "iterate": "each rule-set (pack-declared order); on a MATCHING file, each `apply.value_formats` entry, each raw tag in its `namespace` group in file order",
       "emit": [
-        { "when": "tag value does NOT match report.period.regex", "code": "INVALID_PERIOD_FORMAT", "field": "{period_namespace}", "message": "'{period_tag}' is not YYYY-MM-DD/YYYY-MM-DD" }
+        { "when": "tag value does NOT match the value_format `regex` (or, for a `date_interval` namespace, is not a real calendar interval)", "code": "INVALID_PERIOD_FORMAT", "field": "{namespace}", "message": "rendered from the matching rule-set's `apply.value_formats[].message` (pack-supplied, format-specific); this `message` field is documentation only and is not rendered" }
       ],
-      "source": "schema.py:186-191"
+      "source": "Generalizes the retired report_period_format phase; the format wording lives with the pack's value_format rule, the code lives here"
     }
   ],
   "independent_checks": {
@@ -137,11 +135,11 @@
     "file_class_classification": "derive file_class from path (input to description_cap; never emits)"
   },
   "codes": [
-    { "code": "MISSING_REQUIRED_TAG", "meaning": "a required tag namespace (singleton, at_least_one, or report-required) is absent", "source": "schema.py:146,158,184" },
-    { "code": "MULTIPLE_SINGLE_VALUE_TAGS", "meaning": "a singleton namespace appears more than once", "source": "schema.py:150" },
-    { "code": "ORPHAN_NAMESPACE_TAG", "meaning": "a child namespace is used without a required parent namespace", "source": "schema.py:166" },
-    { "code": "REPORT_ONLY_TAG_MISUSED", "meaning": "a report-only namespace appears on a non-report file", "source": "schema.py:177" },
-    { "code": "INVALID_PERIOD_FORMAT", "meaning": "a period tag value is not YYYY-MM-DD/YYYY-MM-DD", "source": "schema.py:190" },
+    { "code": "MISSING_REQUIRED_TAG", "meaning": "a required tag namespace (singleton, at_least_one, or a rule-set's require_namespaces) is absent", "source": "cardinality + rule_set_required phases" },
+    { "code": "MULTIPLE_SINGLE_VALUE_TAGS", "meaning": "a singleton namespace appears more than once", "source": "singleton_cardinality phase" },
+    { "code": "ORPHAN_NAMESPACE_TAG", "meaning": "a child namespace is used without a required parent namespace", "source": "parent_dependency phase" },
+    { "code": "REPORT_ONLY_TAG_MISUSED", "meaning": "a namespace a rule-set forbids outside its match (forbidden_unless_matched) appears on a non-matching file; code string retained for verdict-parity with pre-generalization output", "source": "rule_set_forbidden phase" },
+    { "code": "INVALID_PERIOD_FORMAT", "meaning": "a rule-set value_format check failed for a tag on a matching file; code string retained for verdict-parity with pre-generalization output", "source": "rule_set_value_format phase" },
     { "code": "MISSING_REQUIRED_FIELD", "meaning": "a required top-level frontmatter field is absent (checked outside the tag cascade)", "source": "schema.py:60-62 (field tuple) + live emitter frontmatter.py:362; code string CONFIRMED against live. See DIVERGENCES.md D5." },
     { "code": "DESCRIPTION_OVER_CAP", "meaning": "the `description` field exceeds the character cap for the file's file_class", "source": "NEW mechanism vs schema.py, but CONFIRMED against the live emitter frontmatter.py:370 (`DESCRIPTION_OVER_CAP`). See DIVERGENCES.md D2." }
   ]

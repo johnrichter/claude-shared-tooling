@@ -9,18 +9,24 @@
 //! file).
 //!
 //! # Construction paths
-//! - [`Profile::bundled_psa_apm`] -- embedded core (`core@1`) + embedded
-//!   psa-apm pack (`psa-apm@1`), both via `include_str!`. Zero filesystem
-//!   reads; this is what the crate's own tests use, and what a psa-apm
-//!   consumer uses by default.
+//! - [`Profile::core_only`] -- caller-supplied core JSON, zero packs: a
+//!   valid `Profile` with no namespace vocabulary, no required fields, no
+//!   conditional rule-sets. Every caller reaches this vocabulary-free state
+//!   the same way; the library never surfaces a specific pack as *the*
+//!   default.
 //! - [`Profile::from_pack_json`] -- embedded core + a caller-supplied pack
 //!   JSON string. This is the path a foreign repo takes: it ships its own
 //!   pack (its own required fields, namespaces, caps, ...) but adopts
-//!   `core@1` unchanged. Resolving *which* pack a foreign repo should load
+//!   `core@2` unchanged. Resolving *which* pack a foreign repo should load
 //!   (a `navigator.toml` sentinel) is a later task (M3.P2.T1); this
 //!   function only needs the pack's JSON text, already read by the caller.
 //! - [`Profile::from_json`] -- both core and pack supplied as JSON text.
-//!   The fully general constructor the two above wrap.
+//! - [`Profile::from_packs`] -- core plus one or more packs, layered. The
+//!   fully general constructor the paths above wrap. A named pack (e.g. the
+//!   shipped `default@1`/`reports@1`) is available only as an opt-in bundle
+//!   a caller fetches by name via [`embedded_pack_json`] and feeds in itself
+//!   -- the library never constructs a `Profile` from a bundled pack on its
+//!   own.
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use regex::Regex;
@@ -29,8 +35,17 @@ use std::fmt;
 
 const EMBEDDED_CORE_JSON: &str =
     include_str!("../../../schemas/frontmatter/frontmatter-core.schema.json");
-const EMBEDDED_PSA_APM_PACK_JSON: &str =
-    include_str!("../../../schemas/frontmatter/frontmatter-psa-apm.pack.json");
+const EMBEDDED_DEFAULT_PACK_JSON: &str =
+    include_str!("../../../schemas/frontmatter/frontmatter-default.pack.json");
+const EMBEDDED_REPORTS_PACK_JSON: &str =
+    include_str!("../../../schemas/frontmatter/frontmatter-reports.pack.json");
+
+/// Every extension pack this crate embeds at compile time, resolvable by
+/// name through [`embedded_pack_json`]. Adding a new embedded pack is a
+/// one-line addition here -- [`embedded_pack_json`] never branches on which
+/// pack it is, only on whether the requested name matches the pack's own
+/// declared `version`.
+const EMBEDDED_PACKS: &[&str] = &[EMBEDDED_DEFAULT_PACK_JSON, EMBEDDED_REPORTS_PACK_JSON];
 
 /// Why a [`Profile`] could not be built from supplied JSON text.
 ///
@@ -46,8 +61,8 @@ pub enum ProfileError {
     /// The extension pack JSON did not deserialize into `Pack` (this
     /// crate's private extension-pack struct).
     InvalidPack(serde_json::Error),
-    /// The pack's `report.period.regex` is not a `regex`-crate-compilable
-    /// pattern.
+    /// One of the pack's rule-set `value_formats[].regex` patterns is not a
+    /// `regex`-crate-compilable pattern.
     InvalidPeriodRegex(String, regex::Error),
     /// One of the pack's `file_class` rule globs, or one of its
     /// `exempt.path_globs`, is not a `globset`-compilable glob.
@@ -72,11 +87,14 @@ pub enum ProfileError {
     },
     /// A dangling reference found only after every layer's merge and every
     /// `removes` directive has been applied -- e.g. a namespace's `parents`
-    /// entry, or `report`'s trigger/required/period namespace, names a
+    /// entry, or a rule-set's `match`/`require_namespaces`/
+    /// `forbidden_unless_matched`/`value_formats` namespace, names a
     /// namespace no layer's merged result still has; or `file_class.default`
     /// names a class [`Profile`]'s merged `description_caps` has no entry
-    /// for. Fails closed rather than leaving the merged [`Profile`] in an
-    /// inconsistent state a caller could not detect until runtime.
+    /// for. Checked ONCE against the fully-merged profile (order-agnostic --
+    /// reordering the layers never causes or cures it), failing closed
+    /// rather than leaving the merged [`Profile`] in an inconsistent state a
+    /// caller could not detect until runtime.
     IntegrityViolation {
         /// Human-readable detail of the dangling reference.
         detail: String,
@@ -132,34 +150,68 @@ impl std::error::Error for ProfileError {}
 pub struct Profile {
     pub(crate) core: Core,
     pub(crate) pack: Pack,
-    /// The pack's `report.period.regex`, compiled once at construction
-    /// time (never per-file/per-match), so a malformed pattern is a
-    /// construction-time [`ProfileError`], not a per-match failure deep in
-    /// `validate`. See the pack file's `report.period.regex`/`notes` for
-    /// why the shipped pattern uses `[0-9]`, not `\d`.
-    pub(crate) period_pattern: Regex,
+    /// Every rule-set's `apply.value_formats[].regex`, compiled once at
+    /// construction time (never per-file/per-match), so a malformed pattern
+    /// is a construction-time [`ProfileError`], not a per-match failure deep
+    /// in `validate`. Shape is parallel to `pack.rule_sets`: outer index is
+    /// the rule-set's position, inner index its value-format's position, so
+    /// `rule_set_value_patterns[i][j]` is the compiled form of
+    /// `pack.rule_sets[i].apply.value_formats[j].regex`. See a pack's
+    /// value-format `regex`/`notes` for why the shipped pattern uses `[0-9]`,
+    /// not `\d`.
+    pub(crate) rule_set_value_patterns: Vec<Vec<Regex>>,
     /// The pack's `file_class.rules` globs and `exempt.path_globs`,
     /// compiled once at construction time -- see [`CompiledGlobs`].
     pub(crate) globs: CompiledGlobs,
 }
 
 impl Profile {
-    /// Builds a `Profile` from the embedded core (`core@1`) and the
-    /// embedded psa-apm pack (`psa-apm@1`) -- no filesystem access.
+    /// Builds a `Profile` from caller-supplied core JSON with zero packs --
+    /// a valid `Profile` carrying no namespace vocabulary, no required
+    /// fields, and no report rules. `validate`/`fix`/`query` all run
+    /// against it without error; every namespace-driven check simply has
+    /// nothing to check.
     ///
-    /// # Panics
-    /// Never: both embedded JSON strings are this crate's own committed
-    /// schema files, validated by this crate's own tests -- an error here
-    /// would mean the checked-in schema itself is broken, which the test
-    /// suite (`profile::tests::bundled_psa_apm_profile_builds`) catches at
-    /// build time, not at a caller's runtime.
-    #[must_use]
-    pub fn bundled_psa_apm() -> Self {
-        Self::from_json(EMBEDDED_CORE_JSON, EMBEDDED_PSA_APM_PACK_JSON)
-            .expect("bundled core + psa-apm pack JSON must deserialize; see profile::tests")
+    /// This is the neutral floor every caller starts from: layering a pack
+    /// (via [`Profile::from_pack_json`]/[`Profile::from_json`]/
+    /// [`Profile::from_packs`]) is always the caller's own opt-in choice,
+    /// never something the library does on its own.
+    ///
+    /// # Errors
+    /// [`ProfileError::InvalidCore`] if `core_json` does not deserialize
+    /// into this crate's `Core`.
+    pub fn core_only(core_json: &str) -> Result<Self, ProfileError> {
+        let core: Core = serde_json::from_str(core_json).map_err(ProfileError::InvalidCore)?;
+        let pack = Pack {
+            required_fields: Vec::new(),
+            description_caps: DescriptionCaps::from_entries(&[]),
+            file_class: FileClassRules {
+                default: String::new(),
+                rules: Vec::new(),
+            },
+            namespaces: Vec::new(),
+            rule_sets: Vec::new(),
+            exempt: ExemptSpec {
+                filenames: Vec::new(),
+                dir_components: Vec::new(),
+                path_globs: Vec::new(),
+            },
+        };
+        // No vocabulary means nothing to cross-reference -- `check_integrity`
+        // exists to catch a pack's OWN dangling references, which an empty
+        // pack cannot have, so this path skips it rather than working around
+        // checks written for a non-empty vocabulary.
+        let rule_set_value_patterns = compile_rule_set_value_patterns(&pack)?;
+        let globs = CompiledGlobs::compile(&pack)?;
+        Ok(Self {
+            core,
+            pack,
+            rule_set_value_patterns,
+            globs,
+        })
     }
 
-    /// Builds a `Profile` from the embedded core (`core@1`) plus a
+    /// Builds a `Profile` from the embedded core (`core@2`) plus a
     /// caller-supplied extension pack's JSON text -- the path a foreign
     /// repo takes when it ships its own vocabulary but adopts the core
     /// mechanisms unchanged. A single-pack special case of
@@ -194,7 +246,7 @@ impl Profile {
     /// `codes`/`authorship`) is rejected outright, never silently merged.
     /// Above that fixed floor, each pack's VOCABULARY (`required_fields` by
     /// field, `description_caps` by file class, `namespaces` by name,
-    /// `report`'s trigger/period/required-namespace entries, `file_class`
+    /// `rule_sets` by their `match` key (`namespace:value`), `file_class`
     /// rules and default, `exempt`'s filenames/dirs/globs) merges key by
     /// key, later pack wins:
     /// - a key no earlier pack defined merges in silently;
@@ -210,12 +262,17 @@ impl Profile {
     ///   target) rather than silently ignored.
     ///
     /// After every layer merges, a fixed set of cross-references is
-    /// checked against the FINAL merged vocabulary (never against an
-    /// intermediate layer) -- a namespace's `parents`, `report`'s
-    /// trigger/required/period namespaces, and `file_class.default`'s
-    /// description cap must all still resolve; a dangling one is
-    /// [`ProfileError::IntegrityViolation`], failing closed rather than
-    /// shipping a `Profile` whose cross-references are broken.
+    /// checked ONCE against the FINAL merged vocabulary (never against an
+    /// intermediate layer, and independent of layer order) -- a namespace's
+    /// `parents`, every rule-set's `match`/`require_namespaces`/
+    /// `forbidden_unless_matched`/`value_formats` namespaces, and
+    /// `file_class.default`'s description cap must all still resolve; a
+    /// dangling one is [`ProfileError::IntegrityViolation`], failing closed
+    /// rather than shipping a `Profile` whose cross-references are broken.
+    /// A rule-set whose `match` namespace is owned by a DIFFERENT pack (e.g.
+    /// `reports@1` matching `type`, owned by `default@1`) resolves fine
+    /// regardless of which order the two were layered, since the check reads
+    /// the merged set, not an earlier-in-order slice of it.
     ///
     /// # Determinism
     /// The merged `Profile` and the returned `Vec<MergeWarning>` are pure
@@ -240,8 +297,8 @@ impl Profile {
     /// the core's own `version`; [`ProfileError::IntegrityViolation`] on a
     /// post-merge dangling reference (see above);
     /// [`ProfileError::InvalidPeriodRegex`] / [`ProfileError::InvalidGlob`]
-    /// if the FINAL merged `report.period.regex` / `file_class`/`exempt`
-    /// globs don't compile.
+    /// if a FINAL merged rule-set `value_formats[].regex` / `file_class`/
+    /// `exempt` glob doesn't compile.
     pub fn from_packs(
         core_json: &str,
         pack_jsons: &[&str],
@@ -279,16 +336,14 @@ impl Profile {
         let pack = build_pack(&state);
         check_integrity(&pack, &state)?;
 
-        let period_pattern = Regex::new(&pack.report.period.regex).map_err(|err| {
-            ProfileError::InvalidPeriodRegex(pack.report.period.regex.clone(), err)
-        })?;
+        let rule_set_value_patterns = compile_rule_set_value_patterns(&pack)?;
         let globs = CompiledGlobs::compile(&pack)?;
 
         Ok((
             Self {
                 core,
                 pack,
-                period_pattern,
+                rule_set_value_patterns,
                 globs,
             },
             warnings,
@@ -332,12 +387,12 @@ impl Profile {
     }
 }
 
-/// The bundled core profile (`core@1`) JSON text, for feeding
-/// [`Profile::from_packs`]. The same text [`Profile::bundled_psa_apm`] and
-/// [`Profile::from_pack_json`] already embed internally -- exposed here so
-/// a caller orchestrating its own `from_packs` call (interleaving named
-/// bundles with its own committed-path packs) never needs a second copy of
-/// this crate's schema data.
+/// The bundled core profile (`core@2`) JSON text, for feeding
+/// [`Profile::from_packs`]. The same text [`Profile::from_pack_json`]
+/// already embeds internally -- exposed here so a caller orchestrating its
+/// own `from_packs` call (interleaving named bundles with its own
+/// committed-path packs) never needs a second copy of this crate's schema
+/// data.
 #[must_use]
 pub fn embedded_core_json() -> &'static str {
     EMBEDDED_CORE_JSON
@@ -345,26 +400,27 @@ pub fn embedded_core_json() -> &'static str {
 
 /// Resolves a named bundle to its embedded extension-pack JSON text, for
 /// feeding [`Profile::from_packs`] alongside committed-path packs a caller
-/// reads itself. `name` is matched against the embedded psa-apm pack's own
-/// declared `version` field (e.g. `"psa-apm@1"`), read from the pack's JSON
-/// at call time rather than duplicated as a separate literal -- so the
-/// resolver key can never drift from the pack it returns. Returns `None`
-/// for any unrecognized name.
+/// reads itself. `name` is matched against each embedded pack's own
+/// declared `version` field (e.g. `"default@1"`, `"reports@1"`), read from
+/// the pack's JSON at call time rather than duplicated as a separate
+/// literal -- so a resolver key can never drift from the pack it returns.
+/// Returns `None` for any unrecognized name.
 ///
 /// # Panics
-/// Never: the embedded pack JSON is this crate's own committed schema
+/// Never: every embedded pack JSON is this crate's own committed schema
 /// file, whose shape (a JSON object with a string `version` field) this
-/// crate's own tests pin -- see [`Profile::bundled_psa_apm`]'s panic-safety
-/// argument.
+/// crate's own tests pin (see `profile::tests`).
 #[must_use]
 pub fn embedded_pack_json(name: &str) -> Option<&'static str> {
-    let declared: serde_json::Value = serde_json::from_str(EMBEDDED_PSA_APM_PACK_JSON)
-        .expect("EMBEDDED_PSA_APM_PACK_JSON must deserialize; see profile::tests");
-    let declared_name = declared
-        .get("version")
-        .and_then(serde_json::Value::as_str)
-        .expect("embedded psa-apm pack JSON must declare a string 'version'");
-    (name == declared_name).then_some(EMBEDDED_PSA_APM_PACK_JSON)
+    EMBEDDED_PACKS.iter().copied().find(|pack_json| {
+        let declared: serde_json::Value = serde_json::from_str(pack_json)
+            .expect("every embedded pack JSON must deserialize; see profile::tests");
+        let declared_name = declared
+            .get("version")
+            .and_then(serde_json::Value::as_str)
+            .expect("every embedded pack JSON must declare a string 'version'");
+        name == declared_name
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -447,17 +503,21 @@ impl CascadeStep {
 // ---------------------------------------------------------------------------
 
 /// The extension pack: the concrete required fields, description caps,
-/// namespace vocabulary, report rules, file-class globs, and exempt
-/// taxonomy a workspace instantiates `core@1` with. See
-/// `frontmatter-psa-apm.pack.json` for the psa-apm values and their
-/// `source` provenance.
+/// namespace vocabulary, conditional rule-sets, file-class globs, and exempt
+/// taxonomy a workspace instantiates `core@2` with. See
+/// `frontmatter-default.pack.json` / `frontmatter-reports.pack.json` for the
+/// shipped values and their `source` provenance.
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct Pack {
     pub(crate) required_fields: Vec<RequiredField>,
     pub(crate) description_caps: DescriptionCaps,
     pub(crate) file_class: FileClassRules,
     pub(crate) namespaces: Vec<NamespaceSpec>,
-    pub(crate) report: ReportSpec,
+    /// Conditional `{match, apply}` rule-sets. Optional: a pack with no
+    /// conditional rules (e.g. `default@1`) omits the key and gets an empty
+    /// vec.
+    #[serde(default)]
+    pub(crate) rule_sets: Vec<RuleSet>,
     pub(crate) exempt: ExemptSpec,
 }
 
@@ -532,9 +592,11 @@ pub(crate) struct FileClassMatch {
     pub(crate) glob: String,
 }
 
-/// One namespace's cascade participation: its cardinality plus the two
-/// optional axes (`parents`, `report_only`) that add extra cascade phases
-/// for that namespace. Array order in the pack (this struct's source
+/// One namespace's cascade participation: its cardinality plus the optional
+/// `parents` axis that adds an extra cascade phase for that namespace.
+/// Whether a namespace is confined to (or required by) certain files is a
+/// rule-set concern (`apply.forbidden_unless_matched`/`require_namespaces`),
+/// not a per-namespace flag. Array order in the pack (this struct's source
 /// position in `Pack::namespaces`) IS iteration order -- see
 /// `namespaces_order_note` in the pack file.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -543,8 +605,6 @@ pub(crate) struct NamespaceSpec {
     pub(crate) cardinality: Cardinality,
     #[serde(default)]
     pub(crate) parents: Vec<String>,
-    #[serde(default)]
-    pub(crate) report_only: bool,
     /// This facet's value type -- will drive range-eligibility for a
     /// downstream query consumer (facetquery): `String` supports
     /// equality/wildcard only, `Date`/`Numeric` are also
@@ -568,8 +628,8 @@ pub(crate) enum Cardinality {
 }
 
 /// A namespace's value type, per the pack's optional per-namespace `type`
-/// (see `frontmatter-psa-apm.pack.json`'s `namespaces[].type` and the
-/// meta-schema's `namespaces.items.properties.type`). `String` is the
+/// (see `frontmatter-reports.pack.json`'s `period` `namespaces[].type` and
+/// the meta-schema's `namespaces.items.properties.type`). `String` is the
 /// default for a pack that omits `type` -- every namespace predates this
 /// field and must keep deserializing unchanged.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -589,23 +649,60 @@ pub enum FacetType {
     DateInterval,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct ReportSpec {
-    pub(crate) trigger: ReportTrigger,
-    pub(crate) required_namespaces: Vec<String>,
-    pub(crate) period: ReportPeriod,
+/// One general conditional rule-set: a `match` criterion selecting files
+/// and the `apply` rules bound to the matching (or, for
+/// `forbidden_unless_matched`, the non-matching) files. The report axis is
+/// one instance (match `type:report`); nothing here is report-named. The
+/// rule-set's merge key is its `match` rendered as `namespace:value`.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub(crate) struct RuleSet {
+    #[serde(rename = "match")]
+    pub(crate) match_criteria: MatchCriteria,
+    pub(crate) apply: ApplyRules,
+}
+
+impl RuleSet {
+    /// The rule-set's merge/removal key -- its `match` as `namespace:value`.
+    pub(crate) fn key(&self) -> String {
+        format!(
+            "{}:{}",
+            self.match_criteria.namespace, self.match_criteria.value
+        )
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct ReportTrigger {
+pub(crate) struct MatchCriteria {
     pub(crate) namespace: String,
     pub(crate) value: String,
 }
 
+/// The rules a rule-set applies. Every axis is optional so a rule-set can
+/// express only the directions it needs.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct ReportPeriod {
+pub(crate) struct ApplyRules {
+    /// Namespaces that MUST be present on a matching file.
+    #[serde(default)]
+    pub(crate) require_namespaces: Vec<String>,
+    /// Namespaces that must be ABSENT on a NON-matching file (the misuse
+    /// inverse -- a namespace valid only on matching files).
+    #[serde(default)]
+    pub(crate) forbidden_unless_matched: Vec<String>,
+    /// Per-namespace value-format checks applied on a matching file.
+    #[serde(default)]
+    pub(crate) value_formats: Vec<ValueFormat>,
+}
+
+/// A matching file's tags in `namespace` must match `regex`; on failure the
+/// pack-supplied `message` (format-specific wording, `{value}` = the whole
+/// offending tag) is rendered. The code lives on the core cascade step, the
+/// message here -- so a differently-formatted pack reuses the mechanism with
+/// its own wording without touching the core.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub(crate) struct ValueFormat {
     pub(crate) namespace: String,
     pub(crate) regex: String,
+    pub(crate) message: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -639,7 +736,7 @@ struct PackLayer {
 /// A dimension of the pack vocabulary [`Profile::from_packs`] merges --
 /// fixes both the meaning of a [`MergeWarning`]'s `dimension` and the order
 /// dimensions are merged within one layer (declared here in the same order
-/// as [`Pack`]'s own fields), part of this crate's warning-ordering
+/// as `Pack`'s own fields), part of this crate's warning-ordering
 /// determinism contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dimension {
@@ -653,12 +750,8 @@ pub enum Dimension {
     FileClassRule,
     /// `namespaces`, keyed by `name`.
     Namespace,
-    /// `report.trigger` (a single always-present key).
-    ReportTrigger,
-    /// `report.period` (a single always-present key).
-    ReportPeriod,
-    /// `report.required_namespaces`, keyed by namespace name.
-    ReportRequired,
+    /// `rule_sets`, keyed by the rule-set's `match` as `namespace:value`.
+    RuleSet,
     /// `exempt.filenames`, keyed by filename.
     ExemptFilename,
     /// `exempt.dir_components`, keyed by directory component.
@@ -740,9 +833,7 @@ struct MergeState {
     file_class_default: Vec<MergedSlot<String>>,
     file_class_rules: Vec<MergedSlot<FileClassRule>>,
     namespaces: Vec<MergedSlot<NamespaceSpec>>,
-    report_trigger: Vec<MergedSlot<ReportTrigger>>,
-    report_period: Vec<MergedSlot<ReportPeriod>>,
-    report_required: Vec<MergedSlot<()>>,
+    rule_sets: Vec<MergedSlot<RuleSet>>,
     exempt_filenames: Vec<MergedSlot<()>>,
     exempt_dirs: Vec<MergedSlot<()>>,
     exempt_globs: Vec<MergedSlot<()>>,
@@ -751,8 +842,8 @@ struct MergeState {
 /// Groups `items` by key, preserving each key's first-appearance position
 /// and each key's own values in their given order -- the shape
 /// [`merge_grouped`] needs to treat "one pack layer declares the same key
-/// more than once" (the bundled psa-apm pack's two `class: "skill"`
-/// `file_class` rules) as ONE bundle, not a spurious same-layer conflict.
+/// more than once" (e.g. `default@1`'s two `class: "skill"` `file_class`
+/// rules) as ONE bundle, not a spurious same-layer conflict.
 fn group_by_key<V>(items: Vec<(String, V)>) -> Vec<(String, Vec<V>)> {
     let mut groups: Vec<(String, Vec<V>)> = Vec::new();
     for (key, value) in items {
@@ -823,7 +914,7 @@ fn merge_layer(
     warnings: &mut Vec<MergeWarning>,
 ) {
     merge_layer_vocabulary(state, layer_index, layer, warnings);
-    merge_layer_report(state, layer_index, layer, warnings);
+    merge_layer_rule_sets(state, layer_index, layer, warnings);
     merge_layer_exempt(state, layer_index, layer, warnings);
 }
 
@@ -899,9 +990,13 @@ fn merge_layer_vocabulary(
     );
 }
 
-/// The `report` slice of one layer's [`Dimension`] set -- see
-/// [`merge_layer_vocabulary`]'s doc for why this is split out.
-fn merge_layer_report(
+/// The `rule_sets` slice of one layer's [`Dimension`] set -- see
+/// [`merge_layer_vocabulary`]'s doc for why this is split out. Each rule-set
+/// merges as one atomic keyed unit (key = its `match` as `namespace:value`,
+/// value = the whole `{match, apply}`): a later layer redefining the same
+/// match key overrides it wholesale (last-definer-wins), a new match key is
+/// additive.
+fn merge_layer_rule_sets(
     state: &mut MergeState,
     layer_index: usize,
     layer: &PackLayer,
@@ -911,31 +1006,14 @@ fn merge_layer_report(
     let layer_id = &layer.version;
 
     merge_grouped(
-        &mut state.report_trigger,
+        &mut state.rule_sets,
         layer_index,
         layer_id,
-        Dimension::ReportTrigger,
-        vec![("trigger".to_string(), vec![pack.report.trigger.clone()])],
-        warnings,
-    );
-    merge_grouped(
-        &mut state.report_period,
-        layer_index,
-        layer_id,
-        Dimension::ReportPeriod,
-        vec![("period".to_string(), vec![pack.report.period.clone()])],
-        warnings,
-    );
-    merge_grouped(
-        &mut state.report_required,
-        layer_index,
-        layer_id,
-        Dimension::ReportRequired,
+        Dimension::RuleSet,
         group_by_key(
-            pack.report
-                .required_namespaces
+            pack.rule_sets
                 .iter()
-                .map(|ns| (ns.clone(), ()))
+                .map(|rs| (rs.key(), rs.clone()))
                 .collect(),
         ),
         warnings,
@@ -1049,9 +1127,9 @@ fn apply_removal(
             Dimension::FileClassRule,
             remove_slot(&mut state.file_class_rules, target),
         ),
-        "report_required" => (
-            Dimension::ReportRequired,
-            remove_slot(&mut state.report_required, target),
+        "rule_set" => (
+            Dimension::RuleSet,
+            remove_slot(&mut state.rule_sets, target),
         ),
         "exempt_filename" => (
             Dimension::ExemptFilename,
@@ -1081,9 +1159,8 @@ fn apply_removal(
 /// slots, in their final (post-removal) order, flattened back into the
 /// shape `validate::validate` already knows how to read: a key's position
 /// in its `Vec<MergedSlot<_>>` is preserved exactly, so cascade-order-
-/// sensitive dimensions (`namespaces`, `required_fields`,
-/// `report.required_namespaces`) come out in the order the layers
-/// converged on, not re-sorted.
+/// sensitive dimensions (`namespaces`, `required_fields`, `rule_sets`) come
+/// out in the order the layers converged on, not re-sorted.
 fn build_pack(state: &MergeState) -> Pack {
     Pack {
         required_fields: state
@@ -1116,31 +1193,11 @@ fn build_pack(state: &MergeState) -> Pack {
             .iter()
             .flat_map(|slot| slot.values.iter().cloned())
             .collect(),
-        report: ReportSpec {
-            trigger: state
-                .report_trigger
-                .first()
-                .and_then(|slot| slot.values.first())
-                .cloned()
-                .unwrap_or_else(|| ReportTrigger {
-                    namespace: String::new(),
-                    value: String::new(),
-                }),
-            required_namespaces: state
-                .report_required
-                .iter()
-                .map(|slot| slot.key.clone())
-                .collect(),
-            period: state
-                .report_period
-                .first()
-                .and_then(|slot| slot.values.first())
-                .cloned()
-                .unwrap_or_else(|| ReportPeriod {
-                    namespace: String::new(),
-                    regex: String::new(),
-                }),
-        },
+        rule_sets: state
+            .rule_sets
+            .iter()
+            .flat_map(|slot| slot.values.iter().cloned())
+            .collect(),
         exempt: ExemptSpec {
             filenames: state
                 .exempt_filenames
@@ -1155,8 +1212,14 @@ fn build_pack(state: &MergeState) -> Pack {
 
 /// Cross-reference checks run once, after every layer has merged and every
 /// `removes` directive has applied -- see [`Profile::from_packs`]'
-/// `IntegrityViolation` contract. Checked in a fixed order (namespace
-/// parents, then `report`'s trigger/required/period, then
+/// `IntegrityViolation` contract. Every reference is resolved against the
+/// FINAL merged `pack.namespaces` (never an earlier-in-order slice), so the
+/// check is ORDER-AGNOSTIC: a rule-set whose `match` namespace is owned by a
+/// pack layered before OR after it resolves identically, and reordering the
+/// `extensions` list never causes or cures a violation -- only a namespace
+/// genuinely ABSENT from the merged set does (OQ6 resolution). Checked in a
+/// fixed order (namespace parents, then each rule-set's
+/// match/require/forbidden/value-format namespaces in pack order, then
 /// `file_class.default`'s cap), so the first dangling reference found is
 /// always the same one for identical input.
 fn check_integrity(pack: &Pack, state: &MergeState) -> Result<(), ProfileError> {
@@ -1166,6 +1229,15 @@ fn check_integrity(pack: &Pack, state: &MergeState) -> Result<(), ProfileError> 
             .namespaces
             .iter()
             .find(|slot| slot.key == name)
+            .map(|slot| vec![slot.layer_id.clone()])
+            .unwrap_or_default()
+    };
+    // The layer that defined a given rule-set, for violation provenance.
+    let rule_set_layers = |key: &str| -> Vec<String> {
+        state
+            .rule_sets
+            .iter()
+            .find(|slot| slot.key == key)
             .map(|slot| vec![slot.layer_id.clone()])
             .unwrap_or_default()
     };
@@ -1184,49 +1256,42 @@ fn check_integrity(pack: &Pack, state: &MergeState) -> Result<(), ProfileError> 
             }
         }
     }
-    if !namespace_exists(&pack.report.trigger.namespace) {
-        return Err(ProfileError::IntegrityViolation {
-            detail: format!(
-                "report.trigger references namespace '{}', which is absent from the merged profile",
-                pack.report.trigger.namespace
-            ),
-            key: pack.report.trigger.namespace.clone(),
-            layers: state
-                .report_trigger
-                .first()
-                .map(|slot| vec![slot.layer_id.clone()])
-                .unwrap_or_default(),
-        });
-    }
-    for required in &pack.report.required_namespaces {
-        if !namespace_exists(required) {
-            return Err(ProfileError::IntegrityViolation {
-                detail: format!(
-                    "report.required_namespaces references namespace '{required}', which is absent from the merged profile"
-                ),
-                key: required.clone(),
-                layers: state
-                    .report_required
-                    .iter()
-                    .find(|slot| slot.key == *required)
-                    .map(|slot| vec![slot.layer_id.clone()])
-                    .unwrap_or_default(),
-            });
+    for rs in &pack.rule_sets {
+        let key = rs.key();
+        // Every namespace a rule-set references -- its match trigger, its
+        // required set, its forbidden set, and each value_format target --
+        // must exist in the merged profile.
+        let mut referenced: Vec<(&str, &str)> =
+            vec![(rs.match_criteria.namespace.as_str(), "match")];
+        referenced.extend(
+            rs.apply
+                .require_namespaces
+                .iter()
+                .map(|ns| (ns.as_str(), "require_namespaces")),
+        );
+        referenced.extend(
+            rs.apply
+                .forbidden_unless_matched
+                .iter()
+                .map(|ns| (ns.as_str(), "forbidden_unless_matched")),
+        );
+        referenced.extend(
+            rs.apply
+                .value_formats
+                .iter()
+                .map(|vf| (vf.namespace.as_str(), "value_formats")),
+        );
+        for (ns, axis) in referenced {
+            if !namespace_exists(ns) {
+                return Err(ProfileError::IntegrityViolation {
+                    detail: format!(
+                        "rule-set '{key}' {axis} references namespace '{ns}', which is absent from the merged profile"
+                    ),
+                    key: ns.to_string(),
+                    layers: rule_set_layers(&key),
+                });
+            }
         }
-    }
-    if !namespace_exists(&pack.report.period.namespace) {
-        return Err(ProfileError::IntegrityViolation {
-            detail: format!(
-                "report.period references namespace '{}', which is absent from the merged profile",
-                pack.report.period.namespace
-            ),
-            key: pack.report.period.namespace.clone(),
-            layers: state
-                .report_period
-                .first()
-                .map(|slot| vec![slot.layer_id.clone()])
-                .unwrap_or_default(),
-        });
     }
     if pack
         .description_caps
@@ -1256,7 +1321,7 @@ fn check_integrity(pack: &Pack, state: &MergeState) -> Result<(), ProfileError> 
 /// `Profile::from_packs` call into a panic; a test in this module's
 /// `#[cfg(test)]` block cross-checks this literal against the meta-schema's
 /// own pattern so the two cannot silently drift.
-const REMOVES_REFERENCE_PATTERN: &str = r"^(namespace|required_field|description_cap|file_class_rule|report_required|exempt_filename|exempt_dir|exempt_glob):.+$";
+const REMOVES_REFERENCE_PATTERN: &str = r"^(namespace|required_field|description_cap|file_class_rule|rule_set|exempt_filename|exempt_dir|exempt_glob):.+$";
 
 /// The `extends`/`version` `name@version` shape both the core profile and
 /// every pack must satisfy -- mirrors `frontmatter-profile.meta.schema.json`'s
@@ -1333,6 +1398,28 @@ fn validate_pack_structure(raw: &serde_json::Value, layer: &PackLayer) -> Result
     Ok(())
 }
 
+/// Compiles every rule-set's `apply.value_formats[].regex` into a
+/// `regex::Regex`, once, at [`Profile`] construction -- so a malformed
+/// pattern is a construction-time [`ProfileError::InvalidPeriodRegex`], not
+/// a per-match failure deep in `validate`. The result is parallel to
+/// `pack.rule_sets`: outer index is the rule-set, inner index its
+/// value-format, matching [`Profile::rule_set_value_patterns`]'s contract.
+fn compile_rule_set_value_patterns(pack: &Pack) -> Result<Vec<Vec<Regex>>, ProfileError> {
+    pack.rule_sets
+        .iter()
+        .map(|rs| {
+            rs.apply
+                .value_formats
+                .iter()
+                .map(|vf| {
+                    Regex::new(&vf.regex)
+                        .map_err(|err| ProfileError::InvalidPeriodRegex(vf.regex.clone(), err))
+                })
+                .collect()
+        })
+        .collect()
+}
+
 /// The pack's `file_class.rules` globs and `exempt.path_globs`, each
 /// compiled once into a `globset::GlobSet` at [`Profile`] construction
 /// (never per-file) -- determinism + perf, and a malformed glob in the
@@ -1394,14 +1481,72 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bundled_psa_apm_profile_builds() {
-        let _profile = Profile::bundled_psa_apm();
+    fn core_only_profile_builds_with_no_vocabulary() {
+        let profile =
+            Profile::core_only(EMBEDDED_CORE_JSON).expect("core-only construction must succeed");
+        assert!(profile.pack.namespaces.is_empty());
+        assert!(profile.pack.required_fields.is_empty());
+        assert_eq!(profile.namespace_facet_type("type"), None);
+        assert_eq!(profile.description_cap("context"), None);
     }
 
     #[test]
-    fn from_pack_json_accepts_the_bundled_pack_text_too() {
-        let profile = Profile::from_pack_json(EMBEDDED_PSA_APM_PACK_JSON)
-            .expect("bundled pack JSON must be a valid pack");
+    fn core_only_rejects_malformed_core_json_as_a_typed_error() {
+        let result = Profile::core_only("{ not json");
+        assert!(matches!(result, Err(ProfileError::InvalidCore(_))));
+    }
+
+    #[test]
+    fn core_only_rejects_empty_core_json_as_a_typed_error_not_a_panic() {
+        // `{}` is well-formed JSON but has none of `Core`'s required
+        // fields (`version`/`mechanisms`/`violation_cascade`) -- a distinct
+        // malformed-core shape from unparseable JSON, still a typed error.
+        let result = Profile::core_only("{}");
+        assert!(matches!(result, Err(ProfileError::InvalidCore(_))));
+    }
+
+    #[test]
+    fn core_only_profile_runs_validate_and_query_end_to_end_without_panic() {
+        // Gap: `core_only_profile_builds_with_no_vocabulary` only inspects
+        // struct fields directly -- it never exercises the actual
+        // `validate`/`query::matches` call paths a real caller takes. This
+        // proves the vocabulary-free Profile is usable, not just buildable:
+        // every namespace-driven check simply has nothing to check, and
+        // neither call panics on a document that carries tags/fields no
+        // empty vocabulary declares.
+        let profile =
+            Profile::core_only(EMBEDDED_CORE_JSON).expect("core-only construction must succeed");
+
+        let doc = crate::parse::parse(
+            "---\nname: \"x\"\ntags:\n  - type:knowledge\n  - topic:apm\n---\nbody\n",
+        )
+        .expect("well-formed document must parse");
+
+        let entry = crate::validate::validate(&doc, "some/doc.md", &profile);
+        assert!(
+            entry.violations.is_empty(),
+            "an empty vocabulary declares no required fields/namespaces/caps to violate: {:?}",
+            entry.violations
+        );
+
+        let query = facetquery::parse("type:knowledge").expect("test query must parse");
+        let result = crate::query::matches(&doc, &query, &profile);
+        assert!(
+            !result.matched,
+            "a facet no empty vocabulary declares must be unknown, not spuriously matched"
+        );
+
+        // Also exercise the empty-document case (no frontmatter at all) --
+        // the emptiest possible input against the emptiest possible schema.
+        let empty_doc = crate::parse::parse("").expect("empty input must parse as no-frontmatter");
+        let empty_entry = crate::validate::validate(&empty_doc, "some/doc.md", &profile);
+        assert!(empty_entry.violations.is_empty());
+    }
+
+    #[test]
+    fn from_pack_json_accepts_a_synthetic_pack_text() {
+        let profile = Profile::from_pack_json(crate::test_support::SYNTHETIC_PACK_JSON)
+            .expect("synthetic pack JSON must be a valid pack");
         assert_eq!(profile.pack.required_fields.len(), 6);
     }
 
@@ -1423,21 +1568,222 @@ mod tests {
     }
 
     #[test]
-    fn embedded_pack_json_resolves_the_psa_apm_name_and_rejects_unknown_names() {
+    fn embedded_pack_json_rejects_unknown_and_retired_names() {
         assert!(embedded_pack_json("does-not-exist@9").is_none());
-        let pack_json = embedded_pack_json("psa-apm@1").expect("psa-apm@1 must resolve");
-        assert_eq!(pack_json, EMBEDDED_PSA_APM_PACK_JSON);
+        // psa-apm@1 is retired under the single-embedded-core@2 topology --
+        // it is no longer an embedded bundle.
+        assert!(
+            embedded_pack_json("psa-apm@1").is_none(),
+            "the retired psa-apm@1 pack must not resolve as an embedded bundle"
+        );
+    }
+
+    #[test]
+    fn embedded_pack_json_resolves_the_default_name_as_a_distinct_bundle() {
+        let pack_json = embedded_pack_json("default@1").expect("default@1 must resolve");
+        assert_eq!(pack_json, EMBEDDED_DEFAULT_PACK_JSON);
+        assert_ne!(
+            pack_json, EMBEDDED_REPORTS_PACK_JSON,
+            "default@1 and reports@1 must be distinct embedded bundles"
+        );
+    }
+
+    #[test]
+    fn default_pack_carries_no_report_vocabulary() {
+        // SC6: default@1 is generic-minus-report -- the report namespaces
+        // live only in the isolated reports@1 pack.
+        let default_pack: serde_json::Value = serde_json::from_str(EMBEDDED_DEFAULT_PACK_JSON)
+            .expect("default@1 pack JSON must parse");
+        let namespace_names: Vec<&str> = default_pack["namespaces"]
+            .as_array()
+            .expect("namespaces must be an array")
+            .iter()
+            .map(|ns| {
+                ns["name"]
+                    .as_str()
+                    .expect("namespace name must be a string")
+            })
+            .collect();
+        for report_namespace in ["source", "period", "audience", "cadence"] {
+            assert!(
+                !namespace_names.contains(&report_namespace),
+                "default@1 must not declare report namespace '{report_namespace}'"
+            );
+        }
+        assert!(
+            default_pack["namespaces"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|ns| ns.get("report_only").is_none()),
+            "default@1 must declare no report_only namespace"
+        );
+    }
+
+    #[test]
+    fn default_pack_layers_cleanly_with_a_synthetic_pack_supplying_report_vocabulary() {
+        // default@1 is designed to be layered with a report-bearing pack
+        // (e.g. reports@1), not used standalone for report enforcement. A
+        // synthetic conforming companion pack (not a specific named
+        // instance) proves the layering MECHANISM -- independent of any
+        // one pack's concrete vocabulary -- accepts default@1's generic
+        // vocabulary and merges in a later layer's `type:report` rule-set
+        // (whose match namespace `type` is owned by default@1) cleanly; see
+        // `default_pack_layered_with_reports_pack_expresses_report_as_a_rule_set`
+        // for the concrete reports@1 integration assertion.
+        let synthetic_report_layer = r#"{
+            "kind": "extension-pack",
+            "profile": "synthetic-reports",
+            "version": "synthetic-reports@1",
+            "extends": "core@2",
+            "description": "Synthetic test-only pack supplying report vocabulary.",
+            "required_fields": [],
+            "description_caps": {},
+            "file_class": {"default": "context", "rules": []},
+            "namespaces": [
+                {"name": "source", "cardinality": "optional"},
+                {"name": "period", "cardinality": "optional", "type": "date_interval"}
+            ],
+            "rule_sets": [
+                {
+                    "match": {"namespace": "type", "value": "report"},
+                    "apply": {
+                        "require_namespaces": ["source", "period"],
+                        "forbidden_unless_matched": ["source", "period"],
+                        "value_formats": [
+                            {"namespace": "period", "regex": "^[0-9]{4}-[0-9]{2}-[0-9]{2}/[0-9]{4}-[0-9]{2}-[0-9]{2}$", "message": "'{value}' is not YYYY-MM-DD/YYYY-MM-DD"}
+                        ]
+                    }
+                }
+            ],
+            "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
+        }"#;
+        let core_json = embedded_core_json();
+        let default_json = embedded_pack_json("default@1").expect("default@1 must resolve");
+        let (profile, _warnings) =
+            Profile::from_packs(core_json, &[default_json, synthetic_report_layer])
+                .expect("default@1 layered with a synthetic report pack must merge cleanly");
+        assert!(profile.required_fields().count() == 6);
+        assert_eq!(profile.pack.rule_sets.len(), 1);
+        assert_eq!(profile.pack.rule_sets[0].match_criteria.value, "report");
+        assert_eq!(
+            profile.pack.rule_sets[0].apply.require_namespaces,
+            vec!["source", "period"]
+        );
+    }
+
+    #[test]
+    fn embedded_pack_json_resolves_the_reports_name_as_a_distinct_bundle() {
+        let pack_json = embedded_pack_json("reports@1").expect("reports@1 must resolve");
+        assert_eq!(pack_json, EMBEDDED_REPORTS_PACK_JSON);
+        assert_ne!(
+            pack_json, EMBEDDED_DEFAULT_PACK_JSON,
+            "reports@1 and default@1 must be distinct embedded bundles"
+        );
+    }
+
+    #[test]
+    fn reports_pack_carries_only_report_vocabulary_and_a_type_report_rule_set() {
+        // SC6: reports@1 is the isolated, opt-in report bundle -- exactly the
+        // four report namespaces (no report_only flag; that axis is retired),
+        // no generic required fields/caps/exempt entries, and a single
+        // general `{match, apply}` rule-set matching `type:report`.
+        let reports_pack: serde_json::Value = serde_json::from_str(EMBEDDED_REPORTS_PACK_JSON)
+            .expect("reports@1 pack JSON must parse");
+        let namespace_names: Vec<&str> = reports_pack["namespaces"]
+            .as_array()
+            .expect("namespaces must be an array")
+            .iter()
+            .map(|ns| {
+                ns["name"]
+                    .as_str()
+                    .expect("namespace name must be a string")
+            })
+            .collect();
+        assert_eq!(
+            namespace_names,
+            vec!["source", "period", "audience", "cadence"]
+        );
+        assert!(
+            reports_pack["namespaces"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|ns| ns.get("report_only").is_none()),
+            "the retired report_only flag must not appear on any reports@1 namespace"
+        );
+        assert_eq!(
+            reports_pack["required_fields"].as_array().map(Vec::len),
+            Some(0),
+            "reports@1 adds no required fields"
+        );
+        let rule_set = &reports_pack["rule_sets"][0];
+        assert_eq!(rule_set["match"]["namespace"].as_str(), Some("type"));
+        assert_eq!(rule_set["match"]["value"].as_str(), Some("report"));
+        assert_eq!(
+            rule_set["apply"]["require_namespaces"]
+                .as_array()
+                .map(|ns| ns.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>()),
+            Some(vec!["source", "period"])
+        );
+        assert_eq!(
+            rule_set["apply"]["forbidden_unless_matched"]
+                .as_array()
+                .map(|ns| ns.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>()),
+            Some(vec!["source", "period", "audience", "cadence"]),
+            "both directions: all four report namespaces are forbidden off a report file"
+        );
+    }
+
+    #[test]
+    fn default_pack_layered_with_reports_pack_expresses_report_as_a_rule_set() {
+        // Integration assertion: layering the shipped default@1 then the
+        // shipped reports@1 yields a merged profile whose sole rule-set
+        // matches `type:report` (its match namespace `type` owned by
+        // default@1), and the four report namespaces are present. There is no
+        // report-named field on the merged pack -- report is one rule-set.
+        let core_json = embedded_core_json();
+        let default_json = embedded_pack_json("default@1").expect("default@1 must resolve");
+        let reports_json = embedded_pack_json("reports@1").expect("reports@1 must resolve");
+        let (profile, warnings) = Profile::from_packs(core_json, &[default_json, reports_json])
+            .expect("default@1 layered with reports@1 must merge cleanly");
+        assert!(
+            warnings.is_empty(),
+            "default@1's inert report placeholder is gone, so reports@1's \
+             `type:report` rule-set introduces a new key -- no override WARN \
+             should surface: {warnings:?}"
+        );
+
+        assert_eq!(profile.pack.rule_sets.len(), 1);
+        let rule_set = &profile.pack.rule_sets[0];
+        assert_eq!(rule_set.match_criteria.namespace, "type");
+        assert_eq!(rule_set.match_criteria.value, "report");
+        assert_eq!(rule_set.apply.require_namespaces, vec!["source", "period"]);
+        assert_eq!(
+            rule_set.apply.forbidden_unless_matched,
+            vec!["source", "period", "audience", "cadence"]
+        );
+
+        for report_namespace in ["source", "period", "audience", "cadence"] {
+            assert!(
+                profile.namespace_facet_type(report_namespace).is_some(),
+                "merged profile must carry report namespace '{report_namespace}'"
+            );
+        }
+        // default@1's own generic vocabulary survives the layering.
+        assert_eq!(profile.required_fields().count(), 6);
     }
 
     #[test]
     fn embedded_pack_json_resolver_key_matches_the_pack_own_declared_identity() {
         // Drift guard: the name embedded_pack_json resolves for must be
-        // exactly the pack's own declared `version`, not a separately
-        // maintained literal that could fall out of sync.
-        let declared = bundled_pack_as_value_standalone();
+        // exactly the embedded pack's own declared `version`, not a
+        // separately maintained literal that could fall out of sync.
+        let declared: serde_json::Value = serde_json::from_str(EMBEDDED_DEFAULT_PACK_JSON)
+            .expect("embedded pack JSON must parse");
         let declared_name = declared["version"]
             .as_str()
-            .expect("bundled pack must declare a string version");
+            .expect("embedded pack must declare a string version");
         assert!(embedded_pack_json(declared_name).is_some());
     }
 
@@ -1449,40 +1795,41 @@ mod tests {
     #[test]
     fn embedded_pack_json_rejects_whitespace_padded_valid_name() {
         // Exact match only -- no trimming of the caller-supplied name.
-        assert!(embedded_pack_json(" psa-apm@1 ").is_none());
-        assert!(embedded_pack_json("psa-apm@1 ").is_none());
-        assert!(embedded_pack_json(" psa-apm@1").is_none());
+        assert!(embedded_pack_json(" default@1 ").is_none());
+        assert!(embedded_pack_json("default@1 ").is_none());
+        assert!(embedded_pack_json(" default@1").is_none());
     }
 
     #[test]
     fn embedded_pack_json_rejects_prefix_or_substring_of_valid_name() {
         // No partial/prefix match -- a substring of the declared version is
         // not the declared version.
-        assert!(embedded_pack_json("psa-apm").is_none());
-        assert!(embedded_pack_json("psa-apm@").is_none());
-        assert!(embedded_pack_json("sa-apm@1").is_none());
-        assert!(embedded_pack_json("psa-apm@11").is_none());
+        assert!(embedded_pack_json("default").is_none());
+        assert!(embedded_pack_json("default@").is_none());
+        assert!(embedded_pack_json("efault@1").is_none());
+        assert!(embedded_pack_json("default@11").is_none());
     }
 
     #[test]
     fn embedded_pack_json_is_case_sensitive() {
-        assert!(embedded_pack_json("PSA-APM@1").is_none());
-        assert!(embedded_pack_json("Psa-Apm@1").is_none());
+        assert!(embedded_pack_json("DEFAULT@1").is_none());
+        assert!(embedded_pack_json("Default@1").is_none());
     }
 
     #[test]
-    fn embedded_accessors_round_trip_through_from_packs_matching_bundled_psa_apm() {
+    fn embedded_accessors_round_trip_through_from_packs_matching_from_pack_json() {
         let core_json = embedded_core_json();
-        let pack_json = embedded_pack_json("psa-apm@1").expect("psa-apm@1 must resolve");
+        let pack_json = embedded_pack_json("default@1").expect("default@1 must resolve");
         let (profile, warnings) = Profile::from_packs(core_json, &[pack_json])
             .expect("embedded core + pack must merge cleanly");
         assert!(warnings.is_empty());
 
-        let bundled = Profile::bundled_psa_apm();
-        assert_eq!(profile.core.version, bundled.core.version);
+        let via_from_pack_json =
+            Profile::from_pack_json(pack_json).expect("from_pack_json must build the same pack");
+        assert_eq!(profile.core.version, via_from_pack_json.core.version);
         assert_eq!(
             profile.required_fields().collect::<Vec<_>>(),
-            bundled.required_fields().collect::<Vec<_>>()
+            via_from_pack_json.required_fields().collect::<Vec<_>>()
         );
     }
 
@@ -1496,20 +1843,21 @@ mod tests {
 
     #[test]
     fn truncated_pack_json_is_a_typed_error_not_a_panic() {
-        // Bundled pack text cut off mid-object -- a realistic "partial
+        // Embedded pack text cut off mid-object -- a realistic "partial
         // write"/"truncated download" shape, not just a syntax typo.
-        let truncated = &EMBEDDED_PSA_APM_PACK_JSON[..EMBEDDED_PSA_APM_PACK_JSON.len() / 2];
+        let truncated = &EMBEDDED_DEFAULT_PACK_JSON[..EMBEDDED_DEFAULT_PACK_JSON.len() / 2];
         let result = Profile::from_pack_json(truncated);
         assert!(matches!(result, Err(ProfileError::InvalidPack(_))));
     }
 
     #[test]
     fn pack_json_missing_a_required_key_is_a_typed_error_not_a_panic() {
-        // Valid JSON, valid object shape, but missing `report` entirely --
-        // `Pack`'s fields are not `#[serde(default)]`, so this must fail
-        // deserialization rather than construct a half-populated `Pack`.
+        // Valid JSON, valid object shape, but missing `exempt` entirely --
+        // `Pack`'s non-`#[serde(default)]` fields must fail deserialization
+        // rather than construct a half-populated `Pack`. (`rule_sets` IS
+        // `#[serde(default)]`, so omitting it is fine -- `exempt` is not.)
         let result = Profile::from_pack_json(
-            r#"{"required_fields":[],"description_caps":{},"file_class":{"default":"context","rules":[]},"namespaces":[],"exempt":{"filenames":[],"dir_components":[],"path_globs":[]}}"#,
+            r#"{"required_fields":[],"description_caps":{},"file_class":{"default":"context","rules":[]},"namespaces":[]}"#,
         );
         assert!(matches!(result, Err(ProfileError::InvalidPack(_))));
     }
@@ -1518,7 +1866,7 @@ mod tests {
     fn pack_json_with_wrong_field_type_is_a_typed_error_not_a_panic() {
         // `required_fields` must be an array of objects; a bare string is
         // the wrong shape entirely.
-        let mut pack = bundled_pack_as_value_standalone();
+        let mut pack = synthetic_pack_as_value();
         pack["required_fields"] = serde_json::json!("not-an-array");
         let result = Profile::from_pack_json(&pack.to_string());
         assert!(matches!(result, Err(ProfileError::InvalidPack(_))));
@@ -1533,7 +1881,7 @@ mod tests {
 
     #[test]
     fn malformed_core_json_is_a_typed_error_not_a_panic() {
-        let result = Profile::from_json("{ not json", EMBEDDED_PSA_APM_PACK_JSON);
+        let result = Profile::from_json("{ not json", EMBEDDED_DEFAULT_PACK_JSON);
         assert!(matches!(result, Err(ProfileError::InvalidCore(_))));
     }
 
@@ -1549,8 +1897,9 @@ mod tests {
     /// than pinned as a regression.
     #[test]
     fn invalid_period_regex_is_a_typed_error_not_a_panic() {
-        let mut pack = bundled_pack_as_value_standalone();
-        pack["report"]["period"]["regex"] = serde_json::json!(r"^(unbalanced"); // real regex syntax error
+        let mut pack = synthetic_pack_as_value();
+        pack["rule_sets"][0]["apply"]["value_formats"][0]["regex"] =
+            serde_json::json!(r"^(unbalanced"); // real regex syntax error
         let result = Profile::from_pack_json(&pack.to_string());
         assert!(matches!(
             result,
@@ -1562,15 +1911,16 @@ mod tests {
     fn a_character_class_period_regex_now_compiles_cleanly() {
         // The prior hand-rolled subset rejected any character class as
         // "unsupported"; the real `regex` crate has no such restriction.
-        let mut pack = bundled_pack_as_value_standalone();
-        pack["report"]["period"]["regex"] = serde_json::json!(r"^[0-9]{4}$");
+        let mut pack = synthetic_pack_as_value();
+        pack["rule_sets"][0]["apply"]["value_formats"][0]["regex"] =
+            serde_json::json!(r"^[0-9]{4}$");
         let result = Profile::from_pack_json(&pack.to_string());
         assert!(result.is_ok());
     }
 
     #[test]
     fn invalid_file_class_glob_is_a_typed_error_not_a_panic() {
-        let mut pack = bundled_pack_as_value_standalone();
+        let mut pack = synthetic_pack_as_value();
         pack["file_class"]["rules"][0]["match"]["glob"] = serde_json::json!("[unterminated");
         let result = Profile::from_pack_json(&pack.to_string());
         assert!(matches!(result, Err(ProfileError::InvalidGlob(_, _))));
@@ -1578,30 +1928,37 @@ mod tests {
 
     #[test]
     fn invalid_exempt_path_glob_is_a_typed_error_not_a_panic() {
-        let mut pack = bundled_pack_as_value_standalone();
+        let mut pack = synthetic_pack_as_value();
         pack["exempt"]["path_globs"] = serde_json::json!(["[unterminated"]);
         let result = Profile::from_pack_json(&pack.to_string());
         assert!(matches!(result, Err(ProfileError::InvalidGlob(_, _))));
     }
 
-    fn bundled_pack_as_value_standalone() -> serde_json::Value {
-        serde_json::from_str(EMBEDDED_PSA_APM_PACK_JSON).expect("bundled pack JSON must parse")
+    fn synthetic_pack_as_value() -> serde_json::Value {
+        serde_json::from_str(crate::test_support::SYNTHETIC_PACK_JSON)
+            .expect("synthetic pack JSON must parse")
     }
 
-    // -- SDET: shipped period regex vs Python PERIOD_RE semantics ----------
+    // -- SDET: shipped period regex semantics (the reports@1-shaped
+    // -- date-interval value_format regex the synthetic pack carries) ------
 
-    fn psa_apm_pattern() -> Regex {
-        Profile::bundled_psa_apm().period_pattern
+    fn period_value_pattern() -> Regex {
+        // The synthetic pack's sole rule-set's sole value_format regex --
+        // the compiled `period` shape check.
+        Profile::from_pack_json(crate::test_support::SYNTHETIC_PACK_JSON)
+            .expect("synthetic pack JSON must build a Profile")
+            .rule_set_value_patterns[0][0]
+            .clone()
     }
 
     #[test]
     fn period_pattern_matches_the_canonical_shape() {
-        assert!(psa_apm_pattern().is_match("2026-04-01/2026-06-30"));
+        assert!(period_value_pattern().is_match("2026-04-01/2026-06-30"));
     }
 
     #[test]
     fn period_pattern_rejects_tricky_non_matches() {
-        let p = psa_apm_pattern();
+        let p = period_value_pattern();
         // Extra/missing digits.
         assert!(!p.is_match("2026-4-01/2026-06-30"), "short month");
         assert!(
@@ -1636,7 +1993,7 @@ mod tests {
     /// functional regression.
     #[test]
     fn shipped_period_regex_rejects_unicode_digits_that_pythons_d_would_accept() {
-        let p = psa_apm_pattern();
+        let p = period_value_pattern();
         assert!(
             !p.is_match("\u{0662}\u{0660}\u{0662}\u{0666}-04-01/2026-06-30"),
             "the shipped ASCII-only `[0-9]` pattern must reject Arabic-Indic \
@@ -1653,12 +2010,13 @@ mod tests {
             .namespaces
             .iter()
             .find(|n| n.name == name)
-            .expect("namespace must exist in the bundled pack")
+            .expect("namespace must exist in the synthetic pack")
     }
 
     #[test]
-    fn bundled_period_namespace_is_facet_type_date_interval() {
-        let profile = Profile::bundled_psa_apm();
+    fn period_namespace_is_facet_type_date_interval() {
+        let profile = Profile::from_pack_json(crate::test_support::SYNTHETIC_PACK_JSON)
+            .expect("synthetic pack JSON must build a Profile");
         assert_eq!(
             namespace(&profile, "period").facet_type,
             FacetType::DateInterval
@@ -1667,24 +2025,26 @@ mod tests {
 
     #[test]
     fn a_namespace_omitting_type_defaults_to_facet_type_string() {
-        let profile = Profile::bundled_psa_apm();
+        let profile = Profile::from_pack_json(crate::test_support::SYNTHETIC_PACK_JSON)
+            .expect("synthetic pack JSON must build a Profile");
         // `topic` carries no `type` in the pack file.
         assert_eq!(namespace(&profile, "topic").facet_type, FacetType::String);
     }
 
     #[test]
     fn an_unknown_facet_type_value_is_a_typed_error_not_a_panic() {
-        let mut pack = bundled_pack_as_value_standalone();
+        let mut pack = synthetic_pack_as_value();
         pack["namespaces"][0]["type"] = serde_json::json!("not-a-real-type");
         let result = Profile::from_pack_json(&pack.to_string());
         assert!(matches!(result, Err(ProfileError::InvalidPack(_))));
     }
 
     #[test]
-    fn bundled_psa_apm_has_the_expected_per_namespace_facet_types() {
-        // Additive check: `period` is the only namespace this task types as
+    fn synthetic_pack_has_the_expected_per_namespace_facet_types() {
+        // Additive check: `period` is the only namespace typed as
         // non-`String` -- every other namespace keeps the implicit default.
-        let profile = Profile::bundled_psa_apm();
+        let profile = Profile::from_pack_json(crate::test_support::SYNTHETIC_PACK_JSON)
+            .expect("synthetic pack JSON must build a Profile");
         for spec in &profile.pack.namespaces {
             let expected = if spec.name == "period" {
                 FacetType::DateInterval
@@ -1739,7 +2099,7 @@ mod tests {
             "required_field",
             "description_cap",
             "file_class_rule",
-            "report_required",
+            "rule_set",
             "exempt_filename",
             "exempt_dir",
             "exempt_glob",
@@ -1806,14 +2166,14 @@ mod tests {
             serde_json::from_str(EMBEDDED_CORE_JSON).expect("bundled core JSON must parse");
         assert_eq!(core["kind"], "core-profile");
 
-        let pack: serde_json::Value =
-            serde_json::from_str(EMBEDDED_PSA_APM_PACK_JSON).expect("bundled pack JSON must parse");
+        let pack: serde_json::Value = serde_json::from_str(EMBEDDED_DEFAULT_PACK_JSON)
+            .expect("embedded pack JSON must parse");
         assert_eq!(pack["kind"], "extension-pack");
     }
 
     #[test]
     fn a_malformed_removes_entry_is_rejected_as_a_meta_schema_violation() {
-        let mut pack = bundled_pack_as_value_standalone();
+        let mut pack = synthetic_pack_as_value();
         pack["removes"] = serde_json::json!(["not-a-valid-typed-reference"]);
         let result = Profile::from_pack_json(&pack.to_string());
         assert!(
@@ -1840,7 +2200,7 @@ mod tests {
     const MERGE_BASE_PACK: &str = r#"{
         "kind": "extension-pack",
         "version": "base@1",
-        "extends": "core@1",
+        "extends": "core@2",
         "required_fields": [{"field": "name", "authorship": "human_authored"}],
         "description_caps": {"context": 100, "extra": 50},
         "file_class": {"default": "context", "rules": []},
@@ -1848,18 +2208,13 @@ mod tests {
             {"name": "type", "cardinality": "singleton"},
             {"name": "period", "cardinality": "optional", "type": "date"}
         ],
-        "report": {
-            "trigger": {"namespace": "type", "value": "report"},
-            "required_namespaces": [],
-            "period": {"namespace": "period", "regex": "^.*$"}
-        },
         "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
     }"#;
 
     const MERGE_EXT_PACK: &str = r#"{
         "kind": "extension-pack",
         "version": "ext@1",
-        "extends": "core@1",
+        "extends": "core@2",
         "removes": ["required_field:name"],
         "required_fields": [],
         "description_caps": {"context": 200},
@@ -1868,18 +2223,13 @@ mod tests {
             {"name": "team", "cardinality": "optional"},
             {"name": "period", "cardinality": "optional", "type": "numeric"}
         ],
-        "report": {
-            "trigger": {"namespace": "type", "value": "report"},
-            "required_namespaces": [],
-            "period": {"namespace": "period", "regex": "^.*$"}
-        },
         "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
     }"#;
 
     const MERGE_THIRD_PACK: &str = r#"{
         "kind": "extension-pack",
         "version": "third@1",
-        "extends": "core@1",
+        "extends": "core@2",
         "removes": ["description_cap:ghost"],
         "required_fields": [],
         "description_caps": {"context": 300},
@@ -1887,11 +2237,6 @@ mod tests {
         "namespaces": [
             {"name": "team", "cardinality": "optional"}
         ],
-        "report": {
-            "trigger": {"namespace": "type", "value": "report"},
-            "required_namespaces": [],
-            "period": {"namespace": "period", "regex": "^.*$"}
-        },
         "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
     }"#;
 
@@ -1979,6 +2324,74 @@ mod tests {
         assert_eq!(profile.namespace_facet_type("no-such-namespace"), None);
     }
 
+    /// SC4: a synthetic pack that REMOVES a facet and OVERRIDES another
+    /// facet's type changes both `validate`'s and `namespace_facet_type`'s
+    /// (the read path a query consumer types a facet through) output --
+    /// with no change to `validate.rs`, `query.rs`, or this file's non-test
+    /// code. The schema edit alone is what moves the verdict.
+    #[test]
+    fn removing_a_facet_and_overriding_anothers_type_changes_validate_and_query_typing() {
+        const BASE: &str = r#"{
+            "kind": "extension-pack",
+            "version": "sc4-base@1",
+            "extends": "core@2",
+            "required_fields": [],
+            "description_caps": {"context": 100},
+            "file_class": {"default": "context", "rules": []},
+            "namespaces": [
+                {"name": "type", "cardinality": "singleton"},
+                {"name": "topic", "cardinality": "at_least_one"},
+                {"name": "period", "cardinality": "optional", "type": "date"}
+            ],
+            "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
+        }"#;
+        const EXT: &str = r#"{
+            "kind": "extension-pack",
+            "version": "sc4-ext@1",
+            "extends": "core@2",
+            "removes": ["namespace:topic"],
+            "required_fields": [],
+            "description_caps": {},
+            "file_class": {"default": "context", "rules": []},
+            "namespaces": [
+                {"name": "period", "cardinality": "optional", "type": "numeric"}
+            ],
+            "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
+        }"#;
+
+        let doc = crate::parse::parse("---\nname: \"x\"\ntags:\n  - type:knowledge\n---\nbody\n")
+            .unwrap();
+
+        // Before the ext layer: `topic` is required, `period` is date-typed.
+        let (before, _) =
+            Profile::from_packs(EMBEDDED_CORE_JSON, &[BASE]).expect("base alone must merge");
+        let before_entry = crate::validate::validate(&doc, "some/doc.md", &before);
+        assert!(
+            before_entry
+                .violations
+                .iter()
+                .any(|v| v.code == "MISSING_REQUIRED_TAG" && v.field == "topic"),
+            "base pack requires at least one topic tag"
+        );
+        assert_eq!(before.namespace_facet_type("period"), Some(FacetType::Date));
+
+        // After layering the ext pack: `topic` is gone (removed), `period`
+        // is now numeric-typed -- both from the schema edit alone.
+        let (after, _) =
+            Profile::from_packs(EMBEDDED_CORE_JSON, &[BASE, EXT]).expect("base + ext must merge");
+        let after_entry = crate::validate::validate(&doc, "some/doc.md", &after);
+        assert!(
+            !after_entry.violations.iter().any(|v| v.field == "topic"),
+            "removing the topic namespace must drop its violation with no code change: {:?}",
+            after_entry.violations
+        );
+        assert_eq!(
+            after.namespace_facet_type("period"),
+            Some(FacetType::Numeric),
+            "overriding period's type must retype it with no code change"
+        );
+    }
+
     #[test]
     fn merge_is_a_pure_function_of_its_ordered_inputs() {
         let (profile_a, warnings_a) = Profile::from_packs(
@@ -2028,13 +2441,12 @@ mod tests {
     }
 
     #[test]
-    fn from_pack_json_and_bundled_psa_apm_are_unaffected_by_from_packs() {
+    fn from_pack_json_is_unaffected_by_from_packs() {
         // Single-pack special cases must keep behaving exactly as before --
         // no warnings surface (there is nothing to override or remove
         // against with only one pack) and the profile is unchanged.
-        let _bundled = Profile::bundled_psa_apm();
-        let via_from_pack_json = Profile::from_pack_json(EMBEDDED_PSA_APM_PACK_JSON)
-            .expect("bundled pack JSON must still build a Profile");
+        let via_from_pack_json = Profile::from_pack_json(crate::test_support::SYNTHETIC_PACK_JSON)
+            .expect("synthetic pack JSON must still build a Profile");
         assert_eq!(via_from_pack_json.pack.required_fields.len(), 6);
     }
 
@@ -2071,7 +2483,7 @@ mod tests {
         assert!(matches!(
             result,
             Err(ProfileError::VersionSkew { extends, core, .. })
-                if extends == "core@99" && core == "core@1"
+                if extends == "core@99" && core == "core@2"
         ));
     }
 
@@ -2095,17 +2507,12 @@ mod tests {
         let removing_pack = r#"{
             "kind": "extension-pack",
             "version": "removes-default-cap@1",
-            "extends": "core@1",
+            "extends": "core@2",
             "removes": ["description_cap:context"],
             "required_fields": [],
             "description_caps": {},
             "file_class": {"default": "context", "rules": []},
             "namespaces": [],
-            "report": {
-                "trigger": {"namespace": "type", "value": "report"},
-                "required_namespaces": [],
-                "period": {"namespace": "period", "regex": "^.*$"}
-            },
             "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
         }"#;
         let result = Profile::from_packs(EMBEDDED_CORE_JSON, &[MERGE_BASE_PACK, removing_pack]);
@@ -2114,13 +2521,129 @@ mod tests {
             Err(ProfileError::IntegrityViolation { ref key, .. }) if key == "context"
         ));
     }
+
+    // -- core@2 / rule-set integrity + OQ6 (order-agnostic reference check) --
+
+    #[test]
+    fn a_rule_set_referencing_an_absent_facet_is_an_integrity_violation() {
+        // A rule-set whose `match` namespace exists in no merged pack fails
+        // closed -- the general form of the retired report-trigger integrity
+        // check (SC17 hard-error class).
+        let pack = r#"{
+            "kind": "extension-pack",
+            "version": "dangling-rule-set@1",
+            "extends": "core@2",
+            "required_fields": [],
+            "description_caps": {"context": 10},
+            "file_class": {"default": "context", "rules": []},
+            "namespaces": [{"name": "type", "cardinality": "singleton"}],
+            "rule_sets": [
+                {
+                    "match": {"namespace": "type", "value": "report"},
+                    "apply": {"require_namespaces": ["ghost-facet"]}
+                }
+            ],
+            "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
+        }"#;
+        let result = Profile::from_packs(EMBEDDED_CORE_JSON, &[pack]);
+        assert!(matches!(
+            result,
+            Err(ProfileError::IntegrityViolation { ref key, .. }) if key == "ghost-facet"
+        ));
+    }
+
+    // A base pack owning `type` and a separate pack whose rule-set MATCHES
+    // `type:report` -- the cross-pack reference OQ6 is about.
+    const OQ6_BASE_OWNS_TYPE: &str = r#"{
+        "kind": "extension-pack",
+        "version": "oq6-base@1",
+        "extends": "core@2",
+        "required_fields": [],
+        "description_caps": {"context": 10},
+        "file_class": {"default": "context", "rules": []},
+        "namespaces": [
+            {"name": "type", "cardinality": "singleton"},
+            {"name": "source", "cardinality": "optional"}
+        ],
+        "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
+    }"#;
+
+    const OQ6_RULE_SET_MATCHES_TYPE: &str = r#"{
+        "kind": "extension-pack",
+        "version": "oq6-rules@1",
+        "extends": "core@2",
+        "required_fields": [],
+        "description_caps": {},
+        "file_class": {"default": "context", "rules": []},
+        "namespaces": [],
+        "rule_sets": [
+            {
+                "match": {"namespace": "type", "value": "report"},
+                "apply": {"require_namespaces": ["source"], "forbidden_unless_matched": ["source"]}
+            }
+        ],
+        "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
+    }"#;
+
+    #[test]
+    fn rule_set_cross_pack_reference_check_is_order_agnostic() {
+        // OQ6 (RESOLVED): a rule-set's trigger/target facet references are
+        // resolved against the FULLY-MERGED profile, never an earlier-in-
+        // order slice. The pack owning `type` may be layered BEFORE or AFTER
+        // the pack whose rule-set matches `type:report`; both orders merge
+        // cleanly, because `type` is in the merged set either way. Reordering
+        // `extensions` is NOT a hard error.
+        let forward = Profile::from_packs(
+            EMBEDDED_CORE_JSON,
+            &[OQ6_BASE_OWNS_TYPE, OQ6_RULE_SET_MATCHES_TYPE],
+        );
+        assert!(
+            forward.is_ok(),
+            "owner-before-rule-set order must merge cleanly: {forward:?}"
+        );
+        let reversed = Profile::from_packs(
+            EMBEDDED_CORE_JSON,
+            &[OQ6_RULE_SET_MATCHES_TYPE, OQ6_BASE_OWNS_TYPE],
+        );
+        assert!(
+            reversed.is_ok(),
+            "rule-set-before-owner order must ALSO merge cleanly (order-agnostic \
+             reference check) -- reordering extensions is not a hard error: {reversed:?}"
+        );
+    }
+
+    #[test]
+    fn a_rule_set_whose_match_facet_is_removed_by_a_later_layer_fails_closed() {
+        // The order-agnostic check still fails closed when the referenced
+        // facet is genuinely ABSENT from the merged set -- here removed by a
+        // later layer after the rule-set was defined.
+        let remove_type = r#"{
+            "kind": "extension-pack",
+            "version": "oq6-remove-type@1",
+            "extends": "core@2",
+            "removes": ["namespace:type"],
+            "required_fields": [],
+            "description_caps": {},
+            "file_class": {"default": "context", "rules": []},
+            "namespaces": [],
+            "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
+        }"#;
+        let result = Profile::from_packs(
+            EMBEDDED_CORE_JSON,
+            &[OQ6_BASE_OWNS_TYPE, OQ6_RULE_SET_MATCHES_TYPE, remove_type],
+        );
+        assert!(matches!(
+            result,
+            Err(ProfileError::IntegrityViolation { ref key, .. }) if key == "type"
+        ));
+    }
 }
 
 /// SDET verification for `M2.P3.T3` (`Profile::from_packs` layered merge).
-/// Targets acceptance points the tests above don't cover: the 5 dimensions
+/// Targets acceptance points the tests above don't cover: the dimensions
 /// the golden 3-layer test leaves untouched (`FileClassDefault`/
-/// `FileClassRule`/`ReportTrigger`/`ReportPeriod`/`ReportRequired`) plus the
-/// 3 exempt dimensions, the exact fixed layer->dimension->key warning order
+/// `FileClassRule`/`RuleSet`) plus the 3 exempt dimensions, the exact fixed
+/// layer->dimension->key warning order
 /// across a realistic multi-dimension merge, `removes`-applied-after-
 /// additive ordering within one layer, a dangling reference introduced two
 /// layers after its target was defined, determinism as a property (not
@@ -2138,7 +2661,7 @@ mod sdet_merge_verification {
     const BASE: &str = r#"{
         "kind": "extension-pack",
         "version": "base@1",
-        "extends": "core@1",
+        "extends": "core@2",
         "required_fields": [{"field": "name", "authorship": "human_authored"}],
         "description_caps": {"context": 100},
         "file_class": {"default": "context", "rules": [{"class": "skill", "match": {"glob": "**/*.skill.md"}}]},
@@ -2146,11 +2669,15 @@ mod sdet_merge_verification {
             {"name": "type", "cardinality": "singleton"},
             {"name": "period", "cardinality": "optional", "type": "date"}
         ],
-        "report": {
-            "trigger": {"namespace": "type", "value": "report"},
-            "required_namespaces": ["type"],
-            "period": {"namespace": "period", "regex": "^.*$"}
-        },
+        "rule_sets": [
+            {
+                "match": {"namespace": "type", "value": "report"},
+                "apply": {
+                    "require_namespaces": ["type"],
+                    "value_formats": [{"namespace": "period", "regex": "^.*$", "message": "bad"}]
+                }
+            }
+        ],
         "exempt": {
             "filenames": ["README.md"],
             "dir_components": ["node_modules"],
@@ -2161,7 +2688,7 @@ mod sdet_merge_verification {
     const EXT: &str = r#"{
         "kind": "extension-pack",
         "version": "ext@1",
-        "extends": "core@1",
+        "extends": "core@2",
         "required_fields": [{"field": "name", "authorship": "machine_derivable"}],
         "description_caps": {"agent": 200},
         "file_class": {
@@ -2174,11 +2701,15 @@ mod sdet_merge_verification {
         "namespaces": [
             {"name": "type", "cardinality": "singleton"}
         ],
-        "report": {
-            "trigger": {"namespace": "type", "value": "REPORT"},
-            "required_namespaces": ["type", "period"],
-            "period": {"namespace": "period", "regex": "^[0-9]+$"}
-        },
+        "rule_sets": [
+            {
+                "match": {"namespace": "type", "value": "report"},
+                "apply": {
+                    "require_namespaces": ["type", "period"],
+                    "value_formats": [{"namespace": "period", "regex": "^[0-9]+$", "message": "bad"}]
+                }
+            }
+        ],
         "exempt": {
             "filenames": ["README.md", "CHANGELOG.md"],
             "dir_components": ["node_modules", "dist"],
@@ -2189,10 +2720,10 @@ mod sdet_merge_verification {
     const THIRD: &str = r#"{
         "kind": "extension-pack",
         "version": "third@1",
-        "extends": "core@1",
+        "extends": "core@2",
         "removes": [
             "file_class_rule:agent",
-            "report_required:period",
+            "rule_set:type:report",
             "exempt_filename:CHANGELOG.md",
             "exempt_dir:dist",
             "exempt_glob:no-such-glob",
@@ -2202,26 +2733,21 @@ mod sdet_merge_verification {
         "description_caps": {},
         "file_class": {"default": "agent", "rules": []},
         "namespaces": [],
-        "report": {
-            "trigger": {"namespace": "type", "value": "REPORT"},
-            "required_namespaces": [],
-            "period": {"namespace": "period", "regex": "^[0-9]+$"}
-        },
         "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
     }"#;
 
     /// The exact warning sequence `BASE`/`EXT`/`THIRD` must produce. Covers
     /// override for every dimension the golden 3-layer test above leaves
-    /// untouched (`FileClassDefault`, `FileClassRule`, `ReportTrigger`,
-    /// `ReportPeriod`), additive+identical-noop+removal for all 3 exempt
-    /// dimensions (which structurally can never produce an Override -- their
-    /// key IS their value), and an override for `RequiredField` (the golden
-    /// test only exercises its removal). The removal order in `THIRD` is
-    /// deliberately NOT dimension order (it interleaves `file_class_rule`,
-    /// `report_required`, `exempt_filename`, `exempt_dir`, `exempt_glob`,
-    /// then `exempt_filename` again) -- proving removals emit in the
-    /// layer's own declared `removes` ARRAY order, not re-sorted into
-    /// dimension order.
+    /// untouched (`FileClassDefault`, `FileClassRule`, `RuleSet` -- the
+    /// rule-set overrides as one atomic keyed unit), additive+identical-noop+
+    /// removal for all 3 exempt dimensions (which structurally can never
+    /// produce an Override -- their key IS their value), and an override for
+    /// `RequiredField` (the golden test only exercises its removal). The
+    /// removal order in `THIRD` is deliberately NOT dimension order (it
+    /// interleaves `file_class_rule`, `rule_set`, `exempt_filename`,
+    /// `exempt_dir`, `exempt_glob`, then `exempt_filename` again) -- proving
+    /// removals emit in the layer's own declared `removes` ARRAY order, not
+    /// re-sorted into dimension order.
     fn expected_warnings() -> Vec<MergeWarning> {
         vec![
             MergeWarning::Override {
@@ -2246,15 +2772,8 @@ mod sdet_merge_verification {
                 base_layer: true,
             },
             MergeWarning::Override {
-                dimension: Dimension::ReportTrigger,
-                key: "trigger".to_string(),
-                from_layer: "base@1".to_string(),
-                to_layer: "ext@1".to_string(),
-                base_layer: true,
-            },
-            MergeWarning::Override {
-                dimension: Dimension::ReportPeriod,
-                key: "period".to_string(),
+                dimension: Dimension::RuleSet,
+                key: "type:report".to_string(),
                 from_layer: "base@1".to_string(),
                 to_layer: "ext@1".to_string(),
                 base_layer: true,
@@ -2267,8 +2786,8 @@ mod sdet_merge_verification {
                 base_layer: false,
             },
             MergeWarning::Removal {
-                dimension: Dimension::ReportRequired,
-                key: "period".to_string(),
+                dimension: Dimension::RuleSet,
+                key: "type:report".to_string(),
                 removing_layer: "third@1".to_string(),
                 removed_from_layer: Some("ext@1".to_string()),
                 base_layer: false,
@@ -2329,13 +2848,10 @@ mod sdet_merge_verification {
             "ext's additive 'agent' rule was removed by third; ext's override of \
              'skill' survives"
         );
-        assert_eq!(profile.pack.report.trigger.value, "REPORT");
-        assert_eq!(profile.pack.report.period.regex, "^[0-9]+$");
-        assert_eq!(
-            profile.pack.report.required_namespaces,
-            vec!["type".to_string()],
-            "base's 'type' survives (ext restated it identically -- a no-op, \
-             not a removal); ext's additive 'period' was removed by third"
+        assert!(
+            profile.pack.rule_sets.is_empty(),
+            "the type:report rule-set (overridden base->ext, then removed by \
+             third) is gone from the merged pack"
         );
         assert!(
             profile.pack.exempt.filenames.is_empty(),
@@ -2358,7 +2874,7 @@ mod sdet_merge_verification {
     const ADDS_AND_REMOVES_OWN_KEY: &str = r#"{
         "kind": "extension-pack",
         "version": "self-remove@1",
-        "extends": "core@1",
+        "extends": "core@2",
         "removes": ["namespace:temp"],
         "required_fields": [{"field": "name", "authorship": "human_authored"}],
         "description_caps": {"context": 10},
@@ -2368,11 +2884,6 @@ mod sdet_merge_verification {
             {"name": "period", "cardinality": "optional"},
             {"name": "temp", "cardinality": "optional"}
         ],
-        "report": {
-            "trigger": {"namespace": "type", "value": "report"},
-            "required_namespaces": [],
-            "period": {"namespace": "period", "regex": "^.*$"}
-        },
         "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
     }"#;
 
@@ -2412,7 +2923,7 @@ mod sdet_merge_verification {
     const LEAF_LAYER: &str = r#"{
         "kind": "extension-pack",
         "version": "leaf@1",
-        "extends": "core@1",
+        "extends": "core@2",
         "required_fields": [],
         "description_caps": {"context": 10},
         "file_class": {"default": "context", "rules": []},
@@ -2421,46 +2932,31 @@ mod sdet_merge_verification {
             {"name": "period", "cardinality": "optional"},
             {"name": "leaf", "cardinality": "optional"}
         ],
-        "report": {
-            "trigger": {"namespace": "type", "value": "report"},
-            "required_namespaces": [],
-            "period": {"namespace": "period", "regex": "^.*$"}
-        },
         "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
     }"#;
 
     const CHILD_LAYER: &str = r#"{
         "kind": "extension-pack",
         "version": "child@1",
-        "extends": "core@1",
+        "extends": "core@2",
         "required_fields": [],
         "description_caps": {},
         "file_class": {"default": "context", "rules": []},
         "namespaces": [
             {"name": "child", "cardinality": "optional", "parents": ["leaf"]}
         ],
-        "report": {
-            "trigger": {"namespace": "type", "value": "report"},
-            "required_namespaces": [],
-            "period": {"namespace": "period", "regex": "^.*$"}
-        },
         "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
     }"#;
 
     const REMOVE_LEAF_LAYER: &str = r#"{
         "kind": "extension-pack",
         "version": "remover@1",
-        "extends": "core@1",
+        "extends": "core@2",
         "removes": ["namespace:leaf"],
         "required_fields": [],
         "description_caps": {},
         "file_class": {"default": "context", "rules": []},
         "namespaces": [],
-        "report": {
-            "trigger": {"namespace": "type", "value": "report"},
-            "required_namespaces": [],
-            "period": {"namespace": "period", "regex": "^.*$"}
-        },
         "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
     }"#;
 
@@ -2518,7 +3014,7 @@ mod sdet_merge_verification {
     const CAPS_UNSORTED_BASE: &str = r#"{
         "kind": "extension-pack",
         "version": "caps-base@1",
-        "extends": "core@1",
+        "extends": "core@2",
         "required_fields": [],
         "description_caps": {"zzz-class": 900, "aaa-class": 100, "mmm-class": 500},
         "file_class": {"default": "aaa-class", "rules": []},
@@ -2526,27 +3022,17 @@ mod sdet_merge_verification {
             {"name": "type", "cardinality": "singleton"},
             {"name": "period", "cardinality": "optional"}
         ],
-        "report": {
-            "trigger": {"namespace": "type", "value": "report"},
-            "required_namespaces": [],
-            "period": {"namespace": "period", "regex": "^.*$"}
-        },
         "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
     }"#;
 
     const CAPS_OVERRIDE_LAYER: &str = r#"{
         "kind": "extension-pack",
         "version": "caps-override@1",
-        "extends": "core@1",
+        "extends": "core@2",
         "required_fields": [],
         "description_caps": {"mmm-class": 501, "bbb-class": 50},
         "file_class": {"default": "aaa-class", "rules": []},
         "namespaces": [],
-        "report": {
-            "trigger": {"namespace": "type", "value": "report"},
-            "required_namespaces": [],
-            "period": {"namespace": "period", "regex": "^.*$"}
-        },
         "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
     }"#;
 
@@ -2632,7 +3118,7 @@ mod sdet_merge_verification {
             r#"{{
                 "kind": "extension-pack",
                 "version": "syn{seed}@1",
-                "extends": "core@1",
+                "extends": "core@2",
                 {removes}
                 "required_fields": [{{"field": "name", "authorship": "human_authored"}}],
                 "description_caps": {{"context": {cap_value}}},
@@ -2643,11 +3129,6 @@ mod sdet_merge_verification {
                     {{"name": "{ns_a}", "cardinality": "{cardinality}"}},
                     {{"name": "{ns_b}", "cardinality": "optional"}}
                 ],
-                "report": {{
-                    "trigger": {{"namespace": "type", "value": "report"}},
-                    "required_namespaces": [],
-                    "period": {{"namespace": "period", "regex": "^.*$"}}
-                }},
                 "exempt": {{"filenames": [], "dir_components": [], "path_globs": []}}
             }}"#
         )
@@ -2778,17 +3259,12 @@ mod sdet_merge_verification {
         let malformed_second_layer = r#"{
             "kind": "extension-pack",
             "version": "bad@1",
-            "extends": "core@1",
+            "extends": "core@2",
             "removes": ["not-a-typed-reference"],
             "required_fields": [],
             "description_caps": {},
             "file_class": {"default": "context", "rules": []},
             "namespaces": [],
-            "report": {
-                "trigger": {"namespace": "type", "value": "report"},
-                "required_namespaces": [],
-                "period": {"namespace": "period", "regex": "^.*$"}
-            },
             "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
         }"#;
         let result = Profile::from_packs(EMBEDDED_CORE_JSON, &[BASE, malformed_second_layer]);
@@ -2811,11 +3287,6 @@ mod sdet_merge_verification {
             "description_caps": {},
             "file_class": {"default": "context", "rules": []},
             "namespaces": [],
-            "report": {
-                "trigger": {"namespace": "type", "value": "report"},
-                "required_namespaces": [],
-                "period": {"namespace": "period", "regex": "^.*$"}
-            },
             "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
         }"#;
         let result = Profile::from_packs(EMBEDDED_CORE_JSON, &[BASE, malformed_extends]);
@@ -2844,7 +3315,7 @@ mod sdet_merge_verification {
         let empty_required_fields_pack = r#"{
             "kind": "extension-pack",
             "version": "empty-required@1",
-            "extends": "core@1",
+            "extends": "core@2",
             "required_fields": [],
             "description_caps": {"context": 10},
             "file_class": {"default": "context", "rules": []},
@@ -2852,11 +3323,6 @@ mod sdet_merge_verification {
                 {"name": "type", "cardinality": "singleton"},
                 {"name": "period", "cardinality": "optional"}
             ],
-            "report": {
-                "trigger": {"namespace": "type", "value": "report"},
-                "required_namespaces": [],
-                "period": {"namespace": "period", "regex": "^.*$"}
-            },
             "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
         }"#;
         let result = Profile::from_packs(EMBEDDED_CORE_JSON, &[empty_required_fields_pack]);

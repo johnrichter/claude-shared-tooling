@@ -219,6 +219,10 @@ mod tests {
         }
     }
 
+    fn profile() -> Profile {
+        crate::test_support::synthetic_profile()
+    }
+
     fn run(query_str: &str, parsed: &ParsedFrontmatter, profile: &Profile) -> MatchResult {
         let query = facetquery::parse(query_str).expect("test query must parse");
         matches(parsed, &query, profile)
@@ -228,7 +232,7 @@ mod tests {
 
     #[test]
     fn facet_lookup_for_known_present_namespace_returns_type_and_values() {
-        let profile = Profile::bundled_psa_apm();
+        let profile = profile();
         let parsed = parsed_with(&["topic:apm", "topic:tracing"], None, "");
         let source = FrontmatterFacetSource::new(&parsed, &profile);
         assert_eq!(
@@ -242,7 +246,7 @@ mod tests {
 
     #[test]
     fn facet_lookup_for_known_but_absent_namespace_is_present_with_empty_values() {
-        let profile = Profile::bundled_psa_apm();
+        let profile = profile();
         let parsed = parsed_with(&["type:knowledge"], None, "");
         let source = FrontmatterFacetSource::new(&parsed, &profile);
         assert_eq!(
@@ -257,7 +261,7 @@ mod tests {
 
     #[test]
     fn facet_lookup_for_interval_typed_namespace_maps_to_query_date_interval_type() {
-        let profile = Profile::bundled_psa_apm();
+        let profile = profile();
         let parsed = parsed_with(&["period:2026-04-01/2026-06-30"], None, "");
         let source = FrontmatterFacetSource::new(&parsed, &profile);
         assert_eq!(
@@ -271,7 +275,7 @@ mod tests {
 
     #[test]
     fn facet_lookup_for_unknown_namespace_is_unknown() {
-        let profile = Profile::bundled_psa_apm();
+        let profile = profile();
         let parsed = parsed_with(&["topic:apm"], None, "");
         let source = FrontmatterFacetSource::new(&parsed, &profile);
         assert_eq!(source.facet("not_a_real_namespace"), FacetLookup::Unknown);
@@ -281,7 +285,7 @@ mod tests {
 
     #[test]
     fn equality_predicate_matches_a_file_with_the_tag_not_one_without() {
-        let profile = Profile::bundled_psa_apm();
+        let profile = profile();
         let with_tag = parsed_with(&["topic:apm"], None, "");
         let without_tag = parsed_with(&["type:knowledge"], None, "");
         assert!(run("topic:apm", &with_tag, &profile).matched);
@@ -290,7 +294,7 @@ mod tests {
 
     #[test]
     fn exists_matches_iff_the_file_has_at_least_one_tag_in_that_namespace() {
-        let profile = Profile::bundled_psa_apm();
+        let profile = profile();
         let with_tag = parsed_with(&["topic:apm"], None, "");
         let without_tag = parsed_with(&["type:knowledge"], None, "");
         assert!(run("topic:*", &with_tag, &profile).matched);
@@ -299,7 +303,7 @@ mod tests {
 
     #[test]
     fn known_but_absent_namespace_never_raises_unknown_facet() {
-        let profile = Profile::bundled_psa_apm();
+        let profile = profile();
         let without_tag = parsed_with(&["type:knowledge"], None, "");
         let result = run("topic:apm", &without_tag, &profile);
         assert!(!result.matched);
@@ -308,7 +312,7 @@ mod tests {
 
     #[test]
     fn genuinely_unknown_facet_raises_unknown_facet_diagnostic() {
-        let profile = Profile::bundled_psa_apm();
+        let profile = profile();
         let parsed = parsed_with(&["topic:apm"], None, "");
         let result = run("not_a_real_namespace:x", &parsed, &profile);
         assert!(!result.matched);
@@ -324,21 +328,21 @@ mod tests {
 
     #[test]
     fn period_range_matches_an_interval_wholly_inside_the_query_window() {
-        let profile = Profile::bundled_psa_apm();
+        let profile = profile();
         let parsed = parsed_with(&["period:2026-04-01/2026-06-30"], None, "");
         assert!(run("period:[2026-01-01 TO 2026-12-31]", &parsed, &profile).matched);
     }
 
     #[test]
     fn period_range_matches_a_single_day_within_the_stored_interval() {
-        let profile = Profile::bundled_psa_apm();
+        let profile = profile();
         let parsed = parsed_with(&["period:2026-04-01/2026-06-30"], None, "");
         assert!(run("period:2026-05-15", &parsed, &profile).matched);
     }
 
     #[test]
     fn period_range_matches_a_partially_overlapping_window() {
-        let profile = Profile::bundled_psa_apm();
+        let profile = profile();
         let parsed = parsed_with(&["period:2026-04-01/2026-06-30"], None, "");
         // The window starts before the stored interval ends and ends after
         // it starts -- a partial overlap, not containment either way.
@@ -347,7 +351,7 @@ mod tests {
 
     #[test]
     fn period_range_does_not_match_a_disjoint_window() {
-        let profile = Profile::bundled_psa_apm();
+        let profile = profile();
         let parsed = parsed_with(&["period:2026-04-01/2026-06-30"], None, "");
         assert!(!run("period:[2027-01-01 TO 2027-12-31]", &parsed, &profile).matched);
     }
@@ -356,7 +360,7 @@ mod tests {
 
     #[test]
     fn bareword_matches_across_every_text_field() {
-        let profile = Profile::bundled_psa_apm();
+        let profile = profile();
         let via_name = parsed_with(&[], Some("APM rollout plan"), "");
         let via_body = parsed_with(&[], None, "discusses the APM rollout in depth");
         let miss = parsed_with(&[], Some("unrelated"), "unrelated body");
@@ -367,7 +371,7 @@ mod tests {
 
     #[test]
     fn bareword_substring_search_does_not_require_a_whole_field_match() {
-        let profile = Profile::bundled_psa_apm();
+        let profile = profile();
         let parsed = parsed_with(&[], None, "one two three");
         assert!(run("two", &parsed, &profile).matched);
     }
@@ -376,7 +380,7 @@ mod tests {
 
     #[test]
     fn matches_end_to_end_parses_a_query_string_and_matches_a_parsed_file() {
-        let profile = Profile::bundled_psa_apm();
+        let profile = profile();
         let parsed = parsed_with(
             &["topic:apm", "type:knowledge"],
             Some("APM Doc"),

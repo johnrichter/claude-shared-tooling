@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://datadoghq.com/ai-shared-lib-public/schemas/frontmatter/frontmatter-profile.meta.schema.json",
   "title": "Frontmatter validation profile — meta-schema",
-  "description": "Meta-schema for the frontmatter validation profile family. A conforming document is EITHER a core-profile (mechanisms, e.g. frontmatter-core.schema.json) OR an extension-pack (concrete vocab, e.g. frontmatter-psa-apm.pack.json), discriminated by `kind`. Validate each profile/pack file against this meta-schema to prove structural well-formedness (the M2.P1.T1 acceptance: 'schema loads + validates against its own meta-schema'). JSON Schema 2020-12; validate with any 2020-12 validator, e.g. `python -m jsonschema -i <file> frontmatter-profile.meta.schema.json`.",
+  "description": "Meta-schema for the frontmatter validation profile family. A conforming document is EITHER a core-profile (mechanisms, e.g. frontmatter-core.schema.json, `core@2`) OR an extension-pack (concrete vocab, e.g. frontmatter-default.pack.json), discriminated by `kind`. Validate each profile/pack file against this meta-schema to prove structural well-formedness. Behavior-modifying conditional rules are a GENERAL `{match, apply}` rule-set construct (`rule_sets`): a criterion selects files, extra `apply` rules bind only to the matching (or, for `forbidden_unless_matched`, the non-matching) files. The report axis is one instance of this construct (a rule-set matching `type:report`) — there is no report-named special case in this meta-schema or in any interpreter of it. JSON Schema 2020-12; validate with any 2020-12 validator, e.g. `python -m jsonschema -i <file> frontmatter-profile.meta.schema.json`.",
   "type": "object",
   "required": ["kind", "profile", "version", "description"],
   "properties": {
@@ -50,7 +50,7 @@
         },
         "mechanisms": {
           "type": "object",
-          "required": ["required_fields", "description_caps", "namespaces", "report", "file_class", "exempt"],
+          "required": ["required_fields", "description_caps", "namespaces", "rule_sets", "file_class", "exempt"],
           "additionalProperties": {
             "type": "object",
             "required": ["meaning"],
@@ -107,7 +107,7 @@
     },
     "extensionPack": {
       "type": "object",
-      "required": ["kind", "extends", "required_fields", "description_caps", "file_class", "namespaces", "report", "exempt"],
+      "required": ["kind", "extends", "required_fields", "description_caps", "file_class", "namespaces", "exempt"],
       "properties": {
         "kind": { "const": "extension-pack" },
         "extends": { "type": "string", "pattern": "^[a-z0-9-]+@[0-9]+$" },
@@ -115,14 +115,15 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(namespace|required_field|description_cap|file_class_rule|report_required|exempt_filename|exempt_dir|exempt_glob):.+$"
+            "pattern": "^(namespace|required_field|description_cap|file_class_rule|rule_set|exempt_filename|exempt_dir|exempt_glob):.+$"
           },
           "uniqueItems": true,
-          "description": "Typed references to mechanisms/vocabulary a merged pack removes from its base, e.g. `namespace:team`. Declared here so a pack can be authored/validated against this shape; a later merge task applies it (removal is not performed by this crate's validator today)."
+          "description": "Typed references to mechanisms/vocabulary a merged pack removes from its base, e.g. `namespace:team` or `rule_set:type:report` (a rule-set's key is its `match` as `namespace:value`). The merge drops the named key from its dimension, warning even for a target nothing defined."
         },
         "required_fields": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
+          "description": "A base pack typically requires at least one field; a purely additive pack layered on top of a base (adding namespaces/caps/exempt rules without its own required fields) may leave this empty.",
           "items": {
             "type": "object",
             "required": ["field", "authorship"],
@@ -135,7 +136,8 @@
         },
         "description_caps": {
           "type": "object",
-          "minProperties": 1,
+          "minProperties": 0,
+          "description": "A base pack typically caps at least one file class; a purely additive pack layered on top of a base may leave this empty.",
           "properties": {
             "source": { "type": "string" }
           },
@@ -175,38 +177,48 @@
               "name": { "type": "string" },
               "cardinality": { "type": "string", "enum": ["singleton", "at_least_one", "optional"] },
               "parents": { "type": "array", "items": { "type": "string" } },
-              "report_only": { "type": "boolean" },
               "type": { "type": "string", "enum": ["string", "date", "numeric", "date_interval"] },
               "source": { "type": "string" }
             }
           }
         },
-        "report": {
-          "type": "object",
-          "required": ["trigger", "required_namespaces", "period"],
-          "properties": {
-            "trigger": {
-              "type": "object",
-              "required": ["namespace", "value"],
-              "properties": {
-                "namespace": { "type": "string" },
-                "value": { "type": "string" }
-              }
-            },
-            "required_namespaces": {
-              "type": "array",
-              "items": { "type": "string" }
-            },
-            "period": {
-              "type": "object",
-              "required": ["namespace", "regex"],
-              "properties": {
-                "namespace": { "type": "string" },
-                "regex": { "type": "string" }
-              }
-            },
-            "notes": { "type": "string" },
-            "source": { "type": "string" }
+        "rule_sets": {
+          "type": "array",
+          "description": "General conditional rule-sets. Each selects files via `match` (a `namespace:value` criterion) and binds extra `apply` rules: `require_namespaces` (present on a matching file), `forbidden_unless_matched` (absent on a NON-matching file — the misuse inverse), and `value_formats` (a matching file's tags in the named namespace must match the regex; a `date_interval`-typed namespace is additionally calendar-checked). The report axis is one instance (match `type:report`); nothing here is report-named. Optional per pack — a pack with no conditional rules omits it.",
+          "items": {
+            "type": "object",
+            "required": ["match", "apply"],
+            "properties": {
+              "match": {
+                "type": "object",
+                "required": ["namespace", "value"],
+                "properties": {
+                  "namespace": { "type": "string" },
+                  "value": { "type": "string" }
+                }
+              },
+              "apply": {
+                "type": "object",
+                "properties": {
+                  "require_namespaces": { "type": "array", "items": { "type": "string" } },
+                  "forbidden_unless_matched": { "type": "array", "items": { "type": "string" } },
+                  "value_formats": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["namespace", "regex", "message"],
+                      "properties": {
+                        "namespace": { "type": "string" },
+                        "regex": { "type": "string" },
+                        "message": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              },
+              "notes": { "type": "string" },
+              "source": { "type": "string" }
+            }
           }
         },
         "exempt": {
