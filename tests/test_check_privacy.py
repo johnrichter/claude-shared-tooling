@@ -33,6 +33,7 @@ _O = "owner:"
 _DD = "data" + "dog"
 _AWS = "AKIA" + "IOSFODNN7" + "EXAMPLE"             # AKIA + exactly 16 -> matches AWS key pattern
 _KEY = "-----BEGIN " + "OPENSSH PRIVATE " + "KEY-----"
+_GHP = "ghp_" + "A" * 36                            # ghp_ + 36 alnum -> matches GitHub token pattern
 
 
 class ScanTests(unittest.TestCase):
@@ -91,6 +92,130 @@ class ScanTests(unittest.TestCase):
             ".git/config": _AWS,        # skip dir -> not scanned
         })
         self.assertEqual(failures, [])
+
+
+class ScopeAndExemptionAdversarialTests(unittest.TestCase):
+    """Adversarial coverage for the frontmatter-scoping + fixture-exemption change.
+
+    Proves the exemption/scoping is classification-only and never widens the
+    secret-scan blind spot, and pins the actual behavior of the frontmatter
+    detector's edge cases so a regression is caught even where the checker's
+    own strictness is debatable.
+    """
+
+    def _scan(self, files: dict[str, str]):
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        root = Path(td.name)
+        for rel, content in files.items():
+            p = root / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+        return cp.scan(root, _CHECKER)
+
+    # --- SAFETY: exemption/scoping must never reduce secret-scan coverage ---
+
+    def test_secret_under_exemption_glob_still_fails(self):
+        # rust/frontmatter/tests/* is exempt from CLASSIFICATION only, never secrets.
+        failures, _ = self._scan({"rust/frontmatter/tests/fixture.md": f"{_KEY}\nabc\n"})
+        self.assertTrue(any("private key" in f for f in failures), msg=str(failures))
+
+    def test_secret_in_non_md_files_still_fails(self):
+        failures, _ = self._scan({
+            "src/lib.rs": f"const KEY: &str = \"{_AWS}\";\n",
+            "config.json": f'{{"token": "{_GHP}"}}\n',
+            "tool.py": f"TOKEN = '{_GHP}'\n",
+            "leak": f"{_AWS}\n",  # no extension at all
+        })
+        self.assertEqual(len(failures), 4, msg=str(failures))
+        self.assertTrue(any("lib.rs" in f for f in failures), msg=str(failures))
+        self.assertTrue(any("config.json" in f for f in failures), msg=str(failures))
+        self.assertTrue(any("tool.py" in f for f in failures), msg=str(failures))
+        self.assertTrue(any(f.startswith("leak:") for f in failures), msg=str(failures))
+
+    def test_secret_in_md_body_outside_frontmatter_still_fails(self):
+        content = f"---\n{_P} public\n{_O} public\n---\n\n{_AWS}\n"
+        failures, _ = self._scan({"doc.md": content})
+        self.assertTrue(any("AWS" in f for f in failures), msg=str(failures))
+
+    # --- SAFETY: real classification leaks outside the exemption still fail ---
+
+    def test_root_md_privacy_internal_no_public_pair_fails_both_checks(self):
+        failures, _ = self._scan({"leak.md": f"---\n{_P} internal\n---\n"})
+        self.assertTrue(any("private marker" in f and "privacy" in f for f in failures), msg=str(failures))
+        self.assertTrue(any("declares privacy: tag but not privacy:public" in f for f in failures), msg=str(failures))
+
+    def test_owner_datadog_outside_exemption_fails(self):
+        failures, _ = self._scan({"notes/secret.md": f"---\n{_O} {_DD}\n{_P} public\n---\n"})
+        self.assertTrue(any("private marker" in f and "owner" in f for f in failures), msg=str(failures))
+
+    # --- CORRECTLY-CLEARED: the false positives the frontmatter-scoping change fixes ---
+
+    def test_privacy_owner_as_source_string_literals_pass(self):
+        failures, _ = self._scan({
+            "lib.rs": f'let s = "{_P}internal owner_lit";\n',
+            "mod.py": f'X = "{_O}{_DD}"\n',
+        })
+        self.assertEqual(failures, [])
+
+    def test_json_schema_enumerating_tag_values_passes(self):
+        content = '{"allowed_privacy": ["' + _P + 'internal", "' + _P + 'public"], "allowed_owner": ["' + _O + _DD + '"]}\n'
+        failures, _ = self._scan({"schema.json": content})
+        self.assertEqual(failures, [])
+
+    def test_exempt_fixture_with_real_private_frontmatter_passes_classification(self):
+        content = f"---\n{_P} internal\n{_O} public\n---\n# fixture\n"
+        failures, _ = self._scan({"rust/frontmatter/tests/fixture2.md": content})
+        self.assertEqual(failures, [])
+
+    # --- EDGE CASES: frontmatter-detector strictness ---
+
+    def test_leading_blank_line_before_frontmatter_still_catches_privacy_internal(self):
+        # Regression guard: a leading blank line before the opening `---` must
+        # not defeat frontmatter detection -- every markdown renderer still
+        # treats this as frontmatter, so the classification check must too.
+        content = f"\n---\n{_P} internal\n{_O} public\n---\n"
+        failures, _ = self._scan({"sneaky.md": content})
+        self.assertTrue(
+            any("private marker" in f for f in failures),
+            msg="leading blank line must not hide privacy:internal -- " + str(failures),
+        )
+
+    def test_bom_before_frontmatter_still_catches_privacy_internal(self):
+        # Regression guard: a UTF-8 BOM before the opening `---` must not
+        # defeat frontmatter detection either.
+        content = f"﻿---\n{_P} internal\n{_O} public\n---\n"
+        failures, _ = self._scan({"bom.md": content})
+        self.assertTrue(
+            any("private marker" in f for f in failures),
+            msg="leading BOM must not hide privacy:internal -- " + str(failures),
+        )
+
+    def test_trailing_whitespace_on_closing_fence_still_catches_privacy_internal(self):
+        # Regression guard: a properly-opened frontmatter block whose closing
+        # `---` carries trailing whitespace (a common invisible editor artifact)
+        # must still be recognized as frontmatter -- common parsers accept
+        # `---\s*`. An exact-match close would treat the block as unclosed and
+        # skip classification entirely, hiding privacy:internal.
+        content = f"---\n{_P} internal\n{_O} public\n--- \nbody\n"
+        failures, _ = self._scan({"trailing.md": content})
+        self.assertTrue(
+            any("private marker" in f for f in failures),
+            msg="trailing space on closing fence must not hide privacy:internal -- " + str(failures),
+        )
+
+    def test_indented_opening_fence_is_not_frontmatter(self):
+        # An indented `---` is body content, not a frontmatter delimiter (parsers
+        # require column 0). Trailing-whitespace tolerance must not slacken this.
+        content = f"   ---\n{_P} internal\n{_O} public\n---\n"
+        failures, _ = self._scan({"indented.md": content})
+        self.assertEqual(failures, [], msg=str(failures))
+
+    def test_privacy_internal_in_body_only_passes_classification(self):
+        # Body text is data, not this file's own classification -- confirmed OK.
+        content = f"---\n{_P} public\n{_O} public\n---\n\nSee also {_P} internal in the wild.\n"
+        failures, _ = self._scan({"doc.md": content})
+        self.assertEqual(failures, [], msg=str(failures))
 
 
 if __name__ == "__main__":
