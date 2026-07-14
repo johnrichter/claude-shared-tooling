@@ -2,11 +2,11 @@
 //! modules (`validate`, `fix`, `query`) via `crate::test_support::...`. A
 //! self-authored extension pack -- not a real shipped bundle -- so the
 //! crate's own tests exercise generic schema mechanics without coupling to
-//! any one named pack's vocabulary. Its namespace/report/exempt shape
-//! mirrors a typical adopting pack's (same cardinalities, parent chains,
-//! report-only axis, period-interval regex) precisely so the existing test
-//! suite's tag literals (`type:report`, `topic:apm`, `period:...`, etc.)
-//! keep exercising the same cascade paths.
+//! any one named pack's vocabulary. Its namespace/rule-set/exempt shape
+//! mirrors a typical adopting pack's (same cardinalities, parent chains, a
+//! `type:report` conditional rule-set with a date-interval value-format)
+//! precisely so the existing test suite's tag literals (`type:report`,
+//! `topic:apm`, `period:...`, etc.) keep exercising the same cascade paths.
 
 use crate::profile::Profile;
 
@@ -17,7 +17,7 @@ pub(crate) const SYNTHETIC_PACK_JSON: &str = r#"{
   "kind": "extension-pack",
   "profile": "synthetic-test",
   "version": "synthetic-test@1",
-  "extends": "core@1",
+  "extends": "core@2",
   "description": "Self-authored test fixture pack -- generic vocabulary for this crate's own test suite, not a shipped bundle.",
   "required_fields": [
     { "field": "name", "authorship": "human_authored", "source": "test fixture" },
@@ -51,21 +51,25 @@ pub(crate) const SYNTHETIC_PACK_JSON: &str = r#"{
     { "name": "feature", "cardinality": "optional", "parents": ["product", "suite"], "source": "test fixture" },
     { "name": "product", "cardinality": "optional", "parents": ["suite"], "source": "test fixture" },
     { "name": "suite", "cardinality": "optional", "source": "test fixture" },
-    { "name": "source", "cardinality": "optional", "report_only": true, "source": "test fixture" },
-    { "name": "period", "cardinality": "optional", "report_only": true, "type": "date_interval", "source": "test fixture" },
-    { "name": "audience", "cardinality": "optional", "report_only": true, "source": "test fixture" },
-    { "name": "cadence", "cardinality": "optional", "report_only": true, "source": "test fixture" },
+    { "name": "source", "cardinality": "optional", "source": "test fixture" },
+    { "name": "period", "cardinality": "optional", "type": "date_interval", "source": "test fixture" },
+    { "name": "audience", "cardinality": "optional", "source": "test fixture" },
+    { "name": "cadence", "cardinality": "optional", "source": "test fixture" },
     { "name": "team", "cardinality": "optional", "source": "test fixture" }
   ],
-  "report": {
-    "trigger": { "namespace": "type", "value": "report" },
-    "required_namespaces": ["source", "period"],
-    "period": {
-      "namespace": "period",
-      "regex": "^[0-9]{4}-[0-9]{2}-[0-9]{2}/[0-9]{4}-[0-9]{2}-[0-9]{2}$"
-    },
-    "source": "test fixture"
-  },
+  "rule_sets": [
+    {
+      "match": { "namespace": "type", "value": "report" },
+      "apply": {
+        "require_namespaces": ["source", "period"],
+        "forbidden_unless_matched": ["source", "period", "audience", "cadence"],
+        "value_formats": [
+          { "namespace": "period", "regex": "^[0-9]{4}-[0-9]{2}-[0-9]{2}/[0-9]{4}-[0-9]{2}-[0-9]{2}$", "message": "'{value}' is not YYYY-MM-DD/YYYY-MM-DD" }
+        ]
+      },
+      "source": "test fixture"
+    }
+  ],
   "exempt": {
     "filenames": ["plan.md", "execution.md", "CLAUDE.md"],
     "dir_components": [".pytest_cache", "__pycache__", ".git", "node_modules"],

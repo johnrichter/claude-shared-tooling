@@ -9,16 +9,16 @@
 use frontmatter::{matches, Profile, RawFields};
 
 /// A self-authored extension pack -- not a shipped bundle -- carrying the
-/// generic namespace/report shape this file's adversarial cases need
-/// (`type`/`status`/`privacy`/`owner`/`topic`/`source`/`period`), so the
-/// query/validate compositions under test never couple to a specific
-/// real pack's vocabulary. Deliberately omits `bogus`, the undeclared
-/// facet several cases below query on purpose.
+/// generic namespace/rule-set shape this file's adversarial cases need
+/// (`type`/`status`/`privacy`/`owner`/`topic`/`source`/`period` + a
+/// `type:report` rule-set), so the query/validate compositions under test
+/// never couple to a specific real pack's vocabulary. Deliberately omits
+/// `bogus`, the undeclared facet several cases below query on purpose.
 const SYNTHETIC_PACK_JSON: &str = r#"{
   "kind": "extension-pack",
   "profile": "synthetic-adversarial-test",
   "version": "synthetic-adversarial-test@1",
-  "extends": "core@1",
+  "extends": "core@2",
   "description": "Self-authored test fixture pack for query/validate adversarial coverage.",
   "required_fields": [
     { "field": "name", "authorship": "human_authored", "source": "test fixture" },
@@ -36,18 +36,22 @@ const SYNTHETIC_PACK_JSON: &str = r#"{
     { "name": "privacy", "cardinality": "singleton", "source": "test fixture" },
     { "name": "owner", "cardinality": "singleton", "source": "test fixture" },
     { "name": "topic", "cardinality": "at_least_one", "source": "test fixture" },
-    { "name": "source", "cardinality": "optional", "report_only": true, "source": "test fixture" },
-    { "name": "period", "cardinality": "optional", "report_only": true, "type": "date_interval", "source": "test fixture" }
+    { "name": "source", "cardinality": "optional", "source": "test fixture" },
+    { "name": "period", "cardinality": "optional", "type": "date_interval", "source": "test fixture" }
   ],
-  "report": {
-    "trigger": { "namespace": "type", "value": "report" },
-    "required_namespaces": ["source", "period"],
-    "period": {
-      "namespace": "period",
-      "regex": "^[0-9]{4}-[0-9]{2}-[0-9]{2}/[0-9]{4}-[0-9]{2}-[0-9]{2}$"
-    },
-    "source": "test fixture"
-  },
+  "rule_sets": [
+    {
+      "match": { "namespace": "type", "value": "report" },
+      "apply": {
+        "require_namespaces": ["source", "period"],
+        "forbidden_unless_matched": ["source", "period"],
+        "value_formats": [
+          { "namespace": "period", "regex": "^[0-9]{4}-[0-9]{2}-[0-9]{2}/[0-9]{4}-[0-9]{2}-[0-9]{2}$", "message": "'{value}' is not YYYY-MM-DD/YYYY-MM-DD" }
+        ]
+      },
+      "source": "test fixture"
+    }
+  ],
   "exempt": { "filenames": [], "dir_components": [], "path_globs": [], "source": "test fixture" }
 }"#;
 

@@ -41,7 +41,7 @@
 //! - `profile` -- [`Profile`], the deserialized declarative schema (core
 //!   profile + extension pack) `validate` interprets. Embeds the core
 //!   profile at compile time (`include_str!`), plus a small set of named
-//!   extension packs (e.g. `psa-apm@1`) resolvable only as opt-in bundles
+//!   extension packs (`default@1`/`reports@1`) resolvable only as opt-in bundles
 //!   via [`embedded_pack_json`] -- the library never constructs a
 //!   `Profile` from one on its own. Also accepts an external pack's JSON
 //!   text, for a foreign repo's own vocabulary.

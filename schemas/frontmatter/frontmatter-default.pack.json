@@ -2,8 +2,8 @@
   "kind": "extension-pack",
   "profile": "default",
   "version": "default@1",
-  "extends": "core@1",
-  "description": "The embedded DEFAULT extension pack -- a generic, workspace-agnostic vocabulary that instantiates `frontmatter-core.schema.json` (core@1) with a minimal, broadly-applicable tagging scheme: the six required fields + their fix-tier authorship, description caps by file_class, the `type`/`status`/`topic` namespace vocabulary, the file_class classification globs, and a small generated/exempt taxonomy. Carries NO report vocabulary -- the report namespaces (`source`/`period`/`audience`/`cadence`) and the report rule-set live only in the separate, opt-in `reports@1` pack. A repo layers this pack (optionally with `reports@1` and its own domain-specific pack) via its `navigator.toml`, or replaces it outright with its own vocabulary.",
+  "extends": "core@2",
+  "description": "The embedded DEFAULT extension pack -- a generic, workspace-agnostic vocabulary that instantiates `frontmatter-core.schema.json` (core@2) with a minimal, broadly-applicable tagging scheme: the six required fields + their fix-tier authorship, description caps by file_class, the `type`/`status`/`topic` namespace vocabulary, the file_class classification globs, and a small generated/exempt taxonomy. Carries NO report vocabulary and NO conditional rule-sets -- the report namespaces (`source`/`period`/`audience`/`cadence`) and the `type:report` rule-set live only in the separate, opt-in `reports@1` pack. A repo layers this pack (optionally with `reports@1` and its own domain-specific pack) via its `navigator.toml`, or replaces it outright with its own vocabulary.",
   "required_fields": [
     { "field": "name", "authorship": "human_authored", "source": "A semantic title -- not mechanically inferable." },
     { "field": "description", "authorship": "human_authored", "source": "Routing prose, capped by file_class (see description_caps)." },
@@ -33,16 +33,6 @@
     { "name": "topic", "cardinality": "at_least_one", "source": "One or more subject-area tags per file." }
   ],
   "namespaces_order_note": "Array order IS the cascade iteration order (core `violation_cascade`): singletons type,status; at_least_one topic. Reordering this array changes emitted violation order for a multi-violation file -- treat it as a behavior change, not a cosmetic one.",
-  "report": {
-    "trigger": { "namespace": "type", "value": "__reports_pack_required__" },
-    "required_namespaces": [],
-    "period": {
-      "namespace": "type",
-      "regex": "^.*$"
-    },
-    "notes": "Interim placeholder: `core@1`'s meta-schema/struct still require a `report` block on every pack, but this pack carries no report vocabulary (that's `reports@1`'s job, M1.P1.T2) -- so `trigger.value` names no real tag any document uses, `required_namespaces` is empty, and `period` points at an always-present namespace with a no-op regex. Dormant when this pack is layered alone; a repo that also layers `reports@1` gets that pack's real trigger/period, which wins the merge. Retired once `core@2` (M1.P3.T1) generalizes `report` into a `{match, apply}` construct with no report-named special case.",
-    "source": "Placeholder mechanics only -- see `notes`. The real report axis lives in `reports@1`."
-  },
   "exempt": {
     "filenames": ["plan.md", "execution.md", "CLAUDE.md"],
     "dir_components": [".pytest_cache", "__pycache__", ".git", "node_modules"],

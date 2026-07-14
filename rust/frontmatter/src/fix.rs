@@ -3,10 +3,11 @@
 //! [`propose_fix`] and [`propose_skeleton`] compute a schema-conformant
 //! replacement frontmatter for a file, reading every repair rule (which
 //! fields are required, their machine-vs-human authorship, description
-//! caps, namespace cardinality/parents/report-only-ness, the report
-//! trigger/period regex) off the merged [`Profile`] -- exactly the schema
-//! [`crate::validate::validate`] itself interprets, so a fix and the
-//! violation it clears are always schema-consistent with each other.
+//! caps, namespace cardinality/parents, and the conditional rule-sets'
+//! match/require/forbidden/value-format axes) off the merged [`Profile`] --
+//! exactly the schema [`crate::validate::validate`] itself interprets, so a
+//! fix and the violation it clears are always schema-consistent with each
+//! other.
 //!
 //! # Purity (SC16)
 //! Nothing in this module touches a filesystem, a network, a model/LLM, or
@@ -36,7 +37,7 @@
 //! presentation choice for whichever caller eventually writes the file,
 //! not a schema concern this pure library needs to preserve.
 
-use crate::profile::{Cardinality, Profile};
+use crate::profile::{Cardinality, Profile, RuleSet};
 use crate::validate::{classify_file_class, flatten, is_missing_value};
 use crate::value::{FrontmatterValue, RawFields};
 use crate::ParsedFrontmatter;
@@ -78,9 +79,9 @@ pub struct FixProposal {
 /// a required field that's absent/blank gets a placeholder (its name then
 /// appears in [`FixProposal::human_authored_fields`] if the profile marks
 /// it `human_authored`); `tags` is dropped and rebuilt against the profile's
-/// namespace rules (dedupe a singleton, drop an orphaned child or a
-/// misused report-only tag, add a placeholder for an absent required
-/// namespace); an over-cap `description` is trimmed to its file class's
+/// namespace rules (dedupe a singleton, drop an orphaned child or a tag a
+/// rule-set forbids outside its match, add a placeholder for an absent
+/// required namespace); an over-cap `description` is trimmed to its file class's
 /// cap; `updated` is always re-stamped to `now` (a Tier-1 fix pass is
 /// itself an edit); every other original top-level field passes through
 /// untouched, in its original relative order, after the schema's required
@@ -214,11 +215,11 @@ fn trim_description(
 /// each singleton namespace to its first occurrence; drop a child
 /// namespace's tags whose declared parent namespace is absent (to a fixed
 /// point, since dropping one child can never resurrect a parent, but a
-/// pack could declare a chain); resolve the report axis (drop a malformed
-/// `period` tag on a report file, or every report-only tag on a
-/// non-report file); then add a placeholder for every still-absent
-/// namespace the profile requires (singleton, at-least-one, or -- on a
-/// report file -- report-required).
+/// pack could declare a chain); resolve every conditional rule-set (on a
+/// matching file drop a value-format-malformed tag; on a non-matching file
+/// drop every `forbidden_unless_matched` tag); then add a placeholder for
+/// every still-absent namespace the profile requires (singleton,
+/// at-least-one, or -- on a matching file -- a rule-set's `require_namespaces`).
 fn repair_tags(
     tags: Option<&FrontmatterValue>,
     profile: &Profile,
@@ -233,23 +234,33 @@ fn repair_tags(
     dedupe_singletons(&mut tags, profile);
     drop_orphaned_children(&mut tags, profile);
 
-    let trigger = &profile.pack.report.trigger;
-    let is_report = tags
-        .iter()
-        .any(|t| t == &format!("{}:{}", trigger.namespace, trigger.value));
-
-    if is_report {
-        drop_malformed_period(&mut tags, profile);
-    } else {
-        drop_report_only(&mut tags, profile);
+    for (rule_index, rule_set) in profile.pack.rule_sets.iter().enumerate() {
+        if rule_set_matched(&tags, rule_set) {
+            drop_malformed_values(
+                &mut tags,
+                rule_set,
+                &profile.rule_set_value_patterns[rule_index],
+            );
+        } else {
+            drop_forbidden(&mut tags, rule_set);
+        }
     }
 
-    let stubbed = add_required_placeholders(&mut tags, profile, is_report, now);
+    let stubbed = add_required_placeholders(&mut tags, profile, now);
     (tags, stubbed)
 }
 
 fn namespace_of(tag: &str) -> &str {
     tag.split_once(':').map_or(tag, |(ns, _)| ns)
+}
+
+/// True if `tags` match `rule_set` -- carry `match.namespace:match.value`.
+fn rule_set_matched(tags: &[String], rule_set: &RuleSet) -> bool {
+    let needle = format!(
+        "{}:{}",
+        rule_set.match_criteria.namespace, rule_set.match_criteria.value
+    );
+    tags.iter().any(|t| t == &needle)
 }
 
 fn dedupe_singletons(tags: &mut Vec<String>, profile: &Profile) {
@@ -288,38 +299,42 @@ fn drop_orphaned_children(tags: &mut Vec<String>, profile: &Profile) {
     }
 }
 
-fn drop_report_only(tags: &mut Vec<String>, profile: &Profile) {
-    let report_only: Vec<&str> = profile
-        .pack
-        .namespaces
-        .iter()
-        .filter(|n| n.report_only)
-        .map(|n| n.name.as_str())
-        .collect();
-    tags.retain(|t| !report_only.contains(&namespace_of(t)));
+/// On a NON-matching file, drops every tag whose namespace a rule-set
+/// forbids outside its match (`apply.forbidden_unless_matched`).
+fn drop_forbidden(tags: &mut Vec<String>, rule_set: &RuleSet) {
+    tags.retain(|t| {
+        !rule_set
+            .apply
+            .forbidden_unless_matched
+            .iter()
+            .any(|ns| ns == namespace_of(t))
+    });
 }
 
-fn drop_malformed_period(tags: &mut Vec<String>, profile: &Profile) {
-    let period_ns = &profile.pack.report.period.namespace;
+/// On a MATCHING file, drops every tag in a rule-set `value_formats`
+/// namespace whose value fails the (pre-compiled) format regex. `patterns`
+/// is parallel to `rule_set.apply.value_formats` (see `Profile`'s field
+/// doc). Only the regex shape is checked here -- a shape-valid-but-not-a-
+/// -real-interval value is left for `validate` to flag, since the fixer has
+/// no way to synthesize a corrected calendar value.
+fn drop_malformed_values(tags: &mut Vec<String>, rule_set: &RuleSet, patterns: &[regex::Regex]) {
     tags.retain(|t| {
-        if namespace_of(t) != period_ns {
-            return true;
-        }
+        let ns = namespace_of(t);
         let value = t.split_once(':').map_or("", |(_, v)| v);
-        profile.period_pattern.is_match(value)
+        rule_set
+            .apply
+            .value_formats
+            .iter()
+            .zip(patterns)
+            .all(|(vf, pattern)| vf.namespace != ns || pattern.is_match(value))
     });
 }
 
 /// Appends a placeholder tag for every namespace `profile` still requires
 /// after the drop phases: every singleton/at-least-one namespace always,
-/// plus (only on a report file) every `report.required_namespaces` entry.
-/// Returns whether any placeholder was appended.
-fn add_required_placeholders(
-    tags: &mut Vec<String>,
-    profile: &Profile,
-    is_report: bool,
-    now: &str,
-) -> bool {
+/// plus (only on a matching file) every rule-set `apply.require_namespaces`
+/// entry. Returns whether any placeholder was appended.
+fn add_required_placeholders(tags: &mut Vec<String>, profile: &Profile, now: &str) -> bool {
     let mut stubbed = false;
 
     for ns in &profile.pack.namespaces {
@@ -334,16 +349,20 @@ fn add_required_placeholders(
         }
     }
 
-    if is_report {
-        for ns in &profile.pack.report.required_namespaces {
+    for (rule_index, rule_set) in profile.pack.rule_sets.iter().enumerate() {
+        if !rule_set_matched(tags, rule_set) {
+            continue;
+        }
+        for ns in &rule_set.apply.require_namespaces {
             if tags.iter().any(|t| namespace_of(t) == ns) {
                 continue;
             }
-            let placeholder = if *ns == profile.pack.report.period.namespace {
-                period_placeholder(profile, now)
-            } else {
-                format!("{ns}:{PLACEHOLDER}")
-            };
+            let placeholder = value_format_placeholder(
+                ns,
+                rule_set,
+                &profile.rule_set_value_patterns[rule_index],
+                now,
+            );
             tags.push(placeholder);
             stubbed = true;
         }
@@ -351,29 +370,41 @@ fn add_required_placeholders(
     stubbed
 }
 
-/// A best-effort, schema-valid placeholder for the report's `period`
-/// namespace: a same-day interval derived from `now`'s date portion (the
-/// merged pack's shipped period format is `YYYY-MM-DD/YYYY-MM-DD`, so
-/// duplicating `now`'s first 10 characters produces a syntactically valid,
-/// single-day interval). Verified against `profile.period_pattern` before
-/// use -- a foreign pack with an incompatible period format falls back to
-/// a bare `TODO` marker rather than guessing a value that wouldn't match.
-fn period_placeholder(profile: &Profile, now: &str) -> String {
-    let period_ns = &profile.pack.report.period.namespace;
-    if let Some(date) = now.get(..10) {
-        let candidate = format!("{date}/{date}");
-        if profile.period_pattern.is_match(&candidate) {
-            return format!("{period_ns}:{candidate}");
+/// A placeholder tag for a required namespace `ns`. When `ns` carries a
+/// value-format (e.g. a date-interval), a best-effort schema-valid value is
+/// synthesized: a same-day interval from `now`'s first 10 chars, used only
+/// if it satisfies that format's regex -- a pack whose format the fixer
+/// can't synthesize (e.g. a `Q<n>` marker) falls back to a bare `TODO`
+/// marker rather than guessing a value that wouldn't match. A namespace with
+/// no value-format gets a bare `TODO` directly.
+fn value_format_placeholder(
+    ns: &str,
+    rule_set: &RuleSet,
+    patterns: &[regex::Regex],
+    now: &str,
+) -> String {
+    if let Some((_, pattern)) = rule_set
+        .apply
+        .value_formats
+        .iter()
+        .zip(patterns)
+        .find(|(vf, _)| vf.namespace == ns)
+    {
+        if let Some(date) = now.get(..10) {
+            let candidate = format!("{date}/{date}");
+            if pattern.is_match(&candidate) {
+                return format!("{ns}:{candidate}");
+            }
         }
     }
-    format!("{period_ns}:{PLACEHOLDER}")
+    format!("{ns}:{PLACEHOLDER}")
 }
 
 /// Renders `fields` as a `---`-fenced canonical YAML block: a `Scalar`
 /// named `updated` renders bare (an unquoted timestamp, this crate's own
 /// convention throughout its test fixtures); every other `Scalar` renders
 /// double-quoted, with `\`/`"` and the whitespace controls `\n`/`\r`/`\t`
-/// escaped (see [`escape_double_quoted`] for why raw newlines are unsafe);
+/// escaped (see `escape_double_quoted` for why raw newlines are unsafe);
 /// a `Sequence` renders as a block
 /// list, one bare (unquoted) item per line indented two spaces under its
 /// key (`tags:`/`links:`-style); a `Mapping` renders as a nested indented
@@ -808,10 +839,10 @@ mod sdet_adversarial {
 
     const NOW: &str = "2026-07-11T00:00:00Z";
 
-    /// A foreign pack whose `report.period.regex` cannot match a
-    /// `YYYY-MM-DD/YYYY-MM-DD` candidate (e.g. it demands a `Q<n>` marker
-    /// this fixer has no way to synthesize). `period_placeholder` must fall
-    /// back to a bare `period:TODO` marker rather than emitting a value that
+    /// A foreign pack whose rule-set `period` value-format regex cannot match
+    /// a `YYYY-MM-DD/YYYY-MM-DD` candidate (e.g. it demands a `Q<n>` marker
+    /// this fixer has no way to synthesize). `value_format_placeholder` must
+    /// fall back to a bare `period:TODO` marker rather than emitting a value that
     /// LOOKS schema-valid but silently isn't -- and that fallback is a
     /// documented Tier-1 limitation, not a bug: this test pins it so it
     /// cannot regress unnoticed, and proves the re-validation round-trip
@@ -822,7 +853,8 @@ mod sdet_adversarial {
     fn foreign_pack_incompatible_period_regex_falls_back_to_bare_todo_and_stays_invalid() {
         let mut pack: serde_json::Value =
             serde_json::from_str(crate::test_support::SYNTHETIC_PACK_JSON).unwrap();
-        pack["report"]["period"]["regex"] = serde_json::json!(r"^Q[1-4]-[0-9]{4}$");
+        pack["rule_sets"][0]["apply"]["value_formats"][0]["regex"] =
+            serde_json::json!(r"^Q[1-4]-[0-9]{4}$");
         let profile = Profile::from_pack_json(&pack.to_string()).unwrap();
 
         let input = "---\nname: \"x\"\ntags:\n  - type:report\n---\nbody\n";

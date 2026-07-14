@@ -28,7 +28,7 @@
 //! task -- the Tier-1 fixer that fills it is `M4.P3.T2`'s `fix`; it is
 //! modeled as an `Option` now so the shape is stable across that task.
 
-use crate::profile::{Cardinality, Profile};
+use crate::profile::{Cardinality, FacetType, Profile, RuleSet};
 use crate::value::{FrontmatterValue, RawFields};
 use crate::ParsedFrontmatter;
 use time::Date;
@@ -309,8 +309,9 @@ fn python_repr_str(s: &str) -> String {
 
 // ---------------------------------------------------------------------------
 // Tag-namespace cascade: the ordered violation phases, driven entirely by
-// the pack's `namespaces` array order and `report` config rather than any
-// namespace vocabulary hardcoded here.
+// the pack's `namespaces` array order and its general conditional
+// `rule_sets` rather than any namespace vocabulary or report-shaped
+// assumption hardcoded here.
 // ---------------------------------------------------------------------------
 
 /// Groups tag strings by namespace (the part before the first `:`),
@@ -342,13 +343,14 @@ fn group_get<'a>(groups: &'a [(String, Vec<String>)], ns: &str) -> &'a [String] 
 }
 
 /// The full ordered tag cascade -- singleton, at-least-one,
-/// parent-dependency, report-only misuse, report-required, period format --
-/// driven entirely by
-/// `profile.pack.namespaces`' array order and `profile.pack.report`, with
-/// message wording read from `profile.core`'s cascade step templates.
+/// parent-dependency, then the three conditional rule-set phases
+/// (forbidden-unless-matched, required, value-format) -- driven entirely by
+/// `profile.pack.namespaces`' array order and `profile.pack.rule_sets`, with
+/// message wording read from `profile.core`'s cascade step templates (and,
+/// for value-format failures, the pack's own value-format `message`).
 /// Delegates each cascade step to its own phase function (below), purely to
 /// keep this entry point short -- the ORDER these phases run in, not their
-/// internal size, is what the parity contract pins.
+/// internal size, is what the emission-order contract pins.
 fn tag_rule_violations(tags: &[String], profile: &Profile) -> Vec<Violation> {
     let mut violations = Vec::new();
     let groups = group_by_namespace(tags);
@@ -356,19 +358,30 @@ fn tag_rule_violations(tags: &[String], profile: &Profile) -> Vec<Violation> {
     singleton_cardinality_phase(&groups, profile, &mut violations);
     at_least_one_cardinality_phase(&groups, profile, &mut violations);
     parent_dependency_phase(&groups, profile, &mut violations);
-
-    let trigger = &profile.pack.report.trigger;
-    let is_report = group_get(&groups, &trigger.namespace)
-        .iter()
-        .any(|t| t.split_once(':').map(|(_, v)| v) == Some(trigger.value.as_str()));
-
-    report_only_misuse_phase(&groups, profile, is_report, &mut violations);
-    if is_report {
-        report_required_phase(&groups, profile, &mut violations);
-        report_period_format_phase(&groups, profile, &mut violations);
-    }
+    rule_set_forbidden_phase(&groups, profile, &mut violations);
+    rule_set_required_phase(&groups, profile, &mut violations);
+    rule_set_value_format_phase(&groups, profile, &mut violations);
 
     violations
+}
+
+/// True if `groups` (the file's tags, grouped by namespace) match `rule_set`
+/// -- i.e. carry a tag `match.namespace:match.value`. The single generic
+/// predicate every rule-set phase branches on; there is no report-named
+/// special case.
+fn rule_set_matches(groups: &[(String, Vec<String>)], rule_set: &RuleSet) -> bool {
+    group_get(groups, &rule_set.match_criteria.namespace)
+        .iter()
+        .any(|t| t.split_once(':').map(|(_, v)| v) == Some(rule_set.match_criteria.value.as_str()))
+}
+
+/// The rendered `{match}` substitution for a rule-set's messages -- its
+/// `match` as `namespace:value` (e.g. `type:report`).
+fn rule_set_match_label(rule_set: &RuleSet) -> String {
+    format!(
+        "{}:{}",
+        rule_set.match_criteria.namespace, rule_set.match_criteria.value
+    )
 }
 
 fn singleton_cardinality_phase(
@@ -474,80 +487,111 @@ fn parent_dependency_phase(
     }
 }
 
-fn report_only_misuse_phase(
+/// For each rule-set, on a NON-matching file, every
+/// `apply.forbidden_unless_matched` namespace present is a misuse -- the
+/// inverse of the require direction (a namespace valid only on matching
+/// files). Iterates rule-sets in pack order, then each rule-set's forbidden
+/// list in its declared order.
+fn rule_set_forbidden_phase(
     groups: &[(String, Vec<String>)],
     profile: &Profile,
-    is_report: bool,
     violations: &mut Vec<Violation>,
 ) {
-    let Some(step) = profile.core.cascade_step("report_only_misuse") else {
+    let Some(step) = profile.core.cascade_step("rule_set_forbidden") else {
         return;
     };
-    for ns in profile.pack.namespaces.iter().filter(|n| n.report_only) {
-        if !group_get(groups, &ns.name).is_empty() && !is_report {
-            if let Some(emit) = step.emit(0) {
-                violations.push(Violation {
-                    code: emit.code.clone(),
-                    field: ns.name.clone(),
-                    message: render(&emit.message, &[("namespace", &ns.name)]),
-                });
+    for rule_set in &profile.pack.rule_sets {
+        if rule_set_matches(groups, rule_set) {
+            continue;
+        }
+        let label = rule_set_match_label(rule_set);
+        for ns in &rule_set.apply.forbidden_unless_matched {
+            if !group_get(groups, ns).is_empty() {
+                if let Some(emit) = step.emit(0) {
+                    violations.push(Violation {
+                        code: emit.code.clone(),
+                        field: ns.clone(),
+                        message: render(&emit.message, &[("namespace", ns), ("match", &label)]),
+                    });
+                }
             }
         }
     }
 }
 
-fn report_required_phase(
+/// For each rule-set, on a MATCHING file, every `apply.require_namespaces`
+/// entry that is absent is a `MISSING_REQUIRED_TAG`.
+fn rule_set_required_phase(
     groups: &[(String, Vec<String>)],
     profile: &Profile,
     violations: &mut Vec<Violation>,
 ) {
-    let Some(step) = profile.core.cascade_step("report_required") else {
+    let Some(step) = profile.core.cascade_step("rule_set_required") else {
         return;
     };
-    for ns in &profile.pack.report.required_namespaces {
-        if group_get(groups, ns).is_empty() {
-            if let Some(emit) = step.emit(0) {
-                violations.push(Violation {
-                    code: emit.code.clone(),
-                    field: ns.clone(),
-                    message: render(&emit.message, &[("namespace", ns)]),
-                });
+    for rule_set in &profile.pack.rule_sets {
+        if !rule_set_matches(groups, rule_set) {
+            continue;
+        }
+        let label = rule_set_match_label(rule_set);
+        for ns in &rule_set.apply.require_namespaces {
+            if group_get(groups, ns).is_empty() {
+                if let Some(emit) = step.emit(0) {
+                    violations.push(Violation {
+                        code: emit.code.clone(),
+                        field: ns.clone(),
+                        message: render(&emit.message, &[("namespace", ns), ("match", &label)]),
+                    });
+                }
             }
         }
     }
 }
 
-fn report_period_format_phase(
+/// For each rule-set, on a MATCHING file, every `apply.value_formats` entry
+/// checks its namespace's tags against the compiled regex; a
+/// `date_interval`-typed namespace is additionally calendar-checked. The
+/// code comes from the core cascade step; the shape-failure message comes
+/// from the pack's own value-format `message` (`{value}` = the whole tag),
+/// while the calendar-failure message is the interval-type semantic pinned
+/// here.
+fn rule_set_value_format_phase(
     groups: &[(String, Vec<String>)],
     profile: &Profile,
     violations: &mut Vec<Violation>,
 ) {
-    let Some(step) = profile.core.cascade_step("report_period_format") else {
+    let Some(step) = profile.core.cascade_step("rule_set_value_format") else {
         return;
     };
-    let period_ns = &profile.pack.report.period.namespace;
-    for period_tag in group_get(groups, period_ns) {
-        let value = period_tag.split_once(':').map_or("", |(_, v)| v);
-        // Two gates on a period value: the pack's regex is the fast shape
-        // check (digits + '/'), and a shape-valid value still needs its two
-        // endpoints to be a real, non-inverted calendar interval -- a
-        // regex alone can't reject `2026-13-45` or `end < start`.
-        let shape_valid = profile.period_pattern.is_match(value);
-        if !shape_valid || !is_real_calendar_interval(value) {
-            if let Some(emit) = step.emit(0) {
-                let message = if shape_valid {
-                    format!("'{period_tag}' is not a real YYYY-MM-DD/YYYY-MM-DD calendar interval")
-                } else {
-                    render(
-                        &emit.message,
-                        &[("period_namespace", period_ns), ("period_tag", period_tag)],
-                    )
-                };
-                violations.push(Violation {
-                    code: emit.code.clone(),
-                    field: period_ns.clone(),
-                    message,
-                });
+    let Some(emit) = step.emit(0) else {
+        return;
+    };
+    for (rule_index, rule_set) in profile.pack.rule_sets.iter().enumerate() {
+        if !rule_set_matches(groups, rule_set) {
+            continue;
+        }
+        for (format_index, value_format) in rule_set.apply.value_formats.iter().enumerate() {
+            // Parallel-index into the profile's compiled patterns (built in
+            // lockstep with `pack.rule_sets` -- see `Profile`'s field doc).
+            let pattern = &profile.rule_set_value_patterns[rule_index][format_index];
+            let is_interval = profile.namespace_facet_type(&value_format.namespace)
+                == Some(FacetType::DateInterval);
+            for tag in group_get(groups, &value_format.namespace) {
+                let value = tag.split_once(':').map_or("", |(_, v)| v);
+                let shape_valid = pattern.is_match(value);
+                let calendar_ok = !is_interval || is_real_calendar_interval(value);
+                if !shape_valid || !calendar_ok {
+                    let message = if shape_valid && is_interval {
+                        format!("'{tag}' is not a real YYYY-MM-DD/YYYY-MM-DD calendar interval")
+                    } else {
+                        render(&value_format.message, &[("value", tag)])
+                    };
+                    violations.push(Violation {
+                        code: emit.code.clone(),
+                        field: value_format.namespace.clone(),
+                        message,
+                    });
+                }
             }
         }
     }
@@ -1651,9 +1695,10 @@ body\n"
     }
 
     #[test]
-    fn mutating_report_required_namespaces_changes_the_verdict() {
+    fn mutating_rule_set_require_namespaces_changes_the_verdict() {
         let mut pack = synthetic_pack_as_value();
-        pack["report"]["required_namespaces"] = serde_json::json!(["source", "period", "audience"]);
+        pack["rule_sets"][0]["apply"]["require_namespaces"] =
+            serde_json::json!(["source", "period", "audience"]);
         let profile =
             Profile::from_pack_json(&pack.to_string()).expect("edited pack must still deserialize");
         let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-04-01/2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
@@ -1664,8 +1709,8 @@ body\n"
                 .violations
                 .iter()
                 .any(|v| v.code == "MISSING_REQUIRED_TAG" && v.field == "audience"),
-            "adding 'audience' to report.required_namespaces in the schema must \
-             surface a new MISSING_REQUIRED_TAG with no validate.rs change: {:?}",
+            "adding 'audience' to the rule-set's require_namespaces in the schema \
+             must surface a new MISSING_REQUIRED_TAG with no validate.rs change: {:?}",
             entry.violations
         );
     }
@@ -1770,5 +1815,123 @@ body\n"
         let third = validate(&parsed, "some/report.md", &profile);
         assert_eq!(first, second);
         assert_eq!(second, third);
+    }
+
+    // -----------------------------------------------------------------------
+    // core@2 generalization: the report axis is one match-then-apply rule-set,
+    // and the mechanism is not report-shaped (SC5/SC20). These tests use the
+    // SHIPPED default@1 + reports@1 (report-semantics parity) and a synthetic
+    // NON-report rule-set (proving the mechanism is generic).
+    // -----------------------------------------------------------------------
+
+    /// Merged profile from the two shipped public packs under core@2.
+    fn default_plus_reports() -> Profile {
+        let core = crate::profile::embedded_core_json();
+        let default_json = crate::profile::embedded_pack_json("default@1").unwrap();
+        let reports_json = crate::profile::embedded_pack_json("reports@1").unwrap();
+        Profile::from_packs(core, &[default_json, reports_json])
+            .expect("default@1 + reports@1 must merge under core@2")
+            .0
+    }
+
+    #[test]
+    fn shipped_default_and_reports_reproduce_pre_split_report_semantics_both_directions() {
+        let profile = default_plus_reports();
+
+        // Non-match direction: a report namespace on a NON-report file is a
+        // REPORT_ONLY_TAG_MISUSED (the retired report_only enforcement,
+        // reproduced by forbidden_unless_matched).
+        let non_report = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:knowledge\n  - status:complete\n  - topic:t\n  - source:slack\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let parsed = parse::parse(non_report).unwrap();
+        let entry = validate(&parsed, "some/doc.md", &profile);
+        assert!(
+            entry
+                .violations
+                .iter()
+                .any(|v| v.code == "REPORT_ONLY_TAG_MISUSED" && v.field == "source"),
+            "a report-only namespace off a report file must still be misuse: {:?}",
+            entry.violations
+        );
+
+        // Match direction: a report file missing source/period fires
+        // MISSING_REQUIRED_TAG for each (require_namespaces on match).
+        let report = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - topic:t\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let parsed = parse::parse(report).unwrap();
+        let entry = validate(&parsed, "some/report.md", &profile);
+        let missing: Vec<&str> = entry
+            .violations
+            .iter()
+            .filter(|v| {
+                v.code == "MISSING_REQUIRED_TAG" && (v.field == "source" || v.field == "period")
+            })
+            .map(|v| v.field.as_str())
+            .collect();
+        assert_eq!(
+            missing,
+            vec!["source", "period"],
+            "a report file must still require source+period: {:?}",
+            entry.violations
+        );
+    }
+
+    /// SC20: a fixture pack adding a NON-report `{match, apply}` rule-set
+    /// changes lint verdicts with NO change to this module's code -- proof
+    /// the mechanism is generic, not report-shaped. The rule-set matches
+    /// `type:policy` and forbids `owner` off a policy file / requires
+    /// `status` on one.
+    #[test]
+    fn a_non_report_rule_set_changes_lint_verdicts_with_no_code_change() {
+        const WITH_POLICY_RULE_SET: &str = r#"{
+            "kind": "extension-pack",
+            "version": "policy@1",
+            "extends": "core@2",
+            "required_fields": [],
+            "description_caps": {"context": 350},
+            "file_class": {"default": "context", "rules": []},
+            "namespaces": [
+                {"name": "type", "cardinality": "singleton"},
+                {"name": "owner", "cardinality": "optional"},
+                {"name": "status", "cardinality": "optional"}
+            ],
+            "rule_sets": [
+                {
+                    "match": {"namespace": "type", "value": "policy"},
+                    "apply": {
+                        "require_namespaces": ["status"],
+                        "forbidden_unless_matched": ["owner"]
+                    }
+                }
+            ],
+            "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
+        }"#;
+        let profile = Profile::from_pack_json(WITH_POLICY_RULE_SET)
+            .expect("a synthetic non-report rule-set pack must build");
+
+        // Non-policy file carrying `owner` -> forbidden_unless_matched fires.
+        let non_policy =
+            "---\nname: \"x\"\ntags:\n  - type:knowledge\n  - owner:datadog\n---\nbody\n";
+        let parsed = parse::parse(non_policy).unwrap();
+        let entry = validate(&parsed, "some/doc.md", &profile);
+        assert!(
+            entry
+                .violations
+                .iter()
+                .any(|v| v.code == "REPORT_ONLY_TAG_MISUSED" && v.field == "owner"),
+            "a non-report rule-set's forbidden_unless_matched must fire generically: {:?}",
+            entry.violations
+        );
+
+        // Policy file missing `status` -> require_namespaces fires.
+        let policy = "---\nname: \"x\"\ntags:\n  - type:policy\n---\nbody\n";
+        let parsed = parse::parse(policy).unwrap();
+        let entry = validate(&parsed, "some/doc.md", &profile);
+        assert!(
+            entry
+                .violations
+                .iter()
+                .any(|v| v.code == "MISSING_REQUIRED_TAG" && v.field == "status"),
+            "a non-report rule-set's require_namespaces must fire generically: {:?}",
+            entry.violations
+        );
     }
 }
