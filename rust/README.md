@@ -3,8 +3,8 @@
 Sensitivity: **public** · Owner: **public** · Kind: **shared Rust workspace**
 
 The platform's first Rust workspace in this repo. Isolated under `rust/` so it never entangles
-the Go module (`go/`) or the Python package (`ai_shared_lib_public/`) — separate `Cargo.toml`,
-separate build/test/lint lifecycle. Holds only deterministic, no-ML machinery.
+the Python package (`ai_shared_lib_public/`) — separate `Cargo.toml`, separate build/test/lint
+lifecycle. Holds only deterministic, no-ML machinery.
 
 ## What lives here
 
@@ -19,8 +19,8 @@ separate build/test/lint lifecycle. Holds only deterministic, no-ML machinery.
 ## Dependency policy
 
 For a non-trivial common capability (parsing, serialization, regex, and the like), **prefer a
-well-maintained, robust, trusted crate over hand-rolling it** — same posture as the Go module and
-Python package: robustness and correctness over minimizing dependency count. Vet every material
+well-maintained, robust, trusted crate over hand-rolling it** — same posture as the Python
+package: robustness and correctness over minimizing dependency count. Vet every material
 crate choice robustness-first (maintenance cadence, adoption, security-advisory history), clear
 its license per the org policy, and pin the exact version.
 
@@ -53,4 +53,4 @@ cargo test
 
 `.github/workflows/ci.yml` runs the above commands per member crate across the
 `{linux, macos} x {x86_64, aarch64}` arch matrix (cross-compiled where a runner can't execute the
-target natively) — see the `rust-*` jobs. Independent of the existing Go/Python/guardrail jobs.
+target natively) — see the `rust-*` jobs. Independent of the existing Python/guardrail jobs.

@@ -149,10 +149,6 @@ __pycache__/
 dist/
 build/
 
-# Go
-*.test
-*.out
-
 # Node / TypeScript
 node_modules/
 .next/
