@@ -48,7 +48,6 @@ Semver git tags (`vX.Y.Z`); consumers pin a tag. Bump on every release so update
 
 ### Changelog
 
-- **Unreleased** — Added an MIT `LICENSE` and a `THIRD-PARTY-LICENSES.md` bundle covering dependency attributions. Dependency policy reversed from stdlib-preferred to prefer-a-trusted-library-for-non-trivial-common-capabilities (CLI/YAML/JSON/regex/glob/math, etc.), vetted robustness-first, license-cleared, pinned, and recorded in `LICENSE-3rdparty.csv`. Docs-only: no code change, `dependencies` stays empty, every module remains stdlib-only in fact.
 - **v0.2.0** — Dependency policy reframed from "dependency-free / Tier 0" to **stdlib-preferred** (justified vendored deps permitted, subject to OSS-license clearance). No code change: `dependencies` stays empty, every module remains stdlib-only in fact. Docs-only contract clarification.
 - **v0.1.0** — Initial release: `resign_commits`, `sitemap_parser`, `article_meta` tools + schema home + secret-scanning guardrail.
 
