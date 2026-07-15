@@ -177,19 +177,19 @@ type Accounting struct {
 	SpecsAsOf       string `json:"specs_as_of,omitempty"`
 	BuildHelpersSHA string `json:"build_helpers_sha,omitempty"`
 
-	// Identity is the ACC5 transcript-only additive accounting identity (see Identity method +
-	// spikes/acc5-identity-basis.md), populated by SetAccounting alongside O/specs_as_of so the
-	// closure result and any residual travel with the run record. nil until a run resolves it.
+	// Identity is the transcript-only additive accounting identity (see the Identity method),
+	// populated by SetAccounting alongside O/specs_as_of so the closure result and any residual
+	// travel with the run record. nil until a run resolves it.
 	Identity *IdentityResult `json:"identity,omitempty"`
 
-	// ListVsActualNotes is the ACC5 §5 documentary list-vs-actual rate-basis note history — one entry
+	// ListVsActualNotes is the documentary list-vs-actual rate-basis note history — one entry
 	// per operator-captured status-line reading (RecordListVsActualNote); append-only so a re-capture
 	// (e.g. a retried baseline) is itemized, never overwritten. NEVER gates a build — see
-	// RecordListVsActualNote and spikes/acc5-identity-basis.md §5.2.
+	// RecordListVsActualNote.
 	ListVsActualNotes []ListVsActualNote `json:"list_vs_actual_notes,omitempty"`
 }
 
-// OrchestratorCost is O (SC3a): the top-level orchestrator transcript's own true-cost, priced from
+// OrchestratorCost is O: the top-level orchestrator transcript's own true-cost, priced from
 // ONLY that one file's ledger entry — never a per-model total, which would also lump in same-model
 // subagents (e.g. a fixed-Opus reviewer/magistrate running alongside an Opus orchestrator). See
 // Accounting.PriceFile, the single place this isolation happens.
@@ -232,8 +232,8 @@ func flattenBuckets(models map[string]*ModelBuckets) Usage {
 }
 
 // PriceFile derives O — the true-cost of ONE ledger file in isolation, typically the top-level
-// orchestrator/main transcript's FileID (see SC3a's O definition: session grand total minus every
-// subagent transcript, isolated per-transcript). Because it prices only that file's own ledger
+// orchestrator/main transcript's FileID (session grand total minus every subagent transcript,
+// isolated per-transcript). Because it prices only that file's own ledger
 // entry, it is correct regardless of whether every sibling subagent transcript was discovered: a
 // nested subagent's cost lives in ITS OWN file's ledger entry, never inside the main transcript's,
 // so it can never leak into O by construction. ok is false when fileID has no ledger entry (the
@@ -248,11 +248,11 @@ func (a *Accounting) PriceFile(fileID string, rates RateTable) (cost Orchestrato
 	return OrchestratorCost{Usage: flattenBuckets(entry), CostUSD: total}, true
 }
 
-// ---- ACC5: transcript-only additive accounting identity (spikes/acc5-identity-basis.md) ----
+// ---- transcript-only additive accounting identity ----
 
 // IdentityResult is the closed-form check `session_total = O + Σ(agent-*.jsonl) + fixed-subagents +
-// residual` (spike §2). Unlike a subtractive O (`session_total − Σ(subagents)`, a tautology that
-// structurally zeroes the gap — spike §1), every term here is priced from its OWN ledger entry, so a
+// residual`. Unlike a subtractive O (`session_total − Σ(subagents)`, a tautology that
+// structurally zeroes the gap), every term here is priced from its OWN ledger entry, so a
 // ledger entry outside the caller-supplied classification surfaces as a nonzero, itemized residual
 // instead of silently vanishing into O. CostStatus is "ok" (|residual| ≤ tolerance; still recorded,
 // never dropped) or "residual-exceeded" (tolerance breached; UnclassifiedTranscripts itemized) — see
@@ -263,44 +263,44 @@ type IdentityResult struct {
 	VariableAgentsUSD float64 `json:"variable_agents_usd"` // Σ(agent-*.jsonl) — variable per-task role agents
 	FixedSubagentsUSD float64 `json:"fixed_subagents_usd"` // fixed-model escalation/review subagents (e.g. magistrate, fixed reviewer)
 	ResidualUSD       float64 `json:"residual_usd"`        // session_total − (O + variable + fixed); asserted, never folded into O
-	ToleranceUSD      float64 `json:"tolerance_usd"`       // T = max(1e-6 × session_total, 1e-6 USD) — spike §3
+	ToleranceUSD      float64 `json:"tolerance_usd"`       // T = max(1e-6 × session_total, 1e-6 USD)
 	CostStatus        string  `json:"cost_status"`         // "ok" | "residual-exceeded"
 
 	// UnclassifiedTranscripts itemizes every ledger entry (other than the O file) not covered by the
 	// caller's known-subagent/fixed classification — populated ONLY when CostStatus is
-	// "residual-exceeded" (spike §4): the residual's exact attribution, so a leak is actionable, not
+	// "residual-exceeded": the residual's exact attribution, so a leak is actionable, not
 	// just flagged.
 	UnclassifiedTranscripts []UnclassifiedTranscript `json:"unclassified_transcripts,omitempty"`
 }
 
 // UnclassifiedTranscript is one ledger entry the identity's classification could not place into
-// {O, agent-*, fixed} — the exact failure mode ACC5 replaces silent O-absorption with (spike §1/§4).
+// {O, agent-*, fixed} — the exact failure mode this identity replaces silent O-absorption with.
 type UnclassifiedTranscript struct {
 	Path    string  `json:"path"`
 	CostUSD float64 `json:"cost_usd"`
 	Model   string  `json:"model,omitempty"` // sorted, comma-joined model keys of this entry; "" if none priced
 }
 
-// ComputeIdentity computes the ACC5 additive accounting identity over a's ledger. mainFileID is O's own
+// ComputeIdentity computes the additive accounting identity over a's ledger. mainFileID is O's own
 // ledger entry (priced via PriceFile, never adjusted). knownSubagents is the independently-discovered
 // set of non-orchestrator transcript paths (e.g. DiscoverSubagentTranscripts' output) that fold into
 // Σ(agent-*.jsonl); fixedSubagents is the subset of those classified as fixed-model escalation/review
-// subagents instead (excluded from the variable sum — spike §2 table; may be nil, since no
-// fixed-subagent classifier exists yet — see ACC5 handoff §7). A ledger entry that is neither
+// subagents instead (excluded from the variable sum; may be nil, since no
+// fixed-subagent classifier exists yet). A ledger entry that is neither
 // mainFileID nor named in either list is UNCLASSIFIED: its cost is excluded from every bucket, so it
 // inflates residual and is itemized rather than silently landing in O — this is what makes the check
-// a real one, not `O + Σ(subagents) ≡ session_total`'s structural tautology (spike §1).
+// a real one, not `O + Σ(subagents) ≡ session_total`'s structural tautology.
 //
-// All four terms are priced from THIS ONE rates argument (basis-invariant — spike §6): session_total
+// All four terms are priced from THIS ONE rates argument (basis-invariant): session_total
 // is Σ over a.Models (itself Σ over the full Ledger, independent of classification), never a's
 // possibly-stale CostUSD field, so a caller cannot silently mix bases across the identity's terms.
 //
 // residual = session_total − (O + Σ(agent-*) + fixed-subagents). |residual| ≤ T = max(1e-6 ×
-// session_total, 1e-6 USD) (spike §3's two-sided bracket: float64 regrouping noise sits ~7 orders of
+// session_total, 1e-6 USD) (a two-sided bracket: float64 regrouping noise sits ~7 orders of
 // magnitude below T; the cheapest realistic un-globbed subagent sits orders of magnitude above it)
-// sets cost_status "ok" — residual_usd is still recorded, never omitted, even at ~0 (spike §4). A
-// breach sets cost_status "residual-exceeded" and itemizes UnclassifiedTranscripts; the caller (ACC1's
-// contract: loud, non-fatal, fails a baseline-capture run only) decides whether that fails the run. O
+// sets cost_status "ok" — residual_usd is still recorded, never omitted, even at ~0. A
+// breach sets cost_status "residual-exceeded" and itemizes UnclassifiedTranscripts; the caller
+// (loud, non-fatal — fails a baseline-capture run only) decides whether that fails the run. O
 // is identical in both branches — see PriceFile, the single place its isolation happens.
 func (a *Accounting) ComputeIdentity(mainFileID string, knownSubagents, fixedSubagents []string, rates RateTable) IdentityResult {
 	fixedSet := fileIDSet(fixedSubagents)
@@ -342,7 +342,7 @@ func (a *Accounting) ComputeIdentity(mainFileID string, knownSubagents, fixedSub
 }
 
 // fileIDSet builds a lookup set from a FileID list, tolerating a nil/empty input (no classifier data
-// available yet — e.g. no fixed-subagent classifier exists as of ACC5's landing, spike handoff §7).
+// available yet — e.g. no fixed-subagent classifier exists yet).
 func fileIDSet(ids []string) map[string]bool {
 	set := map[string]bool{}
 	for _, id := range ids {
@@ -363,9 +363,9 @@ func modelKeysJoined(entry map[string]*ModelBuckets) string {
 	return strings.Join(keys, ",")
 }
 
-// ListVsActualNote is the ACC5 §5 documentary list-vs-actual rate-basis note: the actual-billed
+// ListVsActualNote is the documentary list-vs-actual rate-basis note: the actual-billed
 // whole-session total the operator reads from the Claude Code status line (`/cost`) at a baseline
-// finish, set against this run's list-priced transcript figures. PURELY DOCUMENTARY (spike §5.2) — no
+// finish, set against this run's list-priced transcript figures. PURELY DOCUMENTARY — no
 // field here is asserted against; see RecordListVsActualNote, the sole writer.
 type ListVsActualNote struct {
 	StatusLineTotalUSD        float64 `json:"status_line_total_usd"`        // operator-entered; build-helpers cannot parse this from transcripts
@@ -373,8 +373,8 @@ type ListVsActualNote struct {
 	TranscriptOUSD            float64 `json:"transcript_o_usd"`             // O, orchestrator-only (list-priced)
 	ListVsActualDeltaUSD      float64 `json:"list_vs_actual_delta_usd"`     // transcript_session_total_usd − status_line_total_usd
 	ListVsActualDeltaPct      float64 `json:"list_vs_actual_delta_pct"`     // the same delta as a percent of status_line_total_usd
-	RateBasis                 string  `json:"rate_basis"`                   // "list" (this note's basis; "contract"-ready per ACC4/SC9)
-	SpecsAsOf                 string  `json:"specs_as_of,omitempty"`        // the pinned rate-snapshot timestamp this run's transcript pricing used (ACC4)
+	RateBasis                 string  `json:"rate_basis"`                   // "list" (this note's basis; "contract"-ready)
+	SpecsAsOf                 string  `json:"specs_as_of,omitempty"`        // the pinned rate-snapshot timestamp this run's transcript pricing used
 	CapturedBy                string  `json:"captured_by"`                  // provenance: who captured the status-line reading
 	CapturedAt                string  `json:"captured_at"`                  // provenance: when
 	Note                      string  `json:"note"`                         // states the delta is a basis/scope artifact, not a computation bug
@@ -567,14 +567,14 @@ func priceModels(models map[string]*ModelBuckets, rates RateTable) (byModel map[
 // directory named after the session id — the main transcript's basename without its extension
 // (<dir>/<session-id>/subagents/agent-*.jsonl).
 //
-// SUPERSEDED (ACC2, M13.P2.T2): both patterns are FIXED-depth, and Go's filepath.Glob has no `**`
-// recursion, so this misses every nested-workflow subagent — a batch-engine task's build-engine
-// spawns its impl/test/review/magistrate agents one level deeper, at
-// <dir>/<session-id>/subagents/workflows/wf_*/agent-*.jsonl (see
-// spikes/acc2-nested-transcript.md §2, the FB2 defect). Retained ONLY as the literal pre-fix
-// behavior for the regression pin in accounting_test.go (proving DiscoverSubagentTranscripts finds
-// strictly more than this ever could) — do not use for new discovery. DiscoverSubagentTranscripts
-// is the one seam both O-isolation and attribution now consume.
+// Superseded by DiscoverSubagentTranscripts: both patterns here are FIXED-depth, and Go's
+// filepath.Glob has no `**` recursion, so this misses every nested-workflow subagent — a
+// batch-engine task's build-engine spawns its impl/test/review/magistrate agents one level
+// deeper, at <dir>/<session-id>/subagents/workflows/wf_*/agent-*.jsonl. Retained ONLY as the
+// literal pre-fix behavior for the regression pin in accounting_test.go (proving
+// DiscoverSubagentTranscripts finds strictly more than this ever could) — do not use for new
+// discovery. DiscoverSubagentTranscripts is the one seam both O-isolation and attribution now
+// consume.
 func SubagentGlobs(mainPath string) []string {
 	dir := filepath.Dir(mainPath)
 	stem := strings.TrimSuffix(filepath.Base(mainPath), filepath.Ext(mainPath))
@@ -595,15 +595,14 @@ func cleanAbs(path string) string {
 	return filepath.Clean(path)
 }
 
-// DiscoverSubagentTranscripts is the ONE discovery seam (ACC2, M13.P2.T2): it recursively walks
+// DiscoverSubagentTranscripts is the ONE discovery seam: it recursively walks
 // every candidate subagents/ root under mainPath and returns every agent-*.jsonl transcript found
 // at ANY depth — direct subagents AND nested-workflow subagents (a batch-engine task's build-engine
 // spawning impl/test/review/magistrate agents under workflows/wf_*/) AND any deeper nesting a future
 // spawn pattern introduces, with no fixed-depth assumption. This is the single producer both
 // O-isolation (Account/PriceFile, keyed by TranscriptSource.FileID) and attribution (Attribute,
 // keyed by AttribSource.FileID) consume — callers build both source slices from this SAME returned
-// path list, so the two views can never disagree on what counts as a subagent (see
-// spikes/acc2-nested-transcript.md §3).
+// path list, so the two views can never disagree on what counts as a subagent.
 //
 // Walk roots (both walked, every run, to serve the fixture sibling layout AND the live layout):
 //   - <dir>/subagents             — fixture / sibling layout (bh/testdata/*)
@@ -611,7 +610,7 @@ func cleanAbs(path string) string {
 //     its extension (the session id)
 //
 // Match rule: base name matches `agent-*.jsonl`, at any depth (filepath.WalkDir, never
-// filepath.Glob — Go's Glob has no `**` recursion, which is the FB2 defect this seam fixes). Any
+// filepath.Glob — Go's Glob has no `**` recursion, which is the defect this seam fixes). Any
 // other name (notably a workflow run's journal.jsonl, which carries no billable usage) is excluded
 // by construction — never walked into the returned set. A root that does not exist on disk
 // contributes nothing (not an error: a run with no fan-out, or a fixture with no live-layout dir).

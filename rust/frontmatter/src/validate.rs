@@ -1,4 +1,4 @@
-//! `M2.P2.T1b` -- the sole frontmatter validator: interprets a [`Profile`]
+//! The sole frontmatter validator: interprets a [`Profile`]
 //! (the declarative schema, `crate::profile`) over one file's already-parsed
 //! [`ParsedFrontmatter`] (`crate::parse`) and emits a [`FrontmatterEntry`]
 //! verdict. Every fact this module checks (which fields are required, how
@@ -14,8 +14,7 @@
 //! tag-namespace codes (`MISSING_REQUIRED_TAG`, `MULTIPLE_SINGLE_VALUE_TAGS`,
 //! `ORPHAN_NAMESPACE_TAG`, `REPORT_ONLY_TAG_MISUSED`,
 //! `INVALID_PERIOD_FORMAT`), and the tags-not-a-list code. Deliberately
-//! out of scope (see the task's violation-code enumeration and
-//! `DIVERGENCES.md`): `DESCRIPTION_INVALID_SCALAR` (raw YAML scalar-quoting
+//! out of scope: `DESCRIPTION_INVALID_SCALAR` (raw YAML scalar-quoting
 //! style -- this crate's parser already normalizes scalar shape, so that
 //! raw-text quoting distinction doesn't exist here in the same form),
 //! `INVALID_UPDATED_FORMAT` (timestamp format), and
@@ -24,9 +23,9 @@
 //! [`ScanOutcome`]/[`fold`] below for how a caller folds that into the
 //! coverage rollup instead).
 //!
-//! `proposed_frontmatter` on [`FrontmatterEntry`] stays `None` in this
-//! task -- the Tier-1 fixer that fills it is `M4.P3.T2`'s `fix`; it is
-//! modeled as an `Option` now so the shape is stable across that task.
+//! `proposed_frontmatter` on [`FrontmatterEntry`] always stays `None` from
+//! [`validate`] -- it's an `Option` so a future Tier-1 fixer can populate it
+//! without changing the shape.
 
 use crate::profile::{Cardinality, FacetType, Profile, RuleSet};
 use crate::value::{FrontmatterValue, RawFields};
@@ -51,8 +50,7 @@ pub struct Violation {
 /// The verdict for one file: its derived file class, whether it's
 /// conformant, the violations found (empty when conformant), and a
 /// reserved slot for a future Tier-1-fixer-produced replacement
-/// frontmatter block (`M4.P3.T2`; always `None` from this task's
-/// `validate`).
+/// frontmatter block (always `None` from [`validate`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FrontmatterEntry {
     /// The file class [`validate`] derived from the file's path via the
@@ -65,8 +63,7 @@ pub struct FrontmatterEntry {
     /// Every violation found, in the cascade's fixed emission order (see
     /// the module doc's scope list) -- deterministic for identical input.
     pub violations: Vec<Violation>,
-    /// Reserved for `M4.P3.T2`'s Tier-1 fixer. Always `None` from this
-    /// task's `validate`.
+    /// Reserved for a future Tier-1 fixer. Always `None` from [`validate`].
     pub proposed_frontmatter: Option<String>,
 }
 
@@ -92,9 +89,9 @@ impl FrontmatterEntry {
 }
 
 /// A rollup of validation outcomes across a set of scanned files. The
-/// directory walk that produces the per-file [`ScanOutcome`]s is
-/// `M4.P3.T1`'s `lint` -- this crate only provides the shape and the
-/// per-outcome [`fold`] step.
+/// directory walk that produces the per-file [`ScanOutcome`]s is a
+/// caller's concern (e.g. a `lint` command) -- this crate only provides
+/// the shape and the per-outcome [`fold`] step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CoverageRollup {
     /// Total files folded in, regardless of outcome.
@@ -139,7 +136,7 @@ pub fn fold(rollup: &mut CoverageRollup, outcome: ScanOutcome<'_>) {
 }
 
 // ---------------------------------------------------------------------------
-// DROPPED (M2.P2.T1b finalization, TE escalation #1): NON_STRING_FRONTMATTER_KEY.
+// DROPPED: NON_STRING_FRONTMATTER_KEY.
 // ---------------------------------------------------------------------------
 
 // This check had no reliable trigger. `crate::parse` stringifies EVERY
@@ -164,10 +161,10 @@ pub fn fold(rollup: &mut CoverageRollup, outcome: ScanOutcome<'_>) {
 const CODE_TAGS_NOT_A_LIST: &str = "TAGS_NOT_A_LIST";
 
 /// The description-not-top-level code. Like [`CODE_TAGS_NOT_A_LIST`], it is
-/// not in the declarative schema's cascade `codes` list (see
-/// `DIVERGENCES.md`) -- it guards a placement rule (`description` must be a
-/// top-level field, not nested under `workspace:`) rather than a cascade
-/// step -- so it is pinned here as a named constant.
+/// not in the declarative schema's cascade `codes` list -- it guards a
+/// placement rule (`description` must be a top-level field, not nested
+/// under `workspace:`) rather than a cascade step -- so it is pinned here
+/// as a named constant.
 const CODE_DESCRIPTION_NOT_TOP_LEVEL: &str = "DESCRIPTION_NOT_TOP_LEVEL";
 
 // ---------------------------------------------------------------------------
@@ -742,7 +739,7 @@ tags:\n\
   - topic:testing\n\
   - status:complete\n\
   - privacy:internal\n\
-  - owner:datadog\n\
+  - owner:example\n\
 links: []\n\
 updated: 2026-07-11T00:00:00Z\n\
 ---\n\
@@ -794,7 +791,7 @@ body\n"
             "    - topic:testing\n",
             "    - status:complete\n",
             "    - privacy:internal\n",
-            "    - owner:datadog\n",
+            "    - owner:example\n",
             "---\n",
             "body\n"
         );
@@ -819,7 +816,7 @@ body\n"
             "    - topic:testing\n",
             "    - status:complete\n",
             "    - privacy:internal\n",
-            "    - owner:datadog\n",
+            "    - owner:example\n",
             "---\n",
             "body\n"
         );
@@ -835,7 +832,7 @@ body\n"
     fn description_over_cap_by_file_class_context() {
         let long_description = "x".repeat(351);
         let input = format!(
-            "---\nname: \"x\"\ndescription: \"{long_description}\"\nid: \"a:b:c\"\ntags:\n  - type:knowledge\n  - topic:t\n  - status:complete\n  - privacy:internal\n  - owner:datadog\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n"
+            "---\nname: \"x\"\ndescription: \"{long_description}\"\nid: \"a:b:c\"\ntags:\n  - type:knowledge\n  - topic:t\n  - status:complete\n  - privacy:internal\n  - owner:example\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n"
         );
         let parsed = parse::parse(&input).unwrap();
         let entry = validate(&parsed, "some/doc.md", &profile());
@@ -854,7 +851,7 @@ body\n"
     fn description_over_cap_by_file_class_skill() {
         let long_description = "x".repeat(501);
         let input = format!(
-            "---\nname: \"x\"\ndescription: \"{long_description}\"\nid: \"a:b:c\"\ntags:\n  - type:skill\n  - topic:t\n  - status:complete\n  - privacy:internal\n  - owner:datadog\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n"
+            "---\nname: \"x\"\ndescription: \"{long_description}\"\nid: \"a:b:c\"\ntags:\n  - type:skill\n  - topic:t\n  - status:complete\n  - privacy:internal\n  - owner:example\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n"
         );
         let parsed = parse::parse(&input).unwrap();
         let entry = validate(&parsed, ".claude/skills/x/SKILL.md", &profile());
@@ -868,7 +865,7 @@ body\n"
     fn description_over_cap_by_file_class_agent() {
         let long_description = "x".repeat(751);
         let input = format!(
-            "---\nname: \"x\"\ndescription: \"{long_description}\"\nid: \"a:b:c\"\ntags:\n  - type:agent\n  - topic:t\n  - status:complete\n  - privacy:internal\n  - owner:datadog\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n"
+            "---\nname: \"x\"\ndescription: \"{long_description}\"\nid: \"a:b:c\"\ntags:\n  - type:agent\n  - topic:t\n  - status:complete\n  - privacy:internal\n  - owner:example\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n"
         );
         let parsed = parse::parse(&input).unwrap();
         let entry = validate(&parsed, ".claude/agents/x.md", &profile());
@@ -915,7 +912,7 @@ body\n"
 
     #[test]
     fn multiple_single_value_tags_message_uses_python_repr_list() {
-        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:a\n  - type:b\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:a\n  - type:b\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/doc.md", &profile());
         let violation = entry
@@ -931,7 +928,7 @@ body\n"
 
     #[test]
     fn orphan_namespace_tag_when_feature_present_without_product_or_suite() {
-        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:knowledge\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - feature:trace-explorer\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:knowledge\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - feature:trace-explorer\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/doc.md", &profile());
         let orphans: Vec<&str> = entry
@@ -949,7 +946,7 @@ body\n"
 
     #[test]
     fn report_only_tag_misused_on_non_report_file() {
-        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:knowledge\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:knowledge\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - source:slack\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/doc.md", &profile());
         assert!(entry
@@ -960,7 +957,7 @@ body\n"
 
     #[test]
     fn report_file_requires_source_and_period() {
-        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/report.md", &profile());
         let missing: Vec<&str> = entry
@@ -976,7 +973,7 @@ body\n"
 
     #[test]
     fn report_file_with_bad_period_format_fires_invalid_period_format() {
-        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:not-a-range\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - source:slack\n  - period:not-a-range\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/report.md", &profile());
         let violation = entry
@@ -993,7 +990,7 @@ body\n"
 
     #[test]
     fn report_file_with_valid_period_format_has_no_period_violation() {
-        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-04-01/2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - source:slack\n  - period:2026-04-01/2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/report.md", &profile());
         assert!(entry.is_valid, "violations: {:?}", entry.violations);
@@ -1001,7 +998,7 @@ body\n"
 
     #[test]
     fn report_file_with_leap_day_period_endpoint_has_no_period_violation() {
-        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2024-02-29/2024-03-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - source:slack\n  - period:2024-02-29/2024-03-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/report.md", &profile());
         assert!(entry.is_valid, "violations: {:?}", entry.violations);
@@ -1018,7 +1015,7 @@ body\n"
             "period:2025-02-29/2025-03-01",
         ] {
             let input = format!(
-                "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - {period}\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n"
+                "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - source:slack\n  - {period}\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n"
             );
             let parsed = parse::parse(&input).unwrap();
             let entry = validate(&parsed, "some/report.md", &profile());
@@ -1040,7 +1037,7 @@ body\n"
     /// what the shape regex can't.
     #[test]
     fn report_file_with_inverted_period_fires_invalid_period_format() {
-        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-12-31/2026-01-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - source:slack\n  - period:2026-12-31/2026-01-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/report.md", &profile());
         let violation = entry
@@ -1062,7 +1059,7 @@ body\n"
     /// like this one; it's caught at the existing shape gate instead.
     #[test]
     fn report_file_with_signed_year_period_endpoint_fires_invalid_period_format() {
-        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:+2026-04-01/2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - source:slack\n  - period:+2026-04-01/2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/report.md", &profile());
         let violation = entry
@@ -1081,7 +1078,7 @@ body\n"
     /// VALID -- the gate is `start <= end`, inclusive, not a strict `<`.
     #[test]
     fn report_file_with_same_day_period_interval_has_no_period_violation() {
-        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-05-15/2026-05-15\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - source:slack\n  - period:2026-05-15/2026-05-15\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/report.md", &profile());
         assert!(entry.is_valid, "violations: {:?}", entry.violations);
@@ -1094,7 +1091,7 @@ body\n"
     #[test]
     fn report_file_with_century_leap_rule_period_endpoints() {
         let valid_400_rule =
-            "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2000-02-29/2000-03-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+            "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - source:slack\n  - period:2000-02-29/2000-03-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(valid_400_rule).unwrap();
         let entry = validate(&parsed, "some/report.md", &profile());
         assert!(
@@ -1103,7 +1100,7 @@ body\n"
             entry.violations
         );
 
-        let invalid_100_rule = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2100-02-29/2100-03-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let invalid_100_rule = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - source:slack\n  - period:2100-02-29/2100-03-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(invalid_100_rule).unwrap();
         let entry = validate(&parsed, "some/report.md", &profile());
         let violation = entry
@@ -1128,7 +1125,7 @@ body\n"
             "period:2026-01-00/2026-01-06",
         ] {
             let input = format!(
-                "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - {period}\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n"
+                "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - source:slack\n  - {period}\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n"
             );
             let parsed = parse::parse(&input).unwrap();
             let entry = validate(&parsed, "some/report.md", &profile());
@@ -1148,7 +1145,7 @@ body\n"
     /// value from the message text alone.
     #[test]
     fn shape_gate_and_calendar_gate_period_messages_are_distinguishable() {
-        let shape_input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:not-a-range\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let shape_input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - source:slack\n  - period:not-a-range\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(shape_input).unwrap();
         let entry = validate(&parsed, "some/report.md", &profile());
         let shape_message = entry
@@ -1159,7 +1156,7 @@ body\n"
             .message
             .clone();
 
-        let calendar_input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-02-30/2026-03-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let calendar_input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - source:slack\n  - period:2026-02-30/2026-03-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(calendar_input).unwrap();
         let entry = validate(&parsed, "some/report.md", &profile());
         let calendar_message = entry
@@ -1189,15 +1186,13 @@ body\n"
     #[test]
     fn exempt_path_glob_is_honored() {
         let parsed = parse::parse("---\nname: \"x\"\n---\nbody\n").unwrap();
-        let entry = validate(&parsed, "the-work/workspace/scratchpad.md", &profile());
+        let entry = validate(&parsed, "work/workspace/scratchpad.md", &profile());
         assert!(entry.is_valid);
     }
 
-    /// M2.P2.T1b finalization: `NON_STRING_FRONTMATTER_KEY` is dropped
-    /// (see the module-level "DROPPED" note) -- a sequence-shaped key
-    /// (the check's real, narrow trigger) now produces NO violation of
-    /// that code, matching Python's actual behavior (it never emits this
-    /// code at all).
+    /// `NON_STRING_FRONTMATTER_KEY` is dropped (see the module-level
+    /// "DROPPED" note) -- a sequence-shaped key (the check's real, narrow
+    /// trigger) now produces NO violation of that code.
     #[test]
     fn non_string_top_level_key_produces_no_non_string_key_violation() {
         let input = "---\nname: \"x\"\n[a]: z\n---\nbody\n";
@@ -1248,7 +1243,7 @@ body\n"
         pack["description_caps"]["context"] = serde_json::json!(5);
         let profile =
             Profile::from_pack_json(&pack.to_string()).expect("edited pack must still deserialize");
-        let input = "---\nname: \"x\"\ndescription: \"this is definitely over five characters\"\nid: \"a:b:c\"\ntags:\n  - type:knowledge\n  - topic:t\n  - status:complete\n  - privacy:internal\n  - owner:datadog\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let input = "---\nname: \"x\"\ndescription: \"this is definitely over five characters\"\nid: \"a:b:c\"\ntags:\n  - type:knowledge\n  - topic:t\n  - status:complete\n  - privacy:internal\n  - owner:example\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/doc.md", &profile);
         assert!(entry
@@ -1276,9 +1271,7 @@ body\n"
     }
 
     // -----------------------------------------------------------------------
-    // SDET (M2.P2.T1b verification): cascade order under MULTIPLE
-    // simultaneous violations, cross-checked against the live Python
-    // emitter (`audit_helper.frontmatter.validate` + `schema.tag_rule_violations`).
+    // Cascade order under MULTIPLE simultaneous violations.
     // -----------------------------------------------------------------------
 
     /// One doc that trips EVERY cascade phase at once: a singleton excess
@@ -1289,16 +1282,11 @@ body\n"
     /// `type`/`topic` are present and clean so this isolates the phases
     /// that DO fire.
     ///
-    /// Expected order, hand-verified against a live run of
-    /// `audit_helper.frontmatter.validate()` on the SAME tag list (see this
-    /// task's SDET report): singleton(status excess) -> singleton(privacy
-    /// absent) -> [owner absent -- Rust-only, D1 divergence, sorts last
-    /// among singletons per `DIVERGENCES.md`] -> parent(feature->suite) ->
-    /// parent(product->suite) -> `report_required(source)` ->
-    /// `report_period_format(period)`. Python emits the identical sequence
-    /// MINUS the owner line (schema.py has no `owner` namespace at all --
-    /// see `DIVERGENCES.md` D1); every other code/field, in this exact
-    /// order, matched byte-for-byte in the live comparison.
+    /// Expected order: singleton(status excess) -> singleton(privacy
+    /// absent) -> singleton(owner absent, sorts last among singletons
+    /// because `owner` is appended last in the namespaces array) ->
+    /// parent(feature->suite) -> parent(product->suite) ->
+    /// `report_required(source)` -> `report_period_format(period)`.
     fn multi_violation_report_doc() -> &'static str {
         "---\n\
 name: \"x\"\n\
@@ -1332,24 +1320,22 @@ body\n"
             vec![
                 ("MULTIPLE_SINGLE_VALUE_TAGS", "status"),
                 ("MISSING_REQUIRED_TAG", "privacy"),
-                ("MISSING_REQUIRED_TAG", "owner"), // Rust-only: D1 divergence
+                ("MISSING_REQUIRED_TAG", "owner"), // `owner:` is a required singleton tag, enforced only in Rust
                 ("ORPHAN_NAMESPACE_TAG", "feature"),
                 ("ORPHAN_NAMESPACE_TAG", "product"),
                 ("MISSING_REQUIRED_TAG", "source"),
                 ("INVALID_PERIOD_FORMAT", "period"),
             ],
-            "cascade order (minus the owner line) must match the live Python \
-             emitter's tag_rule_violations() output on the identical tag list"
+            "cascade order (minus the owner line) must match a reference Python \
+             implementation's violation output on the identical tag list"
         );
     }
 
     /// Same fixture with the Rust-only `owner` line filtered out --
-    /// asserts the REMAINING sequence is byte-for-byte the live Python
-    /// emitter's actual output (captured by running
-    /// `audit_helper.frontmatter.validate()` against this exact tags list
-    /// during SDET verification; see the task's SDET report for the raw
-    /// transcript). This is the parity-critical assertion T2's frozen
-    /// goldens will formalize at scale.
+    /// asserts the REMAINING sequence is byte-for-byte a reference Python
+    /// implementation's actual output, captured against this exact tags
+    /// list during cross-implementation verification. This is the
+    /// parity-critical assertion the frozen goldens formalize at scale.
     #[test]
     fn cascade_order_minus_owner_line_is_byte_for_byte_the_live_python_sequence() {
         let parsed = parse::parse(multi_violation_report_doc()).unwrap();
@@ -1398,13 +1384,11 @@ body\n"
     }
 
     // -----------------------------------------------------------------------
-    // SDET: spot-parity fixtures (ran LIVE against
-    // `.claude/skills/workspace-audit/audit-helper`'s venv'd
-    // `audit_helper.frontmatter.validate()`; see the task's SDET report for
-    // the paired Python transcript). Every fixture below produces the
-    // EXACT SAME violation set as the live Python emitter, except for the
-    // Rust-only `owner` line (D1) -- confirmed present/absent as expected
-    // in each case.
+    // SDET: spot-parity fixtures (ran LIVE against a reference Python
+    // implementation of the same validation rules). Every fixture below
+    // produces the EXACT SAME violation set as that reference implementation,
+    // except for the Rust-only `owner` line -- confirmed present/absent as
+    // expected in each case.
     // -----------------------------------------------------------------------
 
     #[test]
@@ -1561,7 +1545,7 @@ body\n"
         tags.push("type:knowledge".to_string());
         tags.push("status:complete".to_string());
         tags.push("privacy:internal".to_string());
-        tags.push("owner:datadog".to_string());
+        tags.push("owner:example".to_string());
         let entry = entry_from_raw(
             vec![
                 ("name", FrontmatterValue::Scalar("x".to_string())),
@@ -1621,12 +1605,12 @@ body\n"
     }
 
     // -----------------------------------------------------------------------
-    // NON_STRING_FRONTMATTER_KEY DROPPED (M2.P2.T1b finalization, TE
-    // escalation #1 -- see the module-level "DROPPED" note above). The
-    // check's false-positive on a legitimate paren-containing key is
-    // resolved by removing the check outright, not by fixing the
-    // heuristic: the tests below now assert NO such violation, for both
-    // the false-positive shapes AND the heuristic's former real trigger.
+    // NON_STRING_FRONTMATTER_KEY DROPPED (see the module-level "DROPPED"
+    // note above). The check's false-positive on a legitimate
+    // paren-containing key is resolved by removing the check outright, not
+    // by fixing the heuristic: the tests below now assert NO such
+    // violation, for both the false-positive shapes AND the heuristic's
+    // former real trigger.
     // -----------------------------------------------------------------------
 
     #[test]
@@ -1683,7 +1667,7 @@ body\n"
             Profile::from_pack_json(&pack.to_string()).expect("edited pack must still deserialize");
         // conformant_context_doc has no privacy: substitute -- reuse a doc
         // missing privacy on purpose.
-        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:knowledge\n  - topic:t\n  - status:complete\n  - owner:datadog\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:knowledge\n  - topic:t\n  - status:complete\n  - owner:example\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/doc.md", &profile);
         assert!(
@@ -1701,7 +1685,7 @@ body\n"
             serde_json::json!(["source", "period", "audience"]);
         let profile =
             Profile::from_pack_json(&pack.to_string()).expect("edited pack must still deserialize");
-        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-04-01/2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - source:slack\n  - period:2026-04-01/2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let entry = validate(&parsed, "some/report.md", &profile);
         assert!(
@@ -1741,12 +1725,10 @@ body\n"
         );
     }
 
-    /// TE (M2.P2.T1b verification): the broad `**/SKILL.md` fallback rule
-    /// (index 1) must still classify a `SKILL.md` that does NOT sit under
-    /// `.claude/skills/` -- i.e. the anchored rule (index 0) does not match,
-    /// but the array-order fallback does, confirmed against `fnmatch`
-    /// parity (`fnmatch.fnmatch("tools/SKILL.md", "**/SKILL.md")` is
-    /// `True`; the anchored glob on the same path is `False`).
+    /// The broad `**/SKILL.md` fallback rule (index 1) must still
+    /// classify a `SKILL.md` that does NOT sit under `.claude/skills/` --
+    /// i.e. the anchored rule (index 0) does not match, but the
+    /// array-order fallback does (fnmatch parity: `**` spans `/`).
     #[test]
     fn skill_md_outside_dot_claude_skills_still_classifies_via_the_broad_fallback_rule() {
         let parsed = parse::parse("---\nname: \"x\"\n---\nbody\n").unwrap();
@@ -1754,10 +1736,10 @@ body\n"
         assert_eq!(entry.file_class, "skill");
     }
 
-    /// TE (M2.P2.T1b verification): the anchored skill rule's leading `*`
-    /// must cross `/` (fnmatch parity, `literal_separator=false`) so a
-    /// `SKILL.md` several directories deep still matches the anchored rule,
-    /// not just the top-level `.claude/skills/*/SKILL.md` shape.
+    /// The anchored skill rule's leading `*` must cross `/` (fnmatch
+    /// parity, `literal_separator=false`) so a `SKILL.md` several
+    /// directories deep still matches the anchored rule, not just the
+    /// top-level `.claude/skills/*/SKILL.md` shape.
     #[test]
     fn anchored_skill_glob_leading_star_crosses_multiple_path_separators() {
         let parsed = parse::parse("---\nname: \"x\"\n---\nbody\n").unwrap();
@@ -1769,19 +1751,17 @@ body\n"
         assert_eq!(entry.file_class, "skill");
     }
 
-    /// TE (M2.P2.T1b verification): the `exempt.path_globs` entry
-    /// `the-work/projects/*/findings/*.md` -- fnmatch parity means each `*`
-    /// crosses `/`, so a `findings/` doc nested MORE than one level below
-    /// `projects/` (extra path segments on either side of the two `*`s)
-    /// still matches, not just the single-segment shape the glob's literal
-    /// text suggests. Confirmed against `fnmatch.fnmatch` directly (see the
-    /// TE verification notes) before pinning here.
+    /// The `exempt.path_globs` entry `work/projects/*/findings/*.md`
+    /// -- fnmatch parity means each `*` crosses `/`, so a `findings/` doc
+    /// nested MORE than one level below `projects/` (extra path segments
+    /// on either side of the two `*`s) still matches, not just the
+    /// single-segment shape the glob's literal text suggests.
     #[test]
     fn exempt_findings_glob_matches_extra_nested_path_segments_too() {
         let parsed = parse::parse("---\nname: \"x\"\n---\nbody\n").unwrap();
         let entry = validate(
             &parsed,
-            "the-work/projects/a/b/findings/sub/x.md",
+            "work/projects/a/b/findings/sub/x.md",
             &profile(),
         );
         assert!(entry.is_valid, "{:?}", entry.violations);
@@ -1818,19 +1798,19 @@ body\n"
     }
 
     // -----------------------------------------------------------------------
-    // core@2 generalization: the report axis is one match-then-apply rule-set,
-    // and the mechanism is not report-shaped (SC5/SC20). These tests use the
-    // SHIPPED default@1 + reports@1 (report-semantics parity) and a synthetic
-    // NON-report rule-set (proving the mechanism is generic).
+    // Under core@2.0.0, the report axis is one match-then-apply rule-set;
+    // the mechanism itself is not report-shaped. These tests use the
+    // SHIPPED default@1.0.0 + reports@1.0.0 (report-semantics parity) and a
+    // synthetic NON-report rule-set (proving the mechanism is generic).
     // -----------------------------------------------------------------------
 
-    /// Merged profile from the two shipped public packs under core@2.
+    /// Merged profile from the two shipped public packs under core@2.0.0.
     fn default_plus_reports() -> Profile {
         let core = crate::profile::embedded_core_json();
-        let default_json = crate::profile::embedded_pack_json("default@1").unwrap();
-        let reports_json = crate::profile::embedded_pack_json("reports@1").unwrap();
+        let default_json = crate::profile::embedded_pack_json("default@1.0.0").unwrap();
+        let reports_json = crate::profile::embedded_pack_json("reports@1.0.0").unwrap();
         Profile::from_packs(core, &[default_json, reports_json])
-            .expect("default@1 + reports@1 must merge under core@2")
+            .expect("default@1.0.0 + reports@1.0.0 must merge under core@2.0.0")
             .0
     }
 
@@ -1839,8 +1819,7 @@ body\n"
         let profile = default_plus_reports();
 
         // Non-match direction: a report namespace on a NON-report file is a
-        // REPORT_ONLY_TAG_MISUSED (the retired report_only enforcement,
-        // reproduced by forbidden_unless_matched).
+        // REPORT_ONLY_TAG_MISUSED, via forbidden_unless_matched.
         let non_report = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:knowledge\n  - status:complete\n  - topic:t\n  - source:slack\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
         let parsed = parse::parse(non_report).unwrap();
         let entry = validate(&parsed, "some/doc.md", &profile);
@@ -1874,7 +1853,7 @@ body\n"
         );
     }
 
-    /// SC20: a fixture pack adding a NON-report `{match, apply}` rule-set
+    /// A fixture pack adding a NON-report `{match, apply}` rule-set
     /// changes lint verdicts with NO change to this module's code -- proof
     /// the mechanism is generic, not report-shaped. The rule-set matches
     /// `type:policy` and forbids `owner` off a policy file / requires
@@ -1884,7 +1863,7 @@ body\n"
         const WITH_POLICY_RULE_SET: &str = r#"{
             "kind": "extension-pack",
             "version": "policy@1",
-            "extends": "core@2",
+            "extends": "core@2.0.0",
             "required_fields": [],
             "description_caps": {"context": 350},
             "file_class": {"default": "context", "rules": []},
@@ -1909,7 +1888,7 @@ body\n"
 
         // Non-policy file carrying `owner` -> forbidden_unless_matched fires.
         let non_policy =
-            "---\nname: \"x\"\ntags:\n  - type:knowledge\n  - owner:datadog\n---\nbody\n";
+            "---\nname: \"x\"\ntags:\n  - type:knowledge\n  - owner:example\n---\nbody\n";
         let parsed = parse::parse(non_policy).unwrap();
         let entry = validate(&parsed, "some/doc.md", &profile);
         assert!(

@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ai-shared-lib-public"
+name = "claude-tooling"
 version = "0.2.1"
 description = "Public shared tools and schemas for AI-agent workspaces (git commit re-signing, sitemap parsing, article-metadata extraction). Stdlib covers what it does well; prefer a trusted, actively-maintained library over hand-rolling any non-trivial common capability, vetted/licensed/pinned before adoption."
 readme = "README.md"
@@ -22,9 +22,9 @@ license = "MIT"
 license-files = ["LICENSE", "LICENSE-3rdparty.csv"]
 
 [project.scripts]
-jr-resign-commits = "ai_shared_lib_public.resign_commits:main"
-jr-sitemap-parser = "ai_shared_lib_public.sitemap_parser:main"
-jr-article-meta = "ai_shared_lib_public.article_meta:main"
+resign-commits = "claude_tooling.resign_commits:main"
+sitemap-parser = "claude_tooling.sitemap_parser:main"
+article-meta = "claude_tooling.article_meta:main"
 
 [tool.setuptools]
-packages = ["ai_shared_lib_public"]
+packages = ["claude_tooling"]

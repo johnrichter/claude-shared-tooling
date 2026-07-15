@@ -2,10 +2,9 @@
 //!
 //! `ScoredDocument` used to live in [`crate::okapi`] and be re-borrowed by
 //! [`crate::bm25f`] (`bm25f -> okapi` for a type that is neither variant's
-//! private concern). Promoted here at `M1.P2.T3` — the task that defines
-//! this crate's public API surface — so both variants (and any future one,
-//! e.g. the M4 "search JSON hit" pin) depend on a neutral, variant-agnostic
-//! module instead of on each other.
+//! private concern). It lives here instead, on this crate's public API
+//! surface, so both variants (and any future one) depend on a neutral,
+//! variant-agnostic module instead of on each other.
 
 /// A ranked search result: one document's id and its BM25 score against the
 /// query that produced it.

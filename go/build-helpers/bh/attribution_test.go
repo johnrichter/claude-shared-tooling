@@ -246,13 +246,13 @@ func TestAttribute_ConcurrentFanOutAndMultiTranscript(t *testing.T) {
 	assertClose(t, t1.CostUSD, 0.050025, "M2.P1.T1 combined measured cost")
 }
 
-// TestAttribute_NestedWorkflowDepth is ACC2's (M13.P2.T2) assertion 3 (testdata/nested/EXPECTED.md):
+// TestAttribute_NestedWorkflowDepth is assertion 3 (testdata/nested/EXPECTED.md):
 // per-task attribution at the REAL nested-workflow depth (session/subagents/workflows/wf_*/), not
-// just the flat sibling layout the other tests in this file use. It also pins AC1 directly: the
+// just the flat sibling layout the other tests in this file use. It also pins that the
 // SAME DiscoverSubagentTranscripts() call this test uses to build attribution's AttribSource list is
 // the identical seam accounting_test.go's TestAccounting_NestedOIsolationAndGrandTotal uses to build
 // its TranscriptSource list — byte-identical FileID strings, not two independently re-derived sets.
-// Pre-change, neither depth-3 nested agent is discovered at all, so M13.P2.T3/M13.P2.T31 would
+// Pre-fix, neither depth-3 nested agent is discovered at all, so M13.P2.T3/M13.P2.T31 would
 // receive zero measured cost and degrade to the even-split pool this test proves absent.
 func TestAttribute_NestedWorkflowDepth(t *testing.T) {
 	rates := loadTestRates(t)

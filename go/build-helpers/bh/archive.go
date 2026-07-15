@@ -82,7 +82,7 @@ type Tombstone struct {
 
 // ArchiveOptions is the explicit, operator-supplied request: which milestone ids to move out of
 // the live docs. There is no "archive everything done" default — the operator names ids, per the
-// design's explicit-only hard rule (SC11).
+// design's explicit-only hard rule.
 type ArchiveOptions struct {
 	MilestoneIDs []string
 }
@@ -99,8 +99,8 @@ type ArchiveOutcome struct {
 }
 
 // Archive moves every task under each named, wholly-terminal milestone out of the live plan/exec
-// docs into the preserved archive doc — the explicit, resume-safe-by-construction operation
-// archival-design.md §4 specifies (SC11). It is pure: callers own reading the three docs and
+// docs into the preserved archive doc — an explicit, resume-safe-by-construction operation.
+// It is pure: callers own reading the three docs and
 // atomically writing the three results back (main.go's runArchive).
 //
 // Preconditions, refused with no partial result on violation:
@@ -110,7 +110,7 @@ type ArchiveOutcome struct {
 //     retrying blind into a partially-applied archive.
 //  2. No-active-loop. Nothing in ExecState marks a build loop in flight — this is an operational
 //     discipline, not a field this function can check. It is enforced by never wiring `archive`
-//     into next/batch/the SKILL.md build loop, which never call it (archival-design.md §4).
+//     into next/batch/the build loop, which never call it.
 //
 // Re-naming an id already present in the archive doc (and therefore already absent from the live
 // plan) is a no-op for that id (Skipped), not an error — archiving is idempotent by construction.

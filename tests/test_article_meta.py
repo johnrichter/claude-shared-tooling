@@ -4,7 +4,7 @@ extraction and null-safe degradation (the anti-hallucination contract)."""
 
 import unittest
 
-from ai_shared_lib_public import article_meta
+from claude_tooling import article_meta
 
 
 class ExtractMetaTests(unittest.TestCase):

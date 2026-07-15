@@ -60,7 +60,7 @@ func TestRenderPlanFieldParity(t *testing.T) {
 	}
 }
 
-// TestRenderPlanTypedFileSurface pins acceptance #3's render clause (M13.P3.T1): the plan.md
+// TestRenderPlanTypedFileSurface pins the render clause: the plan.md
 // mirror must show the TYPED file_surface shape — path plus its kind, and ", required" only for
 // a required entry — not just the bare path. An empty Kind renders as the "file" default.
 func TestRenderPlanTypedFileSurface(t *testing.T) {

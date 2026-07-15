@@ -6,7 +6,7 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 )
 
-// This file is the engine's pre-done assertion (M13.P3.T1): before a task is marked done, its
+// This file is the engine's pre-done assertion: before a task is marked done, its
 // declared file_surface must be actually present on disk, with the pinned match semantics below.
 // VerifyFileSurface stays pure per the package doc comment — fs.FS is an interface, not a
 // concrete IO call, so the real check (os.DirFS(worktree)) is supplied by package main and a

@@ -3,9 +3,9 @@
 //!
 //! [`crate::parse`] is the only module that ever sees a `yaml-rust2` `Yaml`
 //! value — everything downstream of it (this module, [`crate::ParsedFrontmatter`],
-//! and any future consumer such as the M2.P2.T1b `validate` module) only ever
-//! sees [`FrontmatterValue`]. That indirection is deliberate: it lets a
-//! future task swap the YAML backend without changing any consumer's code.
+//! and any future consumer such as the `validate` module) only ever sees
+//! [`FrontmatterValue`]. That indirection is deliberate: it lets a future
+//! change swap the YAML backend without touching any consumer's code.
 
 /// One top-level frontmatter field's value, typed just enough for a
 /// validator to tell "is this a scalar / a list / something else" apart —
@@ -43,17 +43,16 @@ pub enum FrontmatterValue {
     /// values can themselves be `Scalar`/`Sequence`/`Mapping`/`Other`).
     /// Needed because the workspace frontmatter schema nests
     /// Skill/Agent/Rule-specific required fields under a top-level
-    /// `workspace:` key that a validator must be able to descend into (see
-    /// `M2.P2.T1b`). This crate only *preserves* the nested map's shape —
-    /// it does not flatten `workspace:` up into the top level or otherwise
-    /// interpret the nesting; that semantic is the validator's job.
+    /// `workspace:` key that a validator must be able to descend into.
+    /// This crate only *preserves* the nested map's shape — it does not
+    /// flatten `workspace:` up into the top level or otherwise interpret
+    /// the nesting; that semantic is the validator's job.
     Mapping(RawFields),
     /// Anything that is neither a plain scalar, a sequence, nor a mapping:
     /// an explicit YAML null (`key:` with nothing after it), a YAML alias,
-    /// or a value the YAML backend could not resolve. The validator
-    /// (M2.P2.T1b) is expected to reject most of these for frontmatter
-    /// fields, which is why this crate does not try to interpret them
-    /// further.
+    /// or a value the YAML backend could not resolve. The validator is
+    /// expected to reject most of these for frontmatter fields, which is
+    /// why this crate does not try to interpret them further.
     Other,
 }
 

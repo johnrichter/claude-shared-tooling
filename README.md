@@ -13,14 +13,14 @@ Each tool is stdlib-only today and doubles as an importable module for programma
 
 | Command | Purpose |
 | --- | --- |
-| `jr-resign-commits` | Conflict-proof re-signing of unsigned commits on a git ref via `git commit-tree` (reuses each exact tree; preserves merge topology; dry-run by default). |
-| `jr-sitemap-parser` | Fetch, parse, window-filter, and prefix-filter any XML sitemap (`urlset` or one-level `sitemapindex`); fail-open to `[]`. |
-| `jr-article-meta` | Deterministically extract `{title, published, excerpt}` from a page's structured metadata (no LLM; verbatim-or-null). |
+| `resign-commits` | Conflict-proof re-signing of unsigned commits on a git ref via `git commit-tree` (reuses each exact tree; preserves merge topology; dry-run by default). |
+| `sitemap-parser` | Fetch, parse, window-filter, and prefix-filter any XML sitemap (`urlset` or one-level `sitemapindex`); fail-open to `[]`. |
+| `article-meta` | Deterministically extract `{title, published, excerpt}` from a page's structured metadata (no LLM; verbatim-or-null). |
 
 ## Rust workspace
 
 `rust/` is a separate Cargo workspace, isolated from the Python package so it never entangles the
-Python build/test/lint lifecycle. Every member is pure Rust (no CGO/C dependency, `unsafe_code`
+Python build/test/lint lifecycle. Every member is pure Rust (no C dependency, `unsafe_code`
 forbidden workspace-wide) so it stays buildable as a static `musl` binary. None of the crates are
 published (`publish = false`); each is a library consumed by an external binary that vendors this
 repo — for example `frontmatter` and `facetquery` are designed to be embedded in the **navigator**

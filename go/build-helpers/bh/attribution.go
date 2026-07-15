@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// This file implements MEASURED per-task cost attribution (SC2 committed goal) — replacing the
+// This file implements MEASURED per-task cost attribution — replacing the
 // batch even-split ESTIMATE with the true cost each subagent transcript actually incurred, keyed to
 // the task that spawned it. It reads each subagent transcript once, extracts the spawning task ID
 // from the first `user` turn (the leading `Task <id>` line of the dispatch prompt), sums that
@@ -17,7 +17,7 @@ import (
 // shared not restated), and attributes the whole transcript's cost to that task. A task with several
 // transcripts (impl + test + review agents) sums across them.
 //
-// The correlation contract is DECIDED in testdata/accounting/EXPECTED.md (M2.P1.T3): EXTRACT the
+// The correlation contract is DECIDED in testdata/accounting/EXPECTED.md: EXTRACT the
 // FIRST `[A-Z][0-9]+\.P[0-9]+\.T[0-9]+` match in the first user turn — the dispatch prompt always
 // begins `Task <task_id>`, so the leading match is the spawning task, and the greedy `\.T[0-9]+`
 // captures the full digit run so `T31` never truncates to `T3`. MATCH is EXACT full-string equality
@@ -29,7 +29,7 @@ import (
 // Split of concerns matches the package contract: parsing takes an io.Reader and the attribution math
 // takes in-memory values (both pure/testable). The CLI (package main) owns the filesystem —
 // discovering the subagent transcripts (DiscoverSubagentTranscripts, accounting.go — the ONE seam
-// shared with O-isolation, see ACC2/M13.P2.T2) and opening each.
+// shared with O-isolation) and opening each.
 
 // taskIDRE matches a build-with-team task ID as embedded in a dispatch prompt's leading `Task <id>`
 // line. The greedy `[0-9]+` runs capture the FULL digit sequence, so `M2.P1.T31` is captured whole

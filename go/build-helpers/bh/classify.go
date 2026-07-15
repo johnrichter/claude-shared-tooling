@@ -73,7 +73,7 @@ const (
 // Classify decides the route from observed doc state. Staleness compares the design's updated
 // timestamp against the plan's recorded provenance; RFC3339 when both parse, else exact-string.
 //
-// Archive-aware by construction (archival-design.md §4): this decision never inspects per-task
+// Archive-aware by construction: this decision never inspects per-task
 // completion (ExecState.Tasks/Archived are out of scope here), only doc presence + provenance
 // timestamps — a plan/execution pair with an archived milestone routes identically to one
 // without, since archiving never removes design.md, plan.json, or execution.json themselves,
@@ -121,7 +121,7 @@ func planIsStale(designUpdated, planProvenance string) bool {
 	return designUpdated != planProvenance // fallback: any difference means re-derive
 }
 
-// ---- escalation + scope classifiers (SC8) ----
+// ---- escalation + scope classifiers ----
 //
 // Detect vs judge: these deterministic classifiers DETECT which situations warrant a specialist;
 // the magistrate (Opus) JUDGES. The magistrate is expensive, so it fires ONLY on a CLOSED named
@@ -254,7 +254,7 @@ func ClassifyEscalation(in EscalationInput) EscalationResult {
 	return r
 }
 
-// ---- feedback criticality gate (M13.P2.T2) ----
+// ---- feedback criticality gate ----
 //
 // The magistrate-consumes-feedback route. Parallels ClassifyEscalation's magistrate-vs-local split:
 // an above-threshold entry becomes ranked amendment input the magistrate JUDGES (reconcile-exec

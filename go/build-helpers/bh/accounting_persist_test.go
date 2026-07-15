@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// These tests pin ACC1 (M13.P2.T1): SetAccounting/SetAccountingUnresolved persist orchestrator-only
+// These tests pin: SetAccounting/SetAccountingUnresolved persist orchestrator-only
 // O and cost_status onto ExecState.RunConfig.Accounting, and PriceFile's per-file isolation is what
 // makes O correct regardless of whether every subagent transcript was discovered.
 
@@ -77,7 +77,7 @@ func TestSetAccounting_IdempotentOnRerun(t *testing.T) {
 	}
 }
 
-// TestSetAccountingUnresolved_NonFatalMarkerLeavesPriorAccountingUntouched pins ACC1's unresolved
+// TestSetAccountingUnresolved_NonFatalMarkerLeavesPriorAccountingUntouched pins the unresolved
 // path: the marker is loud (cost_status set, logged) but never erases or "recovers" the last
 // known-good O/CostUSD — a transient read failure must only flag that THIS run's snapshot didn't
 // update, never silently fall back to a fabricated or zeroed value.

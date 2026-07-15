@@ -102,7 +102,7 @@ func TestParseTranscriptUsage(t *testing.T) {
 	}
 }
 
-// ---- schema-version migration (M2.P2.T1) ----
+// ---- schema-version migration ----
 
 // legacyExecJSON is a pre-M2 execution.json shape: no schema_version key at all, one done task
 // with a commit SHA + cost + verdicts, one not-started task with a dep, a populated run_config
@@ -159,12 +159,12 @@ func TestMigrateExecLoadsLegacyFileLossless(t *testing.T) {
 	}
 	t1 := ex.Tasks[0]
 	if t1.Status != StatusDone || t1.Commit != "a1b2c3d" || t1.CostUSD != 0.27 || t1.Test != "PASS" || t1.Review != "ACCEPT" {
-		t.Fatalf("done task fields (SC4 lossless) not preserved: %+v", t1)
+		t.Fatalf("done task fields (lossless) not preserved: %+v", t1)
 	}
 	if len(ex.Log) != 1 {
 		t.Fatalf("log lost on migrate: %v", ex.Log)
 	}
-	// new (M2) fields default safely absent — nil ledger is the accounting package's tolerated case.
+	// newer fields default safely absent — nil ledger is the accounting package's tolerated case.
 	if ex.RunConfig.Accounting != nil {
 		t.Fatalf("legacy file must not fabricate an accounting snapshot, got %+v", ex.RunConfig.Accounting)
 	}
@@ -191,7 +191,7 @@ func TestMigrateExecUpgradeSurvivesSaveRoundTrip(t *testing.T) {
 	}
 }
 
-// TestMigrateExecPreservesNextBatchDeterminism is the SC4 no-regression guard: a resumed legacy
+// TestMigrateExecPreservesNextBatchDeterminism is the no-regression guard: a resumed legacy
 // file must yield the exact same next/batch scheduling decision as the same state would pre-upgrade
 // (migrate only stamps schema_version — it must never touch task status/deps/order).
 func TestMigrateExecPreservesNextBatchDeterminism(t *testing.T) {

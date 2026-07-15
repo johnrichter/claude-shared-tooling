@@ -17,7 +17,7 @@ pub(crate) const SYNTHETIC_PACK_JSON: &str = r#"{
   "kind": "extension-pack",
   "profile": "synthetic-test",
   "version": "synthetic-test@1",
-  "extends": "core@2",
+  "extends": "core@2.0.0",
   "description": "Self-authored test fixture pack -- generic vocabulary for this crate's own test suite, not a shipped bundle.",
   "required_fields": [
     { "field": "name", "authorship": "human_authored", "source": "test fixture" },
@@ -74,11 +74,11 @@ pub(crate) const SYNTHETIC_PACK_JSON: &str = r#"{
     "filenames": ["plan.md", "execution.md", "CLAUDE.md"],
     "dir_components": [".pytest_cache", "__pycache__", ".git", "node_modules"],
     "path_globs": [
-      "the-work/daily-briefing/20*.md",
-      "the-work/daily-briefing/archive/20*.md",
-      "the-work/daily-briefing/archive/manual-priorities-resolved.md",
-      "the-work/projects/*/findings/*.md",
-      "the-work/workspace/scratchpad.md"
+      "work/daily-briefing/20*.md",
+      "work/daily-briefing/archive/20*.md",
+      "work/daily-briefing/archive/manual-priorities-resolved.md",
+      "work/projects/*/findings/*.md",
+      "work/workspace/scratchpad.md"
     ],
     "source": "test fixture"
   }

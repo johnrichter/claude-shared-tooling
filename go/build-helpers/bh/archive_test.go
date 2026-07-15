@@ -9,8 +9,8 @@ import (
 // archivePlan is a "done-heavy" two-milestone plan: M1 (2 tasks, later marked done) is the
 // archive candidate; M2 (1 task, left not-started) has no cross-milestone dep on M1, so it stays
 // schedulable regardless of whether M1 is live or archived — the cross-boundary dependency case
-// (a live task depending on an archived one) is M8.P1.T3's scope (statusOrDefault/eligible
-// archive-awareness), not this op's.
+// (a live task depending on an archived one) is statusOrDefault/eligible's archive-awareness to
+// handle, not this op's.
 func archivePlan() Plan {
 	return Plan{
 		Goal:            "demo",
@@ -277,8 +277,8 @@ func TestArchive_AccumulatesAcrossCalls(t *testing.T) {
 }
 
 // Crash-recovery idempotency. runArchive writes three files via separate temp-then-rename swaps,
-// so a crash can land some renames and not others (the writes are not jointly atomic). The design
-// (archival-design.md §4.4) requires retry to self-heal. These fixtures reproduce the two partial
+// so a crash can land some renames and not others (the writes are not jointly atomic). Retry must
+// self-heal. These fixtures reproduce the two partial
 // states and assert a second Archive call completes the archival without duplicating the immutable
 // archive record or falsely refusing. Both FAIL on the pre-fix code (dup group / terminal refusal).
 

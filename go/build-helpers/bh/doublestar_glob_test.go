@@ -6,7 +6,7 @@ import (
 	"testing/fstest"
 )
 
-// M2.P2.T1 adversarial fixtures: proves the doublestar swap actually fixes the documented
+// Adversarial fixtures proving the doublestar swap actually fixes the documented
 // fs.Glob-lacks-`**` gap, not just that VerifyFileSurface still passes trivial cases. Each fixture
 // first pins fs.Glob's failure on the exact same pattern+tree (so the baseline gap is visible and
 // this test would have failed before the swap), then asserts VerifyFileSurface now matches it.

@@ -1,6 +1,6 @@
 ---
 name: Nested-Transcript Discovery Fixtures — Expected Totals
-description: "golden transcript fixture manifest for ACC2 (M13.P2.T2) nested-workflow discovery — real on-disk depth (session/subagents/workflows/wf_*/agent-*.jsonl), the O-isolation + per-task attribution numbers, and the assertions that fail on pre-change SubagentGlobs"
+description: "golden transcript fixture manifest for nested-workflow discovery — real on-disk depth (session/subagents/workflows/wf_*/agent-*.jsonl), the O-isolation + per-task attribution numbers, and the assertions that fail on pre-change SubagentGlobs"
 ---
 
 # Fixture manifest — nested-transcript discovery golden fixtures
@@ -36,7 +36,7 @@ two depth-3 agents sit at `orchestrator/subagents/workflows/wf_*/agent-*.jsonl` 
 below the main transcript's directory, the depth today's fixed two-pattern `SubagentGlobs` provably
 cannot reach (`filepath.Glob` has no `**` recursion). `wf_batch` is the batch-engine's own run
 (spawning `wf_eng1`/`wf_eng2`, each a nested build-engine run for one task); the runtime flattens all
-three into the SAME `workflows/` dir as siblings (see `spikes/acc2-nested-transcript.md` §1) — modeled
+three into the SAME `workflows/` dir as siblings — modeled
 here exactly that way, not with `wf_eng1`/`wf_eng2` nested inside `wf_batch`.
 
 **Shared-prefix ids + interleaving.** Known task set `{M13.P2.T1, M13.P2.T3, M13.P2.T31}`. `agent-e1`'s
@@ -71,7 +71,7 @@ lines outright (the same no-usage-object skip path every other non-billable line
 `DiscoverSubagentTranscripts(testdata/nested/orchestrator.jsonl)` must return exactly 3 paths:
 `agent-direct.jsonl`, `agent-e1.jsonl`, `agent-e2.jsonl` — never `journal.jsonl`. The legacy
 `SubagentGlobs` two-fixed-depth-glob approach finds only 1 (`agent-direct.jsonl`, the depth-1 file both
-its patterns can reach) — the FB2 defect, pinned as a regression: the new seam must find strictly more
+its patterns can reach) — pinned as a regression: the new seam must find strictly more
 than the old two glob patterns ever could, on this exact fixture.
 
 ## Assertion 2 — O-isolation
@@ -98,7 +98,7 @@ assertion pins).
 
 Pre-change, `agent-e1.jsonl`/`agent-e2.jsonl` are never discovered/opened at all, so `M13.P2.T3` and
 `M13.P2.T31` receive zero measured cost each — the exact "nested subagent cost degrades to even-split"
-failure ACC2 exists to close.
+failure this discovery seam closes.
 
 ## Assertion 4 — journal excluded
 
@@ -110,8 +110,8 @@ either consumer ever sees it — the walk only matches `agent-*.jsonl`).
 
 Both the O-isolation source list (`TranscriptSource.FileID`) and the attribution source list
 (`AttribSource.FileID`) are built from the SAME `DiscoverSubagentTranscripts` return value in the tests
-below — byte-identical path strings, not independently re-derived. This is the seam invariant ACC2
-requires; see `spikes/acc2-nested-transcript.md` §3.
+below — byte-identical path strings, not independently re-derived. This is the seam invariant the
+discovery contract requires.
 
 ## Independent-sum confirmation
 
@@ -120,11 +120,9 @@ Summed by hand against the same `message.usage` extraction path as `testdata/acc
 `usage.cache_creation.ephemeral_1h_input_tokens`, `usage.cache_read_input_tokens`,
 `usage.output_tokens`) against every fixture file above — no discrepancy.
 
-## Deviation from the M13.P1.T1 spike's illustrative tree
+## Directory naming
 
-The spike's §4 layout diagram names the live-layout sibling directory `session/` for readability. The
-actual `SubagentGlobs`/`DiscoverSubagentTranscripts` contract keys the live root on `<stem>/subagents`
+The actual `SubagentGlobs`/`DiscoverSubagentTranscripts` contract keys the live root on `<stem>/subagents`
 where `stem` is the main transcript's own basename minus extension — so this fixture names that
 directory `orchestrator/` (matching `orchestrator.jsonl`'s stem) rather than `session/`, to exercise the
-real production key derivation rather than a hand-picked dir name. No other property of the spike's
-layout/assertions changed.
+real production key derivation rather than a hand-picked dir name.

@@ -33,7 +33,7 @@ from urllib.error import URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-USER_AGENT = "jr-shared-sitemap-parser/1.0"
+USER_AGENT = "claude-tooling-sitemap-parser/1.0"
 FETCH_TIMEOUT = 15  # seconds
 MAX_SITEMAPINDEX_DEPTH = 1  # recurse exactly one level into child sitemaps
 

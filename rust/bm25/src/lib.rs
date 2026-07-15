@@ -9,37 +9,26 @@
 //! dependency: a C dependency's libm can vary output by platform, which
 //! would break the determinism contract.
 //!
-//! # What's here (`M1.P1.T2` — the seed)
+//! # What's here
 //! - [`tokenize_whole_identifier`] — the whole-identifier tokenizer
-//!   (`[a-z0-9_]+`, lowercased), ported from ka. This IS this crate's
-//!   tokenizer, not a caller/adapter concern: `bm25` owns tokenization so a
-//!   query and an indexed document always tokenize identically.
+//!   (`[a-z0-9_]+`, lowercased). This IS this crate's tokenizer, not a
+//!   caller/adapter concern: `bm25` owns tokenization so a query and an
+//!   indexed document always tokenize identically.
 //! - [`OkapiIndex`] — the classic flat, single-bag-of-tokens-per-document
-//!   Okapi scorer (`K1 = 1.5`, `B = 0.75`), also ported from ka.
+//!   Okapi scorer (`K1 = 1.5`, `B = 0.75`).
+//! - [`BM25FIndex`] — the fielded, per-field-weighted scorer (multi-field
+//!   documents, configurable field weight + length-normalization `b` via
+//!   [`BM25FConfig`]). Independent of the flat [`OkapiIndex`]; shares the
+//!   tokenizer seam (`crate::tokenize`) and the ranked-output shape
+//!   ([`ScoredDocument`]) with `okapi`.
+//! - [`tokenize_all_case_split`] — the all-case-splitting tokenizer mode
+//!   (`camelCase`/`snake_case`/`TitleCase`/`PascalCase`/`SCREAMING_SNAKE`/
+//!   kebab -> sub-tokens, e.g. `fooBar`/`foo_bar`/`FOO_BAR`/`FooBar` all ->
+//!   `["foo", "bar"]`). A sibling free function to [`tokenize_whole_identifier`],
+//!   same `fn(&str) -> Vec<String>` signature, on purpose — this is what lets
+//!   a caller hold either behind one closed enum.
 //!
-//! Both are faithful ports of ka's `retrieve::bm25` — same constants, same
-//! formula, same tokenizer character class (later made Unicode-aware, see
-//! `M1.P3.T2` below) — generalized only enough to be a freestanding library
-//! (public types, caller-supplied string ids, guaranteed-deterministic
-//! ranked output) rather than ka's internal, `usize`-row-keyed,
-//! `HashMap`-order-dependent original.
-//!
-//! # M1.P2.T1 (landed)
-//! [`BM25FIndex`] — the fielded, per-field-weighted scorer (multi-field
-//! documents, configurable field weight + length-normalization `b` via
-//! [`BM25FConfig`]). New work, not a rewrite: the flat [`OkapiIndex`] is
-//! untouched. Shares the tokenizer seam (`crate::tokenize`) and the
-//! ranked-output shape ([`ScoredDocument`]) with `okapi`, per the plan.
-//!
-//! # M1.P2.T2 (landed)
-//! [`tokenize_all_case_split`] — the all-case-splitting tokenizer mode
-//! (`camelCase`/`snake_case`/`TitleCase`/`PascalCase`/`SCREAMING_SNAKE`/
-//! kebab -> sub-tokens, e.g. `ddTrace`/`dd_trace`/`DD_TRACE`/`DdTrace` all ->
-//! `["dd", "trace"]`). A sibling free function to [`tokenize_whole_identifier`],
-//! same `fn(&str) -> Vec<String>` signature, on purpose — this is what let
-//! `M1.P2.T3` hold either behind one closed enum.
-//!
-//! # M1.P2.T3 (landed) — call-time variant x tokenizer selection
+//! # Call-time variant x tokenizer selection
 //! A caller picks the scoring variant AND the tokenizer independently, at
 //! the call site that builds an index:
 //! - **Variant** — [`OkapiIndex`] (flat, one text per document) or
@@ -57,8 +46,8 @@
 //! variant. The index OWNS the [`Tokenizer`] it was built with and reuses it
 //! for every `search` call — there is no API to search with a different
 //! tokenizer than the index was built with, so build/search tokenizer
-//! agreement (an M1.P2.T1 QR finding: a mismatch silently breaks retrieval)
-//! is a structural guarantee, not caller discipline.
+//! agreement (a mismatch would silently break retrieval) is a structural
+//! guarantee, not caller discipline.
 //!
 //! ```
 //! use bm25::{BM25FConfig, BM25FDocument, BM25FIndex, OkapiDocument, OkapiIndex, Tokenizer};
@@ -66,32 +55,31 @@
 //! // Variant: Okapi (flat). Tokenizer: case-splitting (navigator's default).
 //! let okapi_index = OkapiIndex::build(
 //!     Tokenizer::CaseSplit,
-//!     [OkapiDocument { id: "doc-1", text: "ddTrace span init" }],
+//!     [OkapiDocument { id: "doc-1", text: "fooBar span init" }],
 //! );
-//! assert_eq!(okapi_index.search("trace", 10).len(), 1);
+//! assert_eq!(okapi_index.search("bar", 10).len(), 1);
 //!
 //! // Variant: BM25F (fielded). Tokenizer: whole-identifier (exact-symbol).
 //! let config = BM25FConfig::new().with_field("body", 1.0, 0.75);
 //! let bm25f_index = BM25FIndex::build(
 //!     &config,
 //!     Tokenizer::WholeIdentifier,
-//!     [BM25FDocument { id: "doc-1", fields: vec![("body", "dd_trace span")] }],
+//!     [BM25FDocument { id: "doc-1", fields: vec![("body", "foo_bar span")] }],
 //! );
-//! assert_eq!(bm25f_index.search("dd_trace", 10).len(), 1);
+//! assert_eq!(bm25f_index.search("foo_bar", 10).len(), 1);
 //! ```
 //!
-//! `ScoredDocument`, this crate's one ranked-result type, moved from
-//! `crate::okapi` to the neutral [`crate::result`] module in this task —
-//! both variants return it, so neither should have "owned" it.
+//! `ScoredDocument`, this crate's one ranked-result type, lives in the
+//! neutral [`crate::result`] module — both variants return it, so neither
+//! "owns" it.
 //!
-//! # M1.P3.T1 (landed)
 //! [`BM25FConfig::with_field`] takes [`Weight`]/[`FieldB`] (via
 //! `impl Into<_>`, so a bare `f64` still works ergonomically) instead of
 //! raw `f64` — invalid values CLAMP into a valid range at construction
 //! instead of panicking. See [`bm25f`] module docs for the clamp mapping.
 //!
-//! # M1.P3.T2 (landed)
-//! Both tokenizers refined per two decisions, in [`tokenize`]:
+//! # Tokenizer decisions
+//! Both tokenizers are refined per two decisions, in [`tokenize`]:
 //! - **(E) drop pure-digit tokens** — a token made entirely of digits is
 //!   dropped post-split (`12345` → `[]`; `2Client` → `["client"]`).
 //! - **(F) Unicode-aware, emoji/symbols/punctuation as boundaries** — token
@@ -143,7 +131,7 @@ mod tests {
     }
 }
 
-/// M1.P2.T3 acceptance: the public, call-time-selectable API — both
+/// The public, call-time-selectable API — both
 /// variants x both tokenizers, exercised ONLY through `bm25::` (no reach
 /// into `bm25::okapi`/`bm25::bm25f`/`bm25::tokenize` internals), proving the
 /// crate is linkable and usable standalone (no navigator dependency).
@@ -160,7 +148,7 @@ mod public_api_tests {
             [
                 OkapiDocument {
                     id: "match",
-                    text: "dd_trace span init",
+                    text: "foo_bar span init",
                 },
                 OkapiDocument {
                     id: "no_match",
@@ -168,7 +156,7 @@ mod public_api_tests {
                 },
             ],
         );
-        let results = index.search("dd_trace", 10);
+        let results = index.search("foo_bar", 10);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "match");
         assert!(results[0].score > 0.0);
@@ -181,7 +169,7 @@ mod public_api_tests {
             [
                 OkapiDocument {
                     id: "match",
-                    text: "ddTrace span init",
+                    text: "fooBar span init",
                 },
                 OkapiDocument {
                     id: "no_match",
@@ -189,7 +177,7 @@ mod public_api_tests {
                 },
             ],
         );
-        let results = index.search("trace", 10);
+        let results = index.search("bar", 10);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "match");
         assert!(results[0].score > 0.0);
@@ -204,7 +192,7 @@ mod public_api_tests {
             [
                 BM25FDocument {
                     id: "match",
-                    fields: vec![("body", "dd_trace span init")],
+                    fields: vec![("body", "foo_bar span init")],
                 },
                 BM25FDocument {
                     id: "no_match",
@@ -212,7 +200,7 @@ mod public_api_tests {
                 },
             ],
         );
-        let results = index.search("dd_trace", 10);
+        let results = index.search("foo_bar", 10);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "match");
         assert!(results[0].score > 0.0);
@@ -227,7 +215,7 @@ mod public_api_tests {
             [
                 BM25FDocument {
                     id: "match",
-                    fields: vec![("body", "ddTrace span init")],
+                    fields: vec![("body", "fooBar span init")],
                 },
                 BM25FDocument {
                     id: "no_match",
@@ -235,7 +223,7 @@ mod public_api_tests {
                 },
             ],
         );
-        let results = index.search("trace", 10);
+        let results = index.search("bar", 10);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "match");
         assert!(results[0].score > 0.0);
@@ -244,7 +232,7 @@ mod public_api_tests {
     /// Tokenizer-choice effect: `CaseSplit` retrieves a doc that
     /// `WholeIdentifier` does NOT, for the SAME index-construction inputs —
     /// proves tokenizer selection flows through to retrieval, not just
-    /// compiles. Query `trace` matches `ddTrace` only when the tokenizer
+    /// compiles. Query `bar` matches `fooBar` only when the tokenizer
     /// splits camelCase into sub-tokens.
     #[test]
     fn case_split_retrieves_a_doc_whole_identifier_does_not() {
@@ -253,24 +241,24 @@ mod public_api_tests {
                 tokenizer,
                 [OkapiDocument {
                     id: "camel_doc",
-                    text: "ddTrace span init",
+                    text: "fooBar span init",
                 }],
             )
         };
 
-        let case_split_results = build(Tokenizer::CaseSplit).search("trace", 10);
+        let case_split_results = build(Tokenizer::CaseSplit).search("bar", 10);
         assert_eq!(
             case_split_results.len(),
             1,
-            "CaseSplit must split ddTrace into [\"dd\", \"trace\"], matching query \"trace\""
+            "CaseSplit must split fooBar into [\"foo\", \"bar\"], matching query \"bar\""
         );
 
-        let whole_identifier_results = build(Tokenizer::WholeIdentifier).search("trace", 10);
+        let whole_identifier_results = build(Tokenizer::WholeIdentifier).search("bar", 10);
         assert_eq!(
             whole_identifier_results.len(),
             0,
-            "WholeIdentifier keeps ddTrace as one token (\"ddtrace\"), which never equals \
-             \"trace\" -- must NOT match"
+            "WholeIdentifier keeps fooBar as one token (\"foobar\"), which never equals \
+             \"bar\" -- must NOT match"
         );
     }
 
@@ -286,14 +274,14 @@ mod public_api_tests {
                 tokenizer,
                 [BM25FDocument {
                     id: "camel_doc",
-                    fields: vec![("body", "ddTrace span init")],
+                    fields: vec![("body", "fooBar span init")],
                 }],
             )
         };
 
-        assert_eq!(build(Tokenizer::CaseSplit).search("trace", 10).len(), 1);
+        assert_eq!(build(Tokenizer::CaseSplit).search("bar", 10).len(), 1);
         assert_eq!(
-            build(Tokenizer::WholeIdentifier).search("trace", 10).len(),
+            build(Tokenizer::WholeIdentifier).search("bar", 10).len(),
             0
         );
     }
@@ -309,21 +297,21 @@ mod public_api_tests {
     fn search_always_reuses_the_tokenizer_the_index_was_built_with() {
         // Built with CaseSplit -- if `search` used a different tokenizer
         // internally (the mismatch this guard exists to prevent), a query
-        // tokenized as one whole identifier ("ddtrace") would never match
-        // postings keyed by CaseSplit's sub-tokens ("dd", "trace").
+        // tokenized as one whole identifier ("foobar") would never match
+        // postings keyed by CaseSplit's sub-tokens ("foo", "bar").
         let index = OkapiIndex::build(
             Tokenizer::CaseSplit,
             [OkapiDocument {
                 id: "doc",
-                text: "ddTrace",
+                text: "fooBar",
             }],
         );
         // Repeated `search` calls against the same index are unaffected by
         // anything except the query text -- there is no way to pass a
-        // different tokenizer in, so both calls tokenize "trace" as
+        // different tokenizer in, so both calls tokenize "bar" as
         // CaseSplit did at build time and both find the match.
-        assert_eq!(index.search("trace", 10).len(), 1);
-        assert_eq!(index.search("trace", 10).len(), 1);
+        assert_eq!(index.search("bar", 10).len(), 1);
+        assert_eq!(index.search("bar", 10).len(), 1);
     }
 
     /// Non-trivial-corpus strengthening of the four combination tests
@@ -342,11 +330,11 @@ mod public_api_tests {
             [
                 OkapiDocument {
                     id: "high_tf",
-                    text: "dd_trace dd_trace dd_trace filler filler filler",
+                    text: "foo_bar foo_bar foo_bar filler filler filler",
                 },
                 OkapiDocument {
                     id: "low_tf",
-                    text: "dd_trace filler filler filler filler filler",
+                    text: "foo_bar filler filler filler filler filler",
                 },
                 OkapiDocument {
                     id: "no_match",
@@ -354,7 +342,7 @@ mod public_api_tests {
                 },
             ],
         );
-        let results = index.search("dd_trace", 10);
+        let results = index.search("foo_bar", 10);
         let ids: Vec<&str> = results.iter().map(|r| r.id.as_str()).collect();
         assert_eq!(
             ids,
@@ -371,11 +359,11 @@ mod public_api_tests {
             [
                 OkapiDocument {
                     id: "high_tf",
-                    text: "ddTrace ddTrace ddTrace filler filler filler",
+                    text: "fooBar fooBar fooBar filler filler filler",
                 },
                 OkapiDocument {
                     id: "low_tf",
-                    text: "ddTrace filler filler filler filler filler",
+                    text: "fooBar filler filler filler filler filler",
                 },
                 OkapiDocument {
                     id: "no_match",
@@ -383,7 +371,7 @@ mod public_api_tests {
                 },
             ],
         );
-        let results = index.search("trace", 10);
+        let results = index.search("bar", 10);
         let ids: Vec<&str> = results.iter().map(|r| r.id.as_str()).collect();
         assert_eq!(ids, vec!["high_tf", "low_tf"]);
         assert!(results[0].score > results[1].score);
@@ -398,11 +386,11 @@ mod public_api_tests {
             [
                 BM25FDocument {
                     id: "high_tf",
-                    fields: vec![("body", "dd_trace dd_trace dd_trace filler filler filler")],
+                    fields: vec![("body", "foo_bar foo_bar foo_bar filler filler filler")],
                 },
                 BM25FDocument {
                     id: "low_tf",
-                    fields: vec![("body", "dd_trace filler filler filler filler filler")],
+                    fields: vec![("body", "foo_bar filler filler filler filler filler")],
                 },
                 BM25FDocument {
                     id: "no_match",
@@ -410,7 +398,7 @@ mod public_api_tests {
                 },
             ],
         );
-        let results = index.search("dd_trace", 10);
+        let results = index.search("foo_bar", 10);
         let ids: Vec<&str> = results.iter().map(|r| r.id.as_str()).collect();
         assert_eq!(ids, vec!["high_tf", "low_tf"]);
         assert!(results[0].score > results[1].score);
@@ -425,11 +413,11 @@ mod public_api_tests {
             [
                 BM25FDocument {
                     id: "high_tf",
-                    fields: vec![("body", "ddTrace ddTrace ddTrace filler filler filler")],
+                    fields: vec![("body", "fooBar fooBar fooBar filler filler filler")],
                 },
                 BM25FDocument {
                     id: "low_tf",
-                    fields: vec![("body", "ddTrace filler filler filler filler filler")],
+                    fields: vec![("body", "fooBar filler filler filler filler filler")],
                 },
                 BM25FDocument {
                     id: "no_match",
@@ -437,7 +425,7 @@ mod public_api_tests {
                 },
             ],
         );
-        let results = index.search("trace", 10);
+        let results = index.search("bar", 10);
         let ids: Vec<&str> = results.iter().map(|r| r.id.as_str()).collect();
         assert_eq!(ids, vec!["high_tf", "low_tf"]);
         assert!(results[0].score > results[1].score);
@@ -445,11 +433,11 @@ mod public_api_tests {
 
     /// Inverse of `case_split_retrieves_a_doc_whole_identifier_does_not`:
     /// `WholeIdentifier` makes an exact-symbol match that `CaseSplit`
-    /// over-splits into a FALSE positive. Corpus doc's text has "dd" and
-    /// "trace" as unrelated separate words (never joined as `dd_trace`).
-    /// Query `dd_trace` is one token under `WholeIdentifier` (exact-symbol)
+    /// over-splits into a FALSE positive. Corpus doc's text has "foo" and
+    /// "bar" as unrelated separate words (never joined as `foo_bar`).
+    /// Query `foo_bar` is one token under `WholeIdentifier` (exact-symbol)
     /// and correctly finds nothing; under `CaseSplit` it splits into
-    /// `["dd", "trace"]`, both of which independently appear in the doc, so
+    /// `["foo", "bar"]`, both of which independently appear in the doc, so
     /// it wrongly matches -- proving `WholeIdentifier`'s exact-symbol
     /// contract is real, not just "matches more" like `CaseSplit`.
     #[test]
@@ -459,24 +447,24 @@ mod public_api_tests {
                 tokenizer,
                 [OkapiDocument {
                     id: "unrelated_words_doc",
-                    text: "dd config, trace log",
+                    text: "foo config, bar log",
                 }],
             )
         };
 
-        let whole_identifier_results = build(Tokenizer::WholeIdentifier).search("dd_trace", 10);
+        let whole_identifier_results = build(Tokenizer::WholeIdentifier).search("foo_bar", 10);
         assert_eq!(
             whole_identifier_results.len(),
             0,
-            "WholeIdentifier keeps query \"dd_trace\" as one token, which never equals the \
-             doc's separate \"dd\"/\"trace\" tokens -- must NOT match"
+            "WholeIdentifier keeps query \"foo_bar\" as one token, which never equals the \
+             doc's separate \"foo\"/\"bar\" tokens -- must NOT match"
         );
 
-        let case_split_results = build(Tokenizer::CaseSplit).search("dd_trace", 10);
+        let case_split_results = build(Tokenizer::CaseSplit).search("foo_bar", 10);
         assert_eq!(
             case_split_results.len(),
             1,
-            "CaseSplit splits query \"dd_trace\" into [\"dd\", \"trace\"], both of which \
+            "CaseSplit splits query \"foo_bar\" into [\"foo\", \"bar\"], both of which \
              appear as unrelated separate words in the doc -- over-splitting produces a \
              false-positive match here, which is exactly why WholeIdentifier exists as the \
              exact-symbol opt-in"

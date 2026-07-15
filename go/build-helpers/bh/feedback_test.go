@@ -140,11 +140,11 @@ func TestCriticalityRuleIsDocumented(t *testing.T) {
 	}
 }
 
-// TestRenderFeedbackMirrorsCanonical is the SC13 mirror-parity acceptance test: every field in
+// TestRenderFeedbackMirrorsCanonical is the mirror-parity acceptance test: every field in
 // every canonical entry (JSON round-trip through the same register RenderFeedback consumes) must
 // surface in the rendered Markdown — id, title, source task, impact, urgency, criticality in the
 // table, and feedback/proposed_solution/why_it_matters in the detail section. A field present in
-// JSON but absent from the render is exactly the divergence SC13 forbids.
+// JSON but absent from the render is exactly the divergence this test forbids.
 func TestRenderFeedbackMirrorsCanonical(t *testing.T) {
 	reg := FeedbackRegister{}
 	reg, err := AddFeedback(reg, FeedbackInput{
@@ -256,7 +256,7 @@ func TestRenderFeedbackEscapesTablePipes(t *testing.T) {
 	}
 }
 
-// TestListFeedbackFiltersComposeAndRank is the M13.P1.T2 sanity check: --by-task, --min-impact,
+// TestListFeedbackFiltersComposeAndRank is the core sanity check: --by-task, --min-impact,
 // --min-urgency each narrow correctly, compose with AND, and the survivors rank by criticality
 // descending with a deterministic id-ascending tiebreak. Full adversarial coverage is the
 // test-engineer's stage; this pins the core contract.

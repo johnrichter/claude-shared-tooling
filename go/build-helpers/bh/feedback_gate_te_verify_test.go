@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-// TestGateRandomizedPartitionProperty is an independent adversarial property test (test-engineer
-// authored, not derived from the implementation): across many random registers and thresholds, the
-// partition must stay total, lossless, exactly-once, and rank-ordered — the M13.P2.T2 hard-
+// TestGateRandomizedPartitionProperty is an independent adversarial property test (authored
+// separately from the implementation): across many random registers and thresholds, the
+// partition must stay total, lossless, exactly-once, and rank-ordered — a hard-
 // correctness invariant, exercised well beyond the implementer's fixed fixture.
 func TestGateRandomizedPartitionProperty(t *testing.T) {
 	rng := rand.New(rand.NewSource(20260704))

@@ -147,12 +147,12 @@ func BatchTasks(ex ExecState, p Plan, max int) BatchResult {
 
 	// Greedy admission in topo/plan order: a candidate joins only if it is dependency-
 	// independent of AND file_surface-disjoint from every already-admitted task. The
-	// file_surface-disjoint check is two layers (M13.P3.T4, FB19): fileSurfaceOverlap (kind-blind
+	// file_surface-disjoint check is two layers: fileSurfaceOverlap (kind-blind
 	// path/glob intersection) plus sharedPackageSymbolRisk (kind-aware — a dir-kind entry flags a
 	// same-package symbol-collision risk with any admitted task's file inside it, which the
 	// literal path text alone cannot see). Neither layer can see a collision between two BRAND-NEW
 	// symbols added in different, individually-declared files — that residual gap is why the
-	// post-merge compile/build gate (SKILL.md, this task) is the always-on backstop.
+	// post-merge compile/build gate is the always-on backstop.
 	var admitted []string
 	depClosure := map[string]map[string]bool{}
 	closureFor := func(id string) map[string]bool { return transitiveDeps(id, depsOf, &depClosure) }
@@ -165,7 +165,7 @@ func BatchTasks(ex ExecState, p Plan, max int) BatchResult {
 		}
 		if refByID[id].Task.OrchestratorOnly {
 			// Defensive, belt-and-suspenders: an orchestrator_only task is never admitted into a
-			// dispatchable batch even when it isn't the anchor (SCe) — it stays pending until it
+			// dispatchable batch even when it isn't the anchor — it stays pending until it
 			// becomes the anchor, at which point the refusal above fires.
 			continue
 		}
@@ -326,14 +326,14 @@ func segmentsMayMatch(a, b string) bool {
 // hasGlobMeta reports whether s contains glob metacharacters.
 func hasGlobMeta(s string) bool { return strings.ContainsAny(s, "*?[") }
 
-// ---- SCa bidirectional re-assertion (M13.P3.T2, sca-gate-semantics.md) ----
+// ---- bidirectional re-assertion ----
 //
-// VerifyFileSurface (surface.go, M13.P3.T1) is the FORWARD direction: every declared entry
+// VerifyFileSurface (surface.go) is the FORWARD direction: every declared entry
 // present on disk. This section adds the REVERSE direction (every changed path is covered by
-// SOME declared entry — an off-surface write, FB1's literal failure) and the post-merge form of
+// SOME declared entry — an off-surface write) and the post-merge form of
 // the forward direction (the union of every merged task's surface against the integrated tree —
-// the path a merge itself can drop, downstream of every per-task pre-commit). Both close FB1;
-// neither alone does (spike: "a pre-merge-only or forward-only gate lets one through").
+// the path a merge itself can drop, downstream of every per-task pre-commit). A pre-merge-only or
+// forward-only gate alone lets an off-surface write through; both directions together close it.
 
 // ChangedSetResult is the reverse-direction check's verdict: every path in a git-derived
 // changed-set must be covered by some declared file_surface entry — required or optional either
@@ -389,7 +389,7 @@ func surfaceCovers(e FileSurfaceEntry, changedPath string) bool {
 // VerifyMergedSurface is the post-merge form of the forward direction (site 3): after an octopus
 // merge integrates N per-task branches into the build-branch tip, the union of every merged
 // task's declared file_surface must still be satisfied in the merged tree — a path present at
-// every task's own pre-commit check but dropped by the merge itself (FB1) is invisible to any
+// every task's own pre-commit check but dropped by the merge itself is invisible to any
 // check that ran before the merge, so this is the one assertion downstream of it. Concatenating
 // every task's entries and calling VerifyFileSurface once is equivalent to checking each task's
 // entries individually against the same tree — no new match semantics, just the union input.
@@ -401,7 +401,7 @@ func VerifyMergedSurface(fsys fs.FS, perTaskSurfaces [][]FileSurfaceEntry) FileS
 	return VerifyFileSurface(fsys, union)
 }
 
-// ---- FB19: symbol-level disjointness screen + post-merge build gate (M13.P3.T4) ----
+// ---- symbol-level disjointness screen + post-merge build gate ----
 //
 // Git's text-level merge and fileSurfaceOverlap (kind-blind, literal path/glob text only) are
 // both blind to a same-package symbol collision: two file_surface-disjoint tasks each add an
@@ -449,7 +449,7 @@ func dirEntryCoversOther(dirSide, otherSide []FileSurfaceEntry) bool {
 	return false
 }
 
-// PostMergeBuildGateResult is the FB19 post-merge compile/build gate's verdict.
+// PostMergeBuildGateResult is the post-merge compile/build gate's verdict.
 type PostMergeBuildGateResult struct {
 	OK     bool   `json:"ok"`
 	Output string `json:"output,omitempty"`
@@ -462,8 +462,8 @@ type PostMergeBuildGateResult struct {
 // empty cmd (no build toolchain detected for the target repo) is a deliberate no-op — OK=true —
 // so an undetectable toolchain never blocks a merge; the SKILL.md step resolves cmd once per build
 // worktree (compute-once) from the repo's own toolchain marker. Kept to a single external command
-// with no target-language awareness of its own: the compile step is the simple, always-on half of
-// FB19, complementing (not replacing) sharedPackageSymbolRisk's best-effort static screen above.
+// with no target-language awareness of its own: the compile step is the simple, always-on half,
+// complementing (not replacing) sharedPackageSymbolRisk's best-effort static screen above.
 func RunPostMergeBuildGate(dir string, cmd []string) PostMergeBuildGateResult {
 	if len(cmd) == 0 {
 		return PostMergeBuildGateResult{OK: true}

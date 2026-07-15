@@ -1,6 +1,6 @@
 package main
 
-// Black-box CLI tests for `record-usage` (ACC1, M13.P2.T1). These build the real binary and exec it
+// Black-box CLI tests for `record-usage`. These build the real binary and exec it
 // exactly as the orchestrator skill does (SKILL.md's `record-usage … --final` at finish), so the
 // assertions pin the actual exit codes and stdout/stderr contract — not an in-process shortcut that
 // could pass while the wired-together CLI behaves differently.
@@ -73,8 +73,8 @@ func runRecordUsageCLI(t *testing.T, bin string, args ...string) (stdout, stderr
 	return outBuf.String(), errBuf.String(), code
 }
 
-// TestRecordUsageFinal_ResolvedTranscript_RecordsO pins the finish-time --final path (ACC1
-// criterion 1+3): a resolvable main transcript yields exit 0, cost_status absent (resolved), and
+// TestRecordUsageFinal_ResolvedTranscript_RecordsO pins the finish-time --final path
+// (criterion 1+3): a resolvable main transcript yields exit 0, cost_status absent (resolved), and
 // orchestrator-only O persisted into execution.json's run_config.accounting.
 func TestRecordUsageFinal_ResolvedTranscript_RecordsO(t *testing.T) {
 	bin := buildRecordUsageCLI(t)
@@ -105,7 +105,7 @@ func TestRecordUsageFinal_ResolvedTranscript_RecordsO(t *testing.T) {
 	}
 }
 
-// TestRecordUsageFinal_IsIdempotent pins ACC1 criterion 1 (resume-safe/idempotent): running --final
+// TestRecordUsageFinal_IsIdempotent pins the resume-safe/idempotent invariant: running --final
 // twice in a row over the SAME unchanged transcript must persist byte-identical accounting, proving
 // the finish-time snapshot self-heals rather than accumulating on top of itself on a re-run (e.g. a
 // retried finish step).
@@ -135,7 +135,7 @@ func TestRecordUsageFinal_IsIdempotent(t *testing.T) {
 	}
 }
 
-// TestRecordUsageFinal_UnresolvedTranscript_NonFatalMarker pins ACC1 criterion 2: a main transcript
+// TestRecordUsageFinal_UnresolvedTranscript_NonFatalMarker pins: a main transcript
 // that cannot be read is non-fatal by default — exit 0, cost_status:unresolved written and loud
 // (logged), never silently dropped.
 func TestRecordUsageFinal_UnresolvedTranscript_NonFatalMarker(t *testing.T) {
@@ -168,7 +168,7 @@ func TestRecordUsageFinal_UnresolvedTranscript_NonFatalMarker(t *testing.T) {
 	}
 }
 
-// TestRecordUsageBaselineCapture_UnresolvedTranscript_Fatal pins ACC1 criterion 2's other half: the
+// TestRecordUsageBaselineCapture_UnresolvedTranscript_Fatal pins the other half of that invariant: the
 // SAME unresolved condition fails a --baseline-capture run (nonzero exit, no execution.json emitted
 // to stdout) instead of writing the non-fatal marker — a baseline-capture measurement cannot tolerate
 // a silently-degraded O.
@@ -217,7 +217,7 @@ func TestRecordUsageBaselineCapture_ResolvedTranscript_Succeeds(t *testing.T) {
 	}
 }
 
-// TestRecordUsage_OIsolatedFromSameModelSubagent pins ACC1 criterion 3's isolation guarantee at the
+// TestRecordUsage_OIsolatedFromSameModelSubagent pins the isolation guarantee at the
 // CLI boundary: a subagent transcript sharing the main transcript's model must never leak into O —
 // O must equal the main-file-only cost, strictly less than the whole-session total.
 func TestRecordUsage_OIsolatedFromSameModelSubagent(t *testing.T) {
@@ -257,7 +257,7 @@ func TestRecordUsage_OIsolatedFromSameModelSubagent(t *testing.T) {
 }
 
 // TestUsageCommand_UnresolvedTranscript_StillHardFails is the regression guard for the separate
-// `usage` command (readUsage): ACC1 changes ONLY record-usage's tolerance for an unresolved main
+// `usage` command (readUsage): record-usage changes ONLY its own tolerance for an unresolved main
 // transcript. `usage` must keep its prior die-on-missing behavior (exit 2), proving the two paths
 // were not accidentally merged.
 func TestUsageCommand_UnresolvedTranscript_StillHardFails(t *testing.T) {
@@ -271,7 +271,7 @@ func TestUsageCommand_UnresolvedTranscript_StillHardFails(t *testing.T) {
 	}
 }
 
-// TestRecordUsageFinal_PopulatesSpecsAsOfAndBuildHelpersSHA pins M13.P2.T4 acceptance criteria 1+2
+// TestRecordUsageFinal_PopulatesSpecsAsOfAndBuildHelpersSHA pins acceptance criteria 1+2
 // at the real CLI boundary: the compiled binary, run against the real anthropic-specifications.json
 // used elsewhere in this suite, must stamp both provenance fields with non-empty real values (not
 // just "doesn't crash") — specs_as_of from the specs file's own `_as_of`, build_helpers_sha as a

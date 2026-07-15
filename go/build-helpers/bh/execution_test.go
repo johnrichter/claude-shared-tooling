@@ -126,7 +126,7 @@ func TestReconcilePreservesDoneWork(t *testing.T) {
 	}
 }
 
-// ---- M8.P1.T3 archive-awareness (next/reconcile-exec; archival-design.md §4) ----
+// ---- archive-awareness (next/reconcile-exec) ----
 
 // TestNextTaskArchivedDepResolvesAsDone — a live task whose sole dep was archived (necessarily
 // terminal — Archive's own precondition) must still be picked, never stall. Fails on pre-fix
@@ -205,7 +205,7 @@ func ptr(s Status) *Status    { return &s }
 func ptrF(f float64) *float64 { return &f }
 func ptrS(s string) *string   { return &s }
 
-// ---- pause events (E1/SC1) ----
+// ---- pause events ----
 
 func TestRecordPauseEvent(t *testing.T) {
 	p := validPlan()
@@ -332,7 +332,7 @@ func TestPauseEventsRoundTripJSON(t *testing.T) {
 	}
 }
 
-// ---- escalation events (E2/SC8) ----
+// ---- escalation events ----
 
 func TestRecordEscalationEvent(t *testing.T) {
 	p := validPlan()
@@ -384,7 +384,7 @@ func TestRecordEscalationEventRejectsOutOfSetTrigger(t *testing.T) {
 	}
 }
 
-// TestMagistrateFiringCount — the derivation SC3a's equal-magistrate-firing void check reads: a
+// TestMagistrateFiringCount — the derivation the equal-magistrate-firing void check reads: a
 // plain count of persisted escalation-events, regardless of which named trigger fired each one.
 func TestMagistrateFiringCount(t *testing.T) {
 	p := validPlan()

@@ -98,14 +98,14 @@ func MigrateExec(ex *ExecState) error {
 		return fmt.Errorf("execution.json schema_version %d is newer than this build-helpers supports (max %d) — upgrade build-helpers before resuming this execution", v, CurrentExecSchemaVersion)
 	}
 	// No field-level migrations exist yet: v2 added schema_version itself (plus the already-
-	// nil-safe RunConfig.Accounting/Ledger); v3 adds ExecState.Archived (M8.P1.T2's tombstone
-	// index), also nil-safe/omitempty — an absent field on load is simply an empty slice, no
+	// nil-safe RunConfig.Accounting/Ledger); v3 adds ExecState.Archived, the archive op's tombstone
+	// index, also nil-safe/omitempty — an absent field on load is simply an empty slice, no
 	// explicit upgrade step needed. Extend this switch when a future version needs one.
 	ex.SchemaVersion = CurrentExecSchemaVersion
 	return nil
 }
 
-// ---- archive-aware status resolution (next/batch; archival-design.md §4) ----
+// ---- archive-aware status resolution (next/batch) ----
 
 // archiveAwareStatus returns a status lookup that resolves id from live Tasks first, falling back
 // to the Archived tombstone index, and defaulting to not-started when id is in neither. next/batch
@@ -248,8 +248,8 @@ func round4(f float64) float64 { return math.Round(f*1e4) / 1e4 }
 // recomputeTotals rebuilds the cumulative run-config aggregates from the per-task rows — spend
 // (output-cost lower bound), measured output tokens, and the per-run four-class Usage total.
 // Always recomputed, never hand-summed. Sums BOTH live Tasks and Archived tombstones so the
-// archive op (which moves a row from one to the other) never changes the whole-project total —
-// see archival-design.md "Accounting stays whole-project-true".
+// archive op (which moves a row from one to the other) never changes the whole-project total:
+// accounting stays whole-project-true across an archive.
 func recomputeTotals(ex *ExecState) {
 	var usd float64
 	var tok int64
@@ -306,7 +306,7 @@ func SetUsage(ex *ExecState, u Usage, at string) {
 // SetAccounting records a whole-session, per-model true-cost accounting snapshot (main transcript +
 // every subagent transcript) into run config, refreshes the flat true_usage totals derived from it,
 // derives orchestrator-only O (mainFileID's own ledger entry — see Accounting.PriceFile) as a
-// distinct line item, computes and persists the ACC5 additive accounting identity (see below),
+// distinct line item, computes and persists the additive accounting identity (see below),
 // clears any prior cost_status:unresolved marker (this run DID resolve the main transcript, so the
 // marker no longer applies), and logs it. Unlike per-task SpentUSD (output-only, a lower bound),
 // acct.CostUSD prices input + cache + output across all models. `final` marks the finish-time
@@ -315,14 +315,14 @@ func SetUsage(ex *ExecState, u Usage, at string) {
 // when unavailable) pin the rate-table snapshot and the binary that priced it — see
 // Accounting.SpecsAsOf/BuildHelpersSHA.
 //
-// ACC5 identity (spikes/acc5-identity-basis.md): the known-subagent classification re-derives from
-// DiscoverSubagentTranscripts(mainFileID) — the SAME discovery seam ACC2 uses for O-isolation and
+// The identity: the known-subagent classification re-derives from
+// DiscoverSubagentTranscripts(mainFileID) — the SAME discovery seam used for O-isolation and
 // attribution — rather than trusting acct.Ledger's own keys, so a ledger entry that entered
 // session_total by some OTHER path (e.g. a stale legacy-migration sentinel, or a future discovery
 // drift between this call and the run that built acct) surfaces as an itemized residual instead of
 // silently agreeing with itself. fixedSubagents is empty: no fixed-model (magistrate/reviewer)
-// classifier exists yet (ACC5 handoff §7) — every discovered subagent lands in Σ(agent-*.jsonl) until
-// one is added; the identity's closure guarantee is agnostic to that split (spike §2.1). A discovery
+// classifier exists yet — every discovered subagent lands in Σ(agent-*.jsonl) until
+// one is added; the identity's closure guarantee is agnostic to that split. A discovery
 // error degrades to an empty known-subagent set rather than failing the run (accounting never blocks
 // a build) — any real subagent then shows up as an itemized residual, loud rather than silent.
 func SetAccounting(ex *ExecState, acct *Accounting, mainFileID string, rates RateTable, final bool, at string, specsAsOf, buildHelpersSHA string) {
@@ -360,7 +360,7 @@ func SetAccounting(ex *ExecState, acct *Accounting, mainFileID string, rates Rat
 	ex.Log = append(ex.Log, line)
 }
 
-// SetAccountingUnresolved records the non-fatal cost_status:unresolved marker (ACC1) when the main
+// SetAccountingUnresolved records the non-fatal cost_status:unresolved marker when the main
 // transcript could not be read this run — loud (logged, never silent) but never fatal to the build
 // EXCEPT a baseline-capture run, which the caller (runRecordUsage) fails instead of calling this.
 // Prior accounting (if any) is left untouched — a transient read failure must not erase or silently
@@ -372,16 +372,16 @@ func SetAccountingUnresolved(ex *ExecState, transcript string, at string) {
 	ex.RunConfig.Accounting.CostStatus = "unresolved"
 	ex.RunConfig.Accounting.At = at
 	ex.Updated = at
-	ex.Log = append(ex.Log, fmt.Sprintf("%s NOTE cost_status:unresolved — main transcript %s could not be read this run; prior accounting (if any) left unchanged, O not updated (non-fatal; see ACC1)", at, transcript))
+	ex.Log = append(ex.Log, fmt.Sprintf("%s NOTE cost_status:unresolved — main transcript %s could not be read this run; prior accounting (if any) left unchanged, O not updated (non-fatal)", at, transcript))
 }
 
-// RecordListVsActualNote appends the ACC5 §5 documentary list-vs-actual rate-basis note: the
+// RecordListVsActualNote appends the documentary list-vs-actual rate-basis note: the
 // operator-entered actual-billed whole-session total (read from the Claude Code status line / `/cost`
 // at a baseline finish — build-helpers cannot parse it from transcripts) set against this run's
 // list-priced transcript figures (session_total + O from ex.RunConfig.Accounting). Append-only
 // (ListVsActualNotes), so a re-capture is itemized rather than overwriting the prior one.
 //
-// PURELY DOCUMENTARY (spikes/acc5-identity-basis.md §5.2): this makes NO pass/fail assertion and no
+// PURELY DOCUMENTARY: this makes NO pass/fail assertion and no
 // caller may gate a build on its delta fields — the status-line total is out-of-harness (the operator
 // types it in), non-reproducible (actual billing: negotiated rates + account-level discounts, not
 // obtainable in this workspace), and differs from the transcript figures in BOTH basis (list vs
@@ -414,8 +414,8 @@ func RecordListVsActualNote(ex *ExecState, statusLineTotalUSD float64, capturedB
 		CapturedBy:                capturedBy,
 		CapturedAt:                at,
 		Note: "list-vs-actual rate-basis (and scope) artifact, not a computation bug — list price is >= actual " +
-			"negotiated/discounted billing, and the status line is whole-session scope while O is orchestrator-only " +
-			"(spikes/acc5-identity-basis.md §5-6); documentary only, does NOT gate the build.",
+			"negotiated/discounted billing, and the status line is whole-session scope while O is orchestrator-only; " +
+			"documentary only, does NOT gate the build.",
 	}
 	acct.ListVsActualNotes = append(acct.ListVsActualNotes, note)
 	ex.Updated = at
@@ -499,7 +499,7 @@ func RecordTask(ex *ExecState, taskID string, f RecordFields, at string) error {
 	return nil
 }
 
-// ---- pause events (E1/SC1) ----
+// ---- pause events ----
 
 // RecordPauseEvent appends a structured pause-event {reason_enum,at,task_id?} to ex.PauseEvents
 // and a matching free-text Log line, so the machine-readable event and the human-readable
@@ -520,10 +520,10 @@ func RecordPauseEvent(ex *ExecState, reason PauseReason, taskID, at string) erro
 	return nil
 }
 
-// MechanicalSlipCount derives SC1's mechanical-slip count: the number of persisted pause events
+// MechanicalSlipCount derives the mechanical-slip count: the number of persisted pause events
 // whose reason_enum is tooling-forced (git|state|merge — PauseReason.Mechanical). design-level,
-// approval, budget, and signing pauses are operator-facing gates and are excluded — SC1 measures
-// mechanical regression against the Opus baseline, not every pause the run ever took.
+// approval, budget, and signing pauses are operator-facing gates and are excluded — this measures
+// mechanical regression against a fixed baseline, not every pause the run ever took.
 func MechanicalSlipCount(ex ExecState) int {
 	n := 0
 	for _, e := range ex.PauseEvents {
@@ -534,7 +534,7 @@ func MechanicalSlipCount(ex ExecState) int {
 	return n
 }
 
-// ---- escalation events (E2/SC8) ----
+// ---- escalation events ----
 
 // RecordEscalationEvent appends a structured escalation-event {trigger,tier,route,at,task_id?} to
 // ex.EscalationEvents and a matching free-text Log line, so the machine-readable firing count
@@ -557,10 +557,10 @@ func RecordEscalationEvent(ex *ExecState, trigger EscalationTrigger, tier, route
 	return nil
 }
 
-// MagistrateFiringCount derives SC3a's equal-magistrate-firing void-check input: the number of
-// persisted escalation-events, i.e. how many times this run fired the magistrate. Both runs of an
-// SC3a model-tier pair must report an EQUAL count — a caller comparing two ExecState firing counts
-// is comparing this derived value, never a hand-tallied or free-text-grepped one.
+// MagistrateFiringCount derives the equal-magistrate-firing void-check input: the number of
+// persisted escalation-events, i.e. how many times this run fired the magistrate. Both runs of a
+// model-tier comparison pair must report an EQUAL count — a caller comparing two ExecState firing
+// counts is comparing this derived value, never a hand-tallied or free-text-grepped one.
 func MagistrateFiringCount(ex ExecState) int {
 	return len(ex.EscalationEvents)
 }
@@ -579,8 +579,8 @@ func LogNote(ex *ExecState, note, at string) {
 
 // ReconcileExec applies a plan diff to execution state, preserving completed work: carried
 // rows keep their status + SHA; changed/added rows reset to not-started (changed-was-done is
-// noted as possibly-orphaned); removed rows become superseded (kept for history). Archive-aware
-// (archival-design.md §4): oldP is the pruned live plan, so a design regenerate that still derives
+// noted as possibly-orphaned); removed rows become superseded (kept for history). Archive-aware:
+// oldP is the pruned live plan, so a design regenerate that still derives
 // an already-archived milestone (design.md unchanged there) makes Diff see its tasks as freshly
 // "Added" — archived ids are excluded from the rebuild below instead, so they are never re-admitted
 // as a fresh not-started live row; their tombstone in ex.Archived (untouched by this function)

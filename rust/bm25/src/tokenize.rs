@@ -1,20 +1,18 @@
 //! Tokenization for BM25 term extraction.
 //!
-//! Ported faithfully from ka's `retrieve::bm25::tokenize` (the seed): a
-//! whole-identifier tokenizer that keeps `snake_case`/`SCREAMING_SNAKE`
-//! identifiers as one token (`dd_trace` never splits into `dd` + `trace`).
-//! This preserves exact-match behavior for identifier-heavy corpora.
-//!
-//! # M1.P2.T2
-//! An additional case-splitting tokenizer mode lands here (`camelCase`,
-//! `snake_case`, `TitleCase`, `PascalCase`, `SCREAMING_SNAKE`, kebab-case, each
-//! split into sub-tokens — `dd_trace` → `dd` + `trace`). The two modes will
-//! be exposed as sibling functions (or variants of one enum/trait) so a
+//! Two tokenizer modes, exposed as sibling functions behind one enum
+//! ([`Tokenizer`]): a whole-identifier tokenizer that keeps
+//! `snake_case`/`SCREAMING_SNAKE` identifiers as one token (`foo_bar` never
+//! splits into `foo` + `bar`), preserving exact-match behavior for
+//! identifier-heavy corpora; and a case-splitting tokenizer (`camelCase`,
+//! `snake_case`, `TitleCase`, `PascalCase`, `SCREAMING_SNAKE`, kebab-case,
+//! each split into sub-tokens — `foo_bar` → `foo` + `bar`). The two modes are
+//! exposed as sibling functions (behind one enum, [`Tokenizer`]) so a
 //! caller selects at call time without either mode's logic touching the
-//! other's — see `M1.P2.T3` for the call-time selection surface.
+//! other's.
 //!
-//! # M1.P3.T2 — drop-pure-digit + Unicode-aware, emoji-as-boundary
-//! Two operator decisions land in both tokenizers below:
+//! # Drop-pure-digit + Unicode-aware, emoji-as-boundary
+//! Two operator decisions apply to both tokenizers below:
 //! - **(E) drop pure-digit tokens.** A token made entirely of digits carries
 //!   no lexical/symbol value, so it's dropped after splitting — `12345` →
 //!   `[]`, `2Client` → `["client"]` (the bare `2` is dropped, `client`
@@ -31,9 +29,9 @@
 //!   see its doc comment for the future emoji→name extension point (option
 //!   (c), not implemented here).
 //!
-//! # M1.P3.T3 — NFC normalization + full Unicode Mark coverage
-//! Operator-approved dependency `unicode-normalization` closes the two
-//! Unicode gaps M1.P3.T2 accepted:
+//! # NFC normalization + full Unicode Mark coverage
+//! The `unicode-normalization` dependency closes two
+//! Unicode gaps decisions (E) and (F) above would otherwise leave open:
 //! - **Normalization.** Both tokenizers NFC-normalize `text` as the FIRST
 //!   step, before any char scan/classification (`text.nfc().collect()`).
 //!   NFC (precomposed `é`) and NFD (`e` + combining acute) forms of the same
@@ -62,7 +60,7 @@ use unicode_normalization::UnicodeNormalization;
 /// content; everything else — whitespace, ASCII punctuation, symbols, emoji —
 /// is a boundary). They deliberately do NOT agree on `CharClass::Connector`
 /// (`_`): [`tokenize_whole_identifier`] folds it into the token as content
-/// (keeps `dd_trace` whole); [`tokenize_all_case_split`] treats it as a
+/// (keeps `foo_bar` whole); [`tokenize_all_case_split`] treats it as a
 /// boundary (the `snake_case` separator). That distinction is each tokenizer's
 /// own call, not `classify_char`'s — the enum exposes the `_` case as its own
 /// variant precisely so callers can each decide, rather than baking one
@@ -112,14 +110,14 @@ fn classify_char(c: char) -> CharClass {
 /// `No` for the common combining-diacritic blocks (they modify an alphabetic
 /// base char but aren't themselves alphabetic under that property).
 ///
-/// M1.P3.T3: delegates to `unicode_normalization::char::is_combining_mark`,
-/// the crate's full `General_Category=Mark` (Mn/Mc/Me) check — every
-/// combining mark in Unicode, not a fixed subset. This closes the coverage
-/// gap the earlier hand-rolled 5-range table left open (Devanagari stress
-/// sign UDATTA U+0951, Ethiopic combining gemination U+135D, and other
-/// script-specific marks with no precomposed form all now classify as
-/// `CharClass::AlphanumericContent` and stay attached to their base letter,
-/// instead of falling through as a `CharClass::Boundary`).
+/// Delegates to `unicode_normalization::char::is_combining_mark`, the
+/// crate's full `General_Category=Mark` (Mn/Mc/Me) check — every combining
+/// mark in Unicode, not a fixed subset. This covers marks a fixed range
+/// table would miss (Devanagari stress sign UDATTA U+0951, Ethiopic
+/// combining gemination U+135D, and other script-specific marks with no
+/// precomposed form): they classify as `CharClass::AlphanumericContent` and
+/// stay attached to their base letter, instead of falling through as a
+/// `CharClass::Boundary`.
 fn is_combining_mark(c: char) -> bool {
     unicode_normalization::char::is_combining_mark(c)
 }
@@ -138,18 +136,18 @@ fn is_pure_digit_token(token: &str) -> bool {
 /// `CharClass::Boundary` chars, keeping each surviving run of
 /// `CharClass::AlphanumericContent`-and-`CharClass::Connector` chars as
 /// one token, Unicode-case-folded to lowercase. Identifiers with underscores
-/// stay intact — `dd_trace` is one token, not two — because `_` is a
+/// stay intact — `foo_bar` is one token, not two — because `_` is a
 /// `CharClass::Connector`, which this tokenizer folds into the token same
 /// as content.
 ///
-/// # Normalization (M1.P3.T3 — decided)
+/// # Normalization
 /// `text` is NFC-normalized FIRST, before any char scan/classification
 /// (`text.nfc().collect()`). NFC (precomposed `é`) and NFD (`e` + combining
 /// acute) forms of the same visual string now converge to the SAME token
 /// sequence — content indexed in one form matches a query typed in the
 /// other.
 ///
-/// # Unicode (M1.P3.T2 — decided; mark coverage widened in M1.P3.T3)
+/// # Unicode
 /// Token content is Unicode alphanumeric (`char::is_alphanumeric`, covering
 /// every script's letters and digits) plus combining marks (full Unicode
 /// `General_Category=Mark`, via `is_combining_mark`) — not an ASCII-only
@@ -174,7 +172,7 @@ fn is_pure_digit_token(token: &str) -> bool {
 /// does not segment these scripts). Proper segmentation of those scripts
 /// needs a dictionary or ML model; out of scope for this crate.
 ///
-/// # Digit handling (M1.P3.T2 — decided, decision E)
+/// # Digit handling (decision E)
 /// A token made entirely of digits is dropped post-split — `12345` → `[]`.
 /// Digits mixed with letters are unaffected — `v2_client` → `["v2_client"]`.
 ///
@@ -215,9 +213,9 @@ pub fn tokenize_whole_identifier(text: &str) -> Vec<String> {
 
 /// All-case-splitting tokenizer mode: lowercases and splits `text` into
 /// sub-tokens across every common identifier-casing convention, so
-/// `ddTrace`, `dd_trace`, `DD_TRACE`, `DdTrace`, and `dd-trace` all tokenize
-/// to `["dd", "trace"]` — a `trace` query then matches every casing.
-/// Complements [`tokenize_whole_identifier`], which keeps `dd_trace` as one
+/// `fooBar`, `foo_bar`, `FOO_BAR`, `FooBar`, and `foo-bar` all tokenize
+/// to `["foo", "bar"]` — a `bar` query then matches every casing.
+/// Complements [`tokenize_whole_identifier`], which keeps `foo_bar` as one
 /// token; this fn is the sibling for lexical search where sub-word matches
 /// matter more than exact-identifier matches.
 ///
@@ -225,25 +223,25 @@ pub fn tokenize_whole_identifier(text: &str) -> Vec<String> {
 /// Scans `text` char-by-char (not via `regex`: the split conditions below
 /// need one-character lookahead/lookbehind, which the `regex` crate's
 /// automaton engine doesn't support). Content vs boundary is decided by the
-/// shared `classify_char` seam (see M1.P3.T2 section below); `_` classifies
+/// shared `classify_char` seam (see the Unicode section below); `_` classifies
 /// as the connector class but THIS tokenizer treats it as a boundary
 /// (`snake_case` separator) — the one place it disagrees with
 /// [`tokenize_whole_identifier`]. A new token starts at index `i` when:
 /// - The char at `i` is a boundary or connector (`_`) char
-///   — never emitted, just ends the current token, e.g. `dd_trace` and
-///   `dd-trace` and `dd.trace` all yield `["dd", "trace"]`.
-/// - Lower/digit → upper transition (camelCase boundary): `ddTrace` splits
+///   — never emitted, just ends the current token, e.g. `foo_bar` and
+///   `foo-bar` and `foo.bar` all yield `["foo", "bar"]`.
+/// - Lower/digit → upper transition (camelCase boundary): `fooBar` splits
 ///   between `d` and `T`.
 /// - Upper → upper → lower transition (acronym boundary): a run of capitals
 ///   ends one char before a new capitalized word starts, so `HTTPServer`
 ///   splits between `P` and `S` → `http`, `server` (not `h`,`t`,`t`,
-///   `pserver`), and `DDTrace`/`DD_TRACE`/`DdTrace` all agree with `ddTrace`.
+///   `pserver`), and `FOO_BAR`/`FooBar` all agree with `fooBar`.
 ///
 /// Every emitted token is Unicode-lowercased char-by-char as it's built —
 /// deterministic left-to-right, table-based, not locale-sensitive.
 ///
-/// # Digit handling (decided — QR-confirmed M1.P2.T2, kept as implemented)
-/// The spec doesn't pin digit behavior; the rule is: **digits attach to the
+/// # Digit handling
+/// Digit behavior is not pinned by any external spec; the rule is: **digits attach to the
 /// run they're adjacent to, like a lowercase letter, EXCEPT that a digit
 /// immediately followed by an uppercase letter still triggers the camelCase
 /// split** (digit is in the lower/digit → upper trigger above). Complete rule,
@@ -265,17 +263,16 @@ pub fn tokenize_whole_identifier(text: &str) -> Vec<String> {
 /// Rationale (why kept): bare numeric tokens (`2`) rarely help retrieval on
 /// their own, so digits default to merging with their neighboring letters;
 /// but digits must not swallow the next real word when a case transition is
-/// present. Since M1.P3.T2, a lone digit token from `2Client`-shaped input is
-/// no longer even emitted (decision (E) drops it), so the historical cost of
-/// this rule (a stray `2` token) is gone. Query `trace` still matches every
-/// casing of `dd_trace` because digits never alter the letter tokens.
+/// present. A lone digit token from `2Client`-shaped input is not even
+/// emitted (decision (E) drops it), so no stray `2` token ever surfaces.
+/// Query `bar` still matches every casing of `foo_bar` because digits
+/// never alter the letter tokens.
 ///
-/// # Digit-drop (decision E — M1.P3.T2)
+/// # Digit-drop (decision E)
 /// After all splitting above, any token made entirely of digits is dropped —
 /// `12345` → `[]`. See `is_pure_digit_token` (module-private).
 ///
-/// # Unicode (decision F — M1.P3.T2, supersedes the earlier drop-non-ASCII
-/// rule)
+/// # Unicode (decision F)
 /// Token content is Unicode alphanumeric + combining marks (via the shared
 /// `classify_char` seam), not ASCII-only, and case-boundary detection uses
 /// `char::is_uppercase`/`is_lowercase` (Unicode-table-based) instead of the
@@ -305,8 +302,7 @@ pub fn tokenize_whole_identifier(text: &str) -> Vec<String> {
 /// This is a recall gap for CJK/Thai-heavy content, not a correctness bug —
 /// no character is lost or duplicated, the run is just under-segmented.
 ///
-/// # Normalization (M1.P3.T3 — decided; supersedes the earlier
-/// normalization-sensitivity limitation)
+/// # Normalization
 /// `text` is NFC-normalized FIRST, before any char scan (`text.nfc().collect()`)
 /// — the SAME normalization [`tokenize_whole_identifier`] applies, so NFC and
 /// NFD forms of the same visual string now converge to the same tokens here
@@ -322,9 +318,9 @@ pub fn tokenize_whole_identifier(text: &str) -> Vec<String> {
 /// lookups. Returns an empty vector for empty, all-boundary, or all-digit
 /// input — never panics.
 ///
-/// # M1.P2.T3 (landed)
+/// # Shared signature
 /// Same signature as [`tokenize_whole_identifier`] — `fn(&str) -> Vec<String>`
-/// — by design: the call-time selection API now holds either tokenizer
+/// — by design: the call-time selection API holds either tokenizer
 /// behind [`Tokenizer`] (below), a closed enum injected into `okapi`/`bm25f`
 /// at construction and reused at search, without either scorer knowing which
 /// mode it got.
@@ -419,27 +415,27 @@ impl Tokenizer {
 mod tests {
     use super::*;
 
-    /// Golden case named in the task spec: `dd_trace` must survive as one
+    /// Golden case named in the task spec: `foo_bar` must survive as one
     /// token — the whole point of the whole-identifier mode.
     #[test]
     fn keeps_underscored_identifier_whole() {
-        assert_eq!(tokenize_whole_identifier("dd_trace"), vec!["dd_trace"]);
+        assert_eq!(tokenize_whole_identifier("foo_bar"), vec!["foo_bar"]);
     }
 
     #[test]
     fn lowercases_mixed_case_input() {
-        assert_eq!(tokenize_whole_identifier("DD_TRACE"), vec!["dd_trace"]);
+        assert_eq!(tokenize_whole_identifier("FOO_BAR"), vec!["foo_bar"]);
         assert_eq!(
-            tokenize_whole_identifier("DdTrace_Config"),
-            vec!["ddtrace_config"]
+            tokenize_whole_identifier("FooBar_Config"),
+            vec!["foobar_config"]
         );
     }
 
     #[test]
     fn splits_on_punctuation_and_whitespace() {
         assert_eq!(
-            tokenize_whole_identifier("dd_trace.Span, dd-agent!"),
-            vec!["dd_trace", "span", "dd", "agent"]
+            tokenize_whole_identifier("foo_bar.Span, foo-agent!"),
+            vec!["foo_bar", "span", "foo", "agent"]
         );
     }
 
@@ -450,9 +446,8 @@ mod tests {
     }
 
     /// Digits inside and outside an identifier survive as part of the token
-    /// when mixed with letters/underscores — matches ka's `[a-z0-9_]+`
-    /// intent on the identifier case; a bare all-digit token is dropped
-    /// per decision (E).
+    /// when mixed with letters/underscores, per the `[a-z0-9_]+` identifier
+    /// rule; a bare all-digit token is dropped per decision (E).
     #[test]
     fn keeps_digits_in_and_out_of_identifiers() {
         assert_eq!(tokenize_whole_identifier("v2_client"), vec!["v2_client"]);
@@ -512,14 +507,14 @@ mod all_case_split_tests {
     use super::*;
 
     /// The 5 REQUIRED examples from the task spec: every casing of the same
-    /// identifier must tokenize identically, so a `trace` query matches all.
+    /// identifier must tokenize identically, so a `bar` query matches all.
     #[test]
     fn required_examples_all_agree() {
-        assert_eq!(tokenize_all_case_split("ddTrace"), vec!["dd", "trace"]);
-        assert_eq!(tokenize_all_case_split("dd_trace"), vec!["dd", "trace"]);
-        assert_eq!(tokenize_all_case_split("DD_TRACE"), vec!["dd", "trace"]);
-        assert_eq!(tokenize_all_case_split("DdTrace"), vec!["dd", "trace"]);
-        assert_eq!(tokenize_all_case_split("dd-trace"), vec!["dd", "trace"]);
+        assert_eq!(tokenize_all_case_split("fooBar"), vec!["foo", "bar"]);
+        assert_eq!(tokenize_all_case_split("foo_bar"), vec!["foo", "bar"]);
+        assert_eq!(tokenize_all_case_split("FOO_BAR"), vec!["foo", "bar"]);
+        assert_eq!(tokenize_all_case_split("FooBar"), vec!["foo", "bar"]);
+        assert_eq!(tokenize_all_case_split("foo-bar"), vec!["foo", "bar"]);
     }
 
     #[test]
@@ -569,8 +564,8 @@ mod all_case_split_tests {
     #[test]
     fn splits_dotted_identifiers() {
         assert_eq!(
-            tokenize_all_case_split("dd_trace.SpanContext"),
-            vec!["dd", "trace", "span", "context"]
+            tokenize_all_case_split("foo_bar.SpanContext"),
+            vec!["foo", "bar", "span", "context"]
         );
     }
 
@@ -676,10 +671,10 @@ mod all_case_split_tests {
     #[test]
     fn combining_mark_stays_attached_to_its_base_letter() {
         let decomposed = "e\u{0301}cole"; // "e" + combining acute accent + "cole"
-                                          // M1.P3.T3: NFC-normalization at the tokenizer entry precomposes
+                                          // NFC-normalization at the tokenizer entry precomposes
                                           // "e" + combining acute into single-char "\u{e9}" ("\u{e9}cole")
                                           // before the scan even runs -- the combining mark stays attached to
-                                          // its base letter (one token, not fractured), now via precomposition
+                                          // its base letter (one token, not fractured) via precomposition,
                                           // rather than via `is_combining_mark` classification.
         assert_eq!(tokenize_all_case_split(decomposed), vec!["école"]);
     }
@@ -739,7 +734,7 @@ mod all_case_split_tests {
         );
     }
 
-    // -- Adversarial acronym-boundary probing (SDET-added, M1.P2.T2 verification) --
+    // -- Adversarial acronym-boundary probing --
 
     /// A bare acronym with no trailing lowercase word must not spuriously
     /// split into single letters — the acronym-boundary rule only fires when
@@ -787,7 +782,7 @@ mod all_case_split_tests {
     /// token and must never panic.
     #[test]
     fn leading_trailing_and_doubled_separators_yield_no_empty_tokens() {
-        assert_eq!(tokenize_all_case_split("_dd__trace_"), vec!["dd", "trace"]);
+        assert_eq!(tokenize_all_case_split("_foo__bar_"), vec!["foo", "bar"]);
         assert_eq!(tokenize_all_case_split("--a-b--"), vec!["a", "b"]);
         assert_eq!(tokenize_all_case_split("  x  "), vec!["x"]);
     }
@@ -814,8 +809,8 @@ mod all_case_split_tests {
             vec!["get", "http", "response", "code"]
         );
         assert_eq!(
-            tokenize_all_case_split("dd_trace.SpanContext"),
-            vec!["dd", "trace", "span", "context"]
+            tokenize_all_case_split("foo_bar.SpanContext"),
+            vec!["foo", "bar", "span", "context"]
         );
         assert_eq!(
             tokenize_all_case_split("SCREAMING_SNAKE_CASE"),
@@ -844,16 +839,16 @@ mod all_case_split_tests {
     #[test]
     fn char_conservation_invariant_holds_across_inputs() {
         let inputs = [
-            "ddTrace",
-            "dd_trace",
-            "DD_TRACE",
-            "DdTrace",
-            "dd-trace",
+            "fooBar",
+            "foo_bar",
+            "FOO_BAR",
+            "FooBar",
+            "foo-bar",
             "HTTPServer",
             "parseHTTPResponse",
             "AProtocol",
             "ABCDef",
-            "_dd__trace_",
+            "_foo__bar_",
             "--a-b--",
             "  x  ",
             "getHTTPResponseCode_v2.JSON",
@@ -923,8 +918,8 @@ mod all_case_split_tests {
 
     /// Unicode consistency: `tokenize_all_case_split` must agree with
     /// `tokenize_whole_identifier` on which chars are content across an
-    /// input containing non-ASCII code points — both now KEEP accented
-    /// letters (Unicode-aware since M1.P3.T2), differing only in where they
+    /// input containing non-ASCII code points — both KEEP accented
+    /// letters (Unicode-aware), differing only in where they
     /// insert additional splits for case/underscore boundaries.
     #[test]
     fn unicode_handling_agrees_with_whole_identifier_on_content() {
@@ -974,15 +969,15 @@ mod all_case_split_tests {
         }
     }
 
-    /// Signature parity (M1.P2.T3 precondition): both tokenizer modes must
+    /// Signature parity: both tokenizer modes must
     /// share the exact same `fn(&str) -> Vec<String>` shape so a caller can
     /// hold either behind one function pointer type without wrapping.
     #[test]
     fn signature_parity_between_tokenizer_modes() {
         let a: fn(&str) -> Vec<String> = tokenize_all_case_split;
         let b: fn(&str) -> Vec<String> = tokenize_whole_identifier;
-        assert_eq!(a("ddTrace"), vec!["dd", "trace"]);
-        assert_eq!(b("dd_trace"), vec!["dd_trace"]);
+        assert_eq!(a("fooBar"), vec!["foo", "bar"]);
+        assert_eq!(b("foo_bar"), vec!["foo_bar"]);
     }
 }
 
@@ -995,12 +990,12 @@ mod tokenizer_enum_tests {
     #[test]
     fn each_variant_dispatches_to_its_matching_free_fn() {
         assert_eq!(
-            Tokenizer::CaseSplit.tokenize("ddTrace"),
-            tokenize_all_case_split("ddTrace")
+            Tokenizer::CaseSplit.tokenize("fooBar"),
+            tokenize_all_case_split("fooBar")
         );
         assert_eq!(
-            Tokenizer::WholeIdentifier.tokenize("dd_trace"),
-            tokenize_whole_identifier("dd_trace")
+            Tokenizer::WholeIdentifier.tokenize("foo_bar"),
+            tokenize_whole_identifier("foo_bar")
         );
     }
 
@@ -1011,24 +1006,24 @@ mod tokenizer_enum_tests {
     }
 
     /// The two variants disagree on at least one input (otherwise
-    /// "selectable" would be a no-op) — `ddTrace` splits under `CaseSplit`
+    /// "selectable" would be a no-op) — `fooBar` splits under `CaseSplit`
     /// but stays whole under `WholeIdentifier`.
     #[test]
     fn variants_produce_different_output_for_the_same_input() {
         assert_ne!(
-            Tokenizer::CaseSplit.tokenize("ddTrace"),
-            Tokenizer::WholeIdentifier.tokenize("ddTrace")
+            Tokenizer::CaseSplit.tokenize("fooBar"),
+            Tokenizer::WholeIdentifier.tokenize("fooBar")
         );
     }
 }
 
-/// SDET adversarial probing for M1.P3.T2 — verification-only, not part of
-/// the implementation contract. Targets the Unicode edges the task spec
-/// flagged: combining-mark table completeness, NFC/NFD normalization,
-/// compound emoji, non-Latin case scripts, and drop-pure-digit corner cases
-/// beyond what the SE's own tests already cover.
+/// Adversarial probing for the Unicode-handling decisions above —
+/// verification-only, not part of the implementation contract. Targets
+/// combining-mark table completeness, NFC/NFD normalization, compound
+/// emoji, non-Latin case scripts, and drop-pure-digit corner cases beyond
+/// the tokenizers' own unit tests.
 #[cfg(test)]
-mod sdet_adversarial_tests {
+mod adversarial_tests {
     use super::*;
 
     // -- Drop-pure-digit corner cases --
@@ -1037,13 +1032,9 @@ mod sdet_adversarial_tests {
     fn connector_joined_digit_run_is_not_pure_digit_in_whole_identifier_mode() {
         // `123_456` has a `_` (Connector, not a digit), so
         // `is_pure_digit_token`'s `chars().all(char::is_numeric)` is false —
-        // the token survives whole. This is a real gap: an all-digit
-        // identifier connected by `_` slips through the "no lexical value"
-        // filter the SE's own doc comment says only catches "entirely
-        // digits" tokens. Whether that's a defect or an accepted edge case
-        // is a judgment call for the QR — flagging, not failing on it,
-        // since the SE's doc comment is explicit that `_`-joined digits are
-        // an intentional non-match ("connector, not entirely digits").
+        // the token survives whole. An all-digit identifier connected by
+        // `_` intentionally slips through the "no lexical value" filter,
+        // which only catches tokens made entirely of digits.
         assert_eq!(tokenize_whole_identifier("123_456"), vec!["123_456"]);
     }
 
@@ -1058,7 +1049,7 @@ mod sdet_adversarial_tests {
     #[test]
     fn digit_plus_combining_mark_token_is_kept_not_pure_digit() {
         // A digit followed by a combining mark (e.g. a combining enclosing
-        // circle U+20DD, in the SE's own table) is AlphanumericContent for
+        // circle U+20DD) is AlphanumericContent for
         // both chars, so it forms one token — `is_pure_digit_token` checks
         // `char::is_numeric`, which is false for the combining mark, so the
         // token is NOT dropped even though it "looks like" a digit run.
@@ -1075,15 +1066,15 @@ mod sdet_adversarial_tests {
         assert_eq!(tokenize_all_case_split("2v"), vec!["2v"]);
     }
 
-    // -- Combining-mark full Unicode Mark coverage (M1.P3.T3 fix) --
+    // -- Combining-mark full Unicode Mark coverage --
 
-    /// M1.P3.T3 closes the old 5-range table's gap: `is_combining_mark` now
-    /// delegates to `unicode_normalization::char::is_combining_mark`, the
-    /// full `General_Category=Mark` set. Devanagari stress sign UDATTA
-    /// (U+0951) and Ethiopic combining gemination mark (U+135D) — both
-    /// `is_alphanumeric() == false` and previously outside the old table's 5
-    /// ranges — now classify as `AlphanumericContent` and stay attached to
-    /// their base letter instead of fracturing it.
+    /// `is_combining_mark` delegates to
+    /// `unicode_normalization::char::is_combining_mark`, the full
+    /// `General_Category=Mark` set — a fixed range table would miss marks
+    /// like Devanagari stress sign UDATTA (U+0951) and Ethiopic combining
+    /// gemination mark (U+135D), both `is_alphanumeric() == false`. Full
+    /// coverage classifies them as `AlphanumericContent` and keeps them
+    /// attached to their base letter instead of fracturing it.
     #[test]
     fn marks_formerly_outside_the_table_now_classify_as_content_and_stay_attached() {
         assert_eq!(classify_char('\u{0951}'), CharClass::AlphanumericContent); // Devanagari UDATTA
@@ -1103,8 +1094,8 @@ mod sdet_adversarial_tests {
         assert_eq!(tokenize_whole_identifier(input), vec![input]);
     }
 
-    /// In-table marks (the pre-M1.P3.T3 common case) still stay attached —
-    /// unaffected by the mark-coverage widening, but NFC now precomposes
+    /// Marks in the common Latin/Greek/Cyrillic diacritic blocks still stay
+    /// attached — unaffected by the wider mark coverage above, but NFC precomposes
     /// this specific decomposed form ("e" + combining acute) into a single
     /// precomposed "é" before the scan even runs, so the mark itself no
     /// longer survives as a separate combining char in the output — see the
@@ -1116,14 +1107,14 @@ mod sdet_adversarial_tests {
         assert_eq!(tokenize_whole_identifier(input), vec!["école"]);
     }
 
-    // -- NFC vs NFD normalization (M1.P3.T3 fix: now converges) --
+    // -- NFC vs NFD normalization --
 
-    /// Before M1.P3.T3: the SAME visual string ("café") tokenized to a
-    /// DIFFERENT token depending on whether it was spelled with a
-    /// precomposed é (NFC, U+00E9, one char) or a decomposed e + combining
-    /// acute (NFD, two chars) — a real search-correctness gap. M1.P3.T3
-    /// closes it: both tokenizers NFC-normalize `text` before scanning, so
-    /// NFC and NFD forms of the same visual string now converge to the SAME
+    /// The SAME visual string ("café") would tokenize to a DIFFERENT token
+    /// depending on whether it was spelled with a precomposed é (NFC,
+    /// U+00E9, one char) or a decomposed e + combining acute (NFD, two
+    /// chars), if not for NFC-normalizing `text` before scanning — a real
+    /// search-correctness gap otherwise. Both tokenizers normalize first, so
+    /// NFC and NFD forms of the same visual string converge to the SAME
     /// token sequence, in both tokenizer modes.
     #[test]
     fn nfc_and_nfd_forms_of_the_same_visual_string_now_tokenize_identically() {
@@ -1286,7 +1277,7 @@ mod sdet_adversarial_tests {
         assert_eq!(b1, b2);
     }
 
-    // -- M1.P3.T3 verification: marks with NO precomposed form --
+    // -- verification: marks with no precomposed form --
     //
     // NFC normalization can only collapse a base+mark PAIR that has a
     // precomposed codepoint (e.g. "e"+acute -> "é"). Arabic diacritics and

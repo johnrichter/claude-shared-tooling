@@ -1,4 +1,4 @@
-# CI for ai-shared-lib-public (the authority layer of the privacy guardrail).
+# CI for claude-tooling (the authority layer of the security guardrail).
 # Replaces the removed .gitlab-ci.yml — same shape: guardrail gates unit-tests,
 # the Rust arch matrix, and the Go arch matrix, which run independently of
 # each other.
@@ -37,18 +37,18 @@ permissions:
   contents: read
 
 jobs:
-  # Privacy guardrail — authority-layer tier: no --tier flag (this repo IS the
-  # authority the tiered scans in the other repos defer to).
+  # Secret-scanner guardrail — authority-layer tier: no --tier flag (this repo IS
+  # the authority the tiered scans in the other repos defer to).
   guardrail:
-    name: privacy-guardrail
+    name: security-guardrail
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Privacy + owner-tag scan (authority layer)
-        run: python3 scripts/check_privacy.py --root .
+      - name: Secret scan (authority layer)
+        run: python3 scripts/check_secrets.py --root .
       - name: No-raw-binary scan (tracked tree, authoritative)
         run: python3 scripts/check_no_raw_binary.py --tracked --root .
 
@@ -180,5 +180,5 @@ jobs:
 
   # GH-specific caveat, no GitLab equivalent needed here: GitHub Advanced Security secret
   # scanning is a repo/org SETTING, not a workflow step — it cannot be replicated as a job
-  # in this file. Confirm secret scanning is enabled at the ai-shared-lib-public repo level;
+  # in this file. Confirm secret scanning is enabled at the claude-tooling repo level;
   # it runs independently of this CI and replaces GitLab's Security/Secret-Detection template.

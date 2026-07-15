@@ -54,7 +54,7 @@ func openSource(t *testing.T, fileID, path string, startOffset int64) (Transcrip
 
 // discoverFixtureSources builds the whole-session source set (main + subagents) the same way
 // main.discoverTranscripts does: main transcript plus everything DiscoverSubagentTranscripts finds
-// — the ONE discovery seam (ACC2, M13.P2.T2), not the legacy fixed-depth SubagentGlobs.
+// — the ONE discovery seam, not the legacy fixed-depth SubagentGlobs.
 func discoverFixtureSources(t *testing.T, mainPath string) ([]TranscriptSource, []*os.File) {
 	t.Helper()
 	var sources []TranscriptSource
@@ -72,10 +72,10 @@ func discoverFixtureSources(t *testing.T, mainPath string) ([]TranscriptSource, 
 	return sources, handles
 }
 
-// legacySubagentGlobPaths mirrors the exact pre-ACC2 discovery behavior — SubagentGlobs' two
+// legacySubagentGlobPaths mirrors the exact pre-fix discovery behavior — SubagentGlobs' two
 // fixed-depth patterns run through filepath.Glob, with no recursion — so tests can pin, on a live
-// fixture, that the new seam finds strictly more than the old one ever could (the FB2 defect this
-// task closes), without relying on reverting any code.
+// fixture, that the new seam finds strictly more than the old one ever could, without relying on
+// reverting any code.
 func legacySubagentGlobPaths(t *testing.T, mainPath string) []string {
 	t.Helper()
 	var paths []string
@@ -168,7 +168,7 @@ func TestAccounting_WholeSessionGrandTotal(t *testing.T) {
 	}
 }
 
-// nestedDir is the ACC2 (M13.P2.T2) golden fixture tree at REAL nesting depth — a batch-engine's
+// nestedDir is the golden fixture tree at REAL nesting depth — a batch-engine's
 // direct subagent plus two nested-workflow build-engine agents under workflows/wf_*/, the exact
 // layout today's fixed-depth SubagentGlobs cannot reach. Manifest: testdata/nested/EXPECTED.md.
 const nestedDir = "testdata/nested"
@@ -176,7 +176,7 @@ const nestedDir = "testdata/nested"
 // TestDiscoverSubagentTranscripts_NestedWorkflowDepth is assertion 1 (EXPECTED.md): the seam must
 // find all 3 subagent transcripts at their real depths — the depth-1 direct control AND both
 // depth-3 nested-workflow agents — and must NEVER surface wf_batch/journal.jsonl (excluded by name,
-// not by depth). It also pins the FB2 regression directly, without relying on reverting any code:
+// not by depth). It also pins the depth regression directly, without relying on reverting any code:
 // the legacy SubagentGlobs two-fixed-depth-glob approach, run against this SAME fixture, finds only
 // the depth-1 file — strictly fewer than the new seam — proving the new seam is not merely
 // equivalent but a real widening to the depth today's globs cannot express.
@@ -209,10 +209,10 @@ func TestDiscoverSubagentTranscripts_NestedWorkflowDepth(t *testing.T) {
 		}
 	}
 
-	// FB2 regression pin: the legacy glob-only approach cannot see past depth 1 on this fixture.
+	// Regression pin: the legacy glob-only approach cannot see past depth 1 on this fixture.
 	legacy := legacySubagentGlobPaths(t, mainPath)
 	if len(legacy) != 1 || !strings.HasSuffix(legacy[0], "agent-direct.jsonl") {
-		t.Fatalf("legacy SubagentGlobs on the nested fixture = %v, want exactly [agent-direct.jsonl] — if this fails, the fixture no longer pins the FB2 defect", legacy)
+		t.Fatalf("legacy SubagentGlobs on the nested fixture = %v, want exactly [agent-direct.jsonl] — if this fails, the fixture no longer pins the depth regression", legacy)
 	}
 	if len(got) <= len(legacy) {
 		t.Fatalf("new seam found %d, legacy glob found %d — the new seam must find strictly more at real nesting depth", len(got), len(legacy))
@@ -595,18 +595,18 @@ func TestAccounting_LegacyLedgerMigrationPreservesAggregate(t *testing.T) {
 	}
 }
 
-// ---- ACC5 (M13.P2.T5): transcript-only additive accounting identity + documentary note ----
+// ---- transcript-only additive accounting identity + documentary note ----
 //
-// These tests pin spikes/acc5-identity-basis.md against the SAME golden fixtures already committed
-// for ACC2: the identity closes on a real multi-transcript walk (residual ≤ T), and a classifier that
-// misses one already-Ledgered, already-discovered subagent transcript (simulating exactly the
-// mis-globbed-nested-transcript risk the additive-O rewrite exists to catch — spike §1) surfaces the
-// gap as an itemized residual, never a silent O inflation.
+// These tests pin the identity against the SAME golden fixtures already committed
+// for subagent discovery: the identity closes on a real multi-transcript walk (residual ≤ T), and
+// a classifier that misses one already-Ledgered, already-discovered subagent transcript
+// (simulating exactly the mis-globbed-nested-transcript risk the additive-O rewrite exists to
+// catch) surfaces the gap as an itemized residual, never a silent O inflation.
 
-// TestIdentity_GoldenFixtureResidualWithinTolerance is the primary closure test (spike §3): O +
+// TestIdentity_GoldenFixtureResidualWithinTolerance is the primary closure test: O +
 // Σ(agent-*.jsonl) + fixed-subagents + residual reproduces session_total with |residual| ≤ T on the
 // real testdata/accounting/ walk, when the known-subagent classification agrees with what Account
-// actually folded in (the production case — ACC2's single discovery seam feeds both).
+// actually folded in (the production case — the single discovery seam feeds both).
 func TestIdentity_GoldenFixtureResidualWithinTolerance(t *testing.T) {
 	rates := loadTestRates(t)
 	mainPath := filepath.Join(accountingDir, "orchestrator.jsonl")
@@ -641,7 +641,7 @@ func TestIdentity_GoldenFixtureResidualWithinTolerance(t *testing.T) {
 	assertClose(t, id.OUSD+id.VariableAgentsUSD+id.FixedSubagentsUSD+id.ResidualUSD, id.SessionTotalUSD,
 		"closure: O + variable-agents + fixed-subagents + residual must equal session_total")
 	if id.FixedSubagentsUSD != 0 {
-		t.Fatalf("fixed_subagents_usd = %v, want 0 (no fixed-subagent classifier data supplied — ACC5 handoff §7)", id.FixedSubagentsUSD)
+		t.Fatalf("fixed_subagents_usd = %v, want 0 (no fixed-subagent classifier data supplied)", id.FixedSubagentsUSD)
 	}
 	if len(id.UnclassifiedTranscripts) != 0 {
 		t.Fatalf("unexpected unclassified transcripts on the golden fixture: %+v", id.UnclassifiedTranscripts)
@@ -704,8 +704,8 @@ func TestIdentity_SyntheticOverCountSurfacesAsItemizedResidualNotOInflation(t *t
 }
 
 // TestSetAccounting_PersistsIdentity pins that record-usage's SetAccounting path (not just the raw
-// ComputeIdentity method) computes and persists the ACC5 identity onto RunConfig.Accounting.Identity,
-// re-deriving the known-subagent set from the same DiscoverSubagentTranscripts seam ACC2 uses — so a
+// ComputeIdentity method) computes and persists the identity onto RunConfig.Accounting.Identity,
+// re-deriving the known-subagent set from the same DiscoverSubagentTranscripts seam — so a
 // production run gets the identity for free, with no extra caller wiring.
 func TestSetAccounting_PersistsIdentity(t *testing.T) {
 	rates := loadTestRates(t)
@@ -721,7 +721,7 @@ func TestSetAccounting_PersistsIdentity(t *testing.T) {
 
 	id := ex.RunConfig.Accounting.Identity
 	if id == nil {
-		t.Fatal("SetAccounting did not persist the ACC5 identity onto RunConfig.Accounting.Identity")
+		t.Fatal("SetAccounting did not persist the identity onto RunConfig.Accounting.Identity")
 	}
 	if id.CostStatus != "ok" {
 		t.Fatalf("cost_status = %q, want %q (unclassified: %+v)", id.CostStatus, "ok", id.UnclassifiedTranscripts)

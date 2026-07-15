@@ -1,6 +1,6 @@
 package main
 
-// Black-box CLI coverage for M13.P2.T3: the `record` command's new --input-tokens/
+// Black-box CLI coverage for the `record` command's --input-tokens/
 // --cache-write-tokens/--cache-read-tokens/--usage-turns flags, which populate ExecTask.Usage
 // end-to-end through the actual binary (not just the bh package's pure functions).
 

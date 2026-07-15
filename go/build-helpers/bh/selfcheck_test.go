@@ -450,7 +450,7 @@ func TestCheckSessionID_MatchDoesNotAbort(t *testing.T) {
 }
 
 func TestCheckSessionID_MismatchHardAborts(t *testing.T) {
-	// The FB26 hard-fail contract: a resolved transcript naming a DIFFERENT session's id must
+	// The hard-fail contract: a resolved transcript naming a DIFFERENT session's id must
 	// abort unconditionally -- there is no warn-only escape hatch, unlike the tier ceiling check.
 	scan := SessionIDScan{SessionID: testUUIDOther, Lines: 1, Parsed: 1}
 	r := CheckSessionID(testUUIDOurs, scan)

@@ -240,7 +240,7 @@ func TestRetrieveExecUnknownLevel(t *testing.T) {
 	}
 }
 
-// ---- archive.json (M8.P1.T3; archival-design.md §3) ----
+// ---- archive.json ----
 
 // archiveFixture archives the "done-heavy" archivePlan's M1 (archive_test.go) into a fresh
 // ArchiveDoc, giving RetrieveArchive a real two-task archived group to project.
