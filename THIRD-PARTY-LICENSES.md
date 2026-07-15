@@ -5,8 +5,8 @@ This file lists the third-party code bundled into this repository's distributed 
 Scope:
 
 - Python side: zero third-party runtime dependencies (stdlib only).
-- Go side (`go/build-helpers`): zero third-party dependencies (stdlib only) — nothing to add to `LICENSE-3rdparty.csv` today; a future dependency lands there per `SC-DEPVET`.
-- All third-party code is the 35 Rust crates below, statically linked into the distributed binary.
+- Go side (`go/build-helpers`): one third-party dependency, `doublestar` (glob matching in `bh/surface.go`), statically linked into the distributed `go/.bin/build-helpers-*` binaries.
+- All other third-party code is the 35 Rust crates below, statically linked into the distributed binary.
 
 The MIT, BSD-3-Clause, Zlib, and Unicode-3.0 licenses relied on below each require their copyright notice and permission/license text to travel with any binary that includes the licensed code. This file reproduces that attribution and license text for the statically-linked components, satisfying those obligations.
 
@@ -66,6 +66,7 @@ Apache-2.0 and Unlicense appear in the source CSV as `OR` alternatives but are n
 | deranged | https://github.com/jhpratt/deranged | MIT OR Apache-2.0 | MIT |
 | num-conv | https://github.com/jhpratt/num-conv | MIT OR Apache-2.0 | MIT |
 | powerfmt | https://github.com/jhpratt/powerfmt | MIT OR Apache-2.0 | MIT |
+| doublestar | https://github.com/bmatcuk/doublestar | MIT | MIT |
 
 ## License texts
 
@@ -107,6 +108,7 @@ Applies to the components below, used under MIT. Copyright holder per component,
 - deranged — Jacob Pratt <jacob@jhpratt.dev>
 - num-conv — Jacob Pratt <jacob@jhpratt.dev>
 - powerfmt — Jacob Pratt <jacob@jhpratt.dev>
+- doublestar — Bob Matcuk
 
 License text:
 
