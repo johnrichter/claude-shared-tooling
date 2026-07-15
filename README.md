@@ -76,6 +76,14 @@ A pre-commit hook plus a required CI check scan for accidentally committed secre
 
 Semver git tags (`vX.Y.Z`); consumers pin a tag. Bump on every release so updates propagate.
 
+### Go workspace (`go/`)
+
+Versioned independently of the top-level `vX.Y.Z` line, using Go's subdirectory-module tag
+convention: a tag for a module rooted below the repo root is prefixed with that path, so a
+`go/` release is tagged `go/vX.Y.Z` (e.g. `go/v0.1.0`) — never a bare `vX.Y.Z`, which is reserved
+for the top-level Python package. Bump on every release that changes `go/` behavior (source or a
+recompiled `.bin/` binary); tag from a commit where `go/` is in its released state.
+
 ### Changelog
 
 - **v0.2.0** — Dependency policy reframed from "dependency-free / Tier 0" to **stdlib-preferred** (justified vendored deps permitted, subject to OSS-license clearance). No code change: `dependencies` stays empty, every module remains stdlib-only in fact. Docs-only contract clarification.
