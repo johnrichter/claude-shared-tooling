@@ -64,7 +64,7 @@ func TestCLI_RecordUsageFlags_PopulateAllFourTokenClasses(t *testing.T) {
 	recorded := runCLI(t, bin, "record", execPath, "M1.P1.T1",
 		"--status", "done",
 		"--cost", "0.42",
-		"--tokens-out", "300",     // output — same basis as legacy TokensOut
+		"--tokens-out", "300", // output — same basis as legacy TokensOut
 		"--input-tokens", "500",
 		"--cache-write-tokens", "200",
 		"--cache-read-tokens", "9000", // cache_read intentionally dominates output

@@ -4,24 +4,31 @@ Deterministic mechanics for the `build-with-team` orchestrator — the parts tha
 not LLM guesswork: plan validation, content-addressed reconciliation, tier checks, front-door
 routing, execution-state transitions, and rendering the `plan.md` / `execution.md` mirrors.
 
-Go, stdlib-only, no third-party dependencies. The binary is **pre-compiled and committed to git
-LFS** at `.bin/build-helpers` — the orchestrator execs it directly (no build-on-the-fly). It does
-not change at runtime; edit the sources only when changing behavior, then recompile + re-commit.
+Go, stdlib-only, no third-party dependencies. Binaries are **pre-compiled and committed to git
+LFS** at `../.bin/build-helpers-<goos>-<goarch>`, one per supported OS/arch — the orchestrator
+execs the matching one directly (no build-on-the-fly). They do not change at runtime; edit the
+sources only when changing behavior, then recompile every target + re-commit.
 
 ## Architecture
 
 - **`bh/`** — the API. Pure functions: parsed values in, values/errors out. No file IO, no
   `os.Exit`. Fully unit-tested (`go test ./...`).
 - **`main.go`** — the CLI. The only layer that touches the filesystem and sets exit codes.
-- **`.bin/build-helpers`** — the committed, LFS-tracked binary the skill invokes.
+- **`../.bin/build-helpers-<goos>-<goarch>`** — the committed, LFS-tracked binaries the skill
+  invokes (`go/.bin/`, sibling of this module — shared across any future `go/` module).
 
 ## Build / recompile
 
-The binary is platform-specific (built for the committer's OS/arch). After editing the sources —
-or on a new platform — recompile and re-commit:
+Each binary is platform-specific. After editing the sources, cross-compile every supported target
+and re-commit all four (pure Go, no cgo, so this needs no target toolchains beyond the Go compiler
+itself):
 
 ```sh
-go build -trimpath -ldflags='-s -w' -o .bin/build-helpers .   # .gitattributes routes it to LFS
+GOOS=linux  GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o ../.bin/build-helpers-linux-amd64 .
+GOOS=linux  GOARCH=arm64 go build -trimpath -ldflags='-s -w' -o ../.bin/build-helpers-linux-arm64 .
+GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o ../.bin/build-helpers-darwin-amd64 .
+GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags='-s -w' -o ../.bin/build-helpers-darwin-arm64 .
+# .gitattributes routes go/.bin/* through LFS
 ```
 
 ## Canonical state model
@@ -132,8 +139,8 @@ completed work.
 ## Develop
 
 ```sh
-go test ./...              # unit tests (incl. plan-schema.json drift guard)
+go test ./...                                # unit tests (incl. plan-schema.json drift guard)
 go vet ./...
-gofmt -l .                 # empty = formatted
-.bin/build-helpers --help  # CLI usage
+gofmt -l .                                   # empty = formatted
+../.bin/build-helpers-<goos>-<goarch> --help # CLI usage (pick your platform's binary)
 ```
