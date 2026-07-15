@@ -1,6 +1,10 @@
 package bh
 
-import "io/fs"
+import (
+	"io/fs"
+
+	"github.com/bmatcuk/doublestar/v4"
+)
 
 // This file is the engine's pre-done assertion (M13.P3.T1): before a task is marked done, its
 // declared file_surface must be actually present on disk, with the pinned match semantics below.
@@ -23,7 +27,8 @@ type FileSurfaceResult struct {
 // VerifyFileSurface applies file_surface's pinned match semantics against fsys, rooted at the
 // task's worktree:
 //   - kind=file (default via FileSurfaceKind.Resolve): Path must exist and be a non-directory.
-//   - kind=glob: Path is a glob pattern (fs.Glob semantics) and must match >=1 entry.
+//   - kind=glob: Path is a glob pattern (doublestar semantics, so `**` recurses across path
+//     separators) and must match >=1 entry.
 //   - kind=dir: Path must exist, be a directory, and be non-empty (>=1 immediate child).
 //   - Required (any kind), additionally: every matched file must be non-trivial — non-zero byte
 //     size — so a task cannot fake completion with an empty placeholder. A dir match is not
@@ -53,7 +58,7 @@ func VerifyFileSurface(fsys fs.FS, entries []FileSurfaceEntry) FileSurfaceResult
 }
 
 func verifyGlob(fsys fs.FS, e FileSurfaceEntry, fail func(path, reason string)) {
-	matches, err := fs.Glob(fsys, e.Path)
+	matches, err := doublestar.Glob(fsys, e.Path)
 	if err != nil {
 		fail(e.Path, "malformed glob pattern: "+err.Error())
 		return
