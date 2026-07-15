@@ -24,12 +24,18 @@ and re-commit all four (pure Go, no cgo, so this needs no target toolchains beyo
 itself):
 
 ```sh
-GOOS=linux  GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o ../.bin/build-helpers-linux-amd64 .
-GOOS=linux  GOARCH=arm64 go build -trimpath -ldflags='-s -w' -o ../.bin/build-helpers-linux-arm64 .
-GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o ../.bin/build-helpers-darwin-amd64 .
-GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags='-s -w' -o ../.bin/build-helpers-darwin-arm64 .
+GOOS=linux  GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags='-s -w' -o ../.bin/build-helpers-linux-amd64 .
+GOOS=linux  GOARCH=arm64 go build -trimpath -buildvcs=false -ldflags='-s -w' -o ../.bin/build-helpers-linux-arm64 .
+GOOS=darwin GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags='-s -w' -o ../.bin/build-helpers-darwin-amd64 .
+GOOS=darwin GOARCH=arm64 go build -trimpath -buildvcs=false -ldflags='-s -w' -o ../.bin/build-helpers-darwin-arm64 .
 # .gitattributes routes go/.bin/* through LFS
 ```
+
+`-buildvcs=false` is mandatory: without it Go stamps the building checkout's VCS revision/time/dirty
+state into every binary, which makes the output non-reproducible and breaks the committed==fresh
+parity gate (`parity_test.go`). Build with the **pinned toolchain go1.26.x** — a different Go minor
+version can emit different bytes and will fail the parity gate as a false "drift"; recut all four
+binaries whenever the pinned toolchain is intentionally bumped.
 
 ## Canonical state model
 
