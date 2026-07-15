@@ -7,6 +7,7 @@ Each tool is stdlib-only today and doubles as an importable module for programma
 
 - **CLI tools** — three small utilities, each also usable as a library (see [Tools](#tools)).
 - **`schemas/`** — generalized, non-proprietary schema and format definitions others can adopt (see `schemas/README.md`).
+- **`rust/`** — a Cargo workspace of deterministic, no-ML Rust crates (see [Rust workspace](#rust-workspace)).
 
 ## Tools
 
@@ -16,6 +17,23 @@ Each tool is stdlib-only today and doubles as an importable module for programma
 | `jr-sitemap-parser` | Fetch, parse, window-filter, and prefix-filter any XML sitemap (`urlset` or one-level `sitemapindex`); fail-open to `[]`. |
 | `jr-article-meta` | Deterministically extract `{title, published, excerpt}` from a page's structured metadata (no LLM; verbatim-or-null). |
 
+## Rust workspace
+
+`rust/` is a separate Cargo workspace, isolated from the Python package so it never entangles the
+Python build/test/lint lifecycle. Every member is pure Rust (no CGO/C dependency, `unsafe_code`
+forbidden workspace-wide) so it stays buildable as a static `musl` binary. None of the crates are
+published (`publish = false`); each is a library consumed by an external binary that vendors this
+repo — for example `frontmatter` and `facetquery` are designed to be embedded in the **navigator**
+binary at build time. Detail: `rust/README.md`.
+
+| Crate | Purpose |
+| --- | --- |
+| `bm25` | General-purpose, call-time-customizable BM25 ranking library — flat (`OkapiIndex`) and fielded (`BM25FIndex`) scoring, pluggable tokenizer, deterministic (bit-for-bit identical output for identical input). |
+| `frontmatter` | The one YAML-frontmatter-plus-Markdown-body parser for navigator, plus a `validate` module that interprets the declarative schema in `schemas/frontmatter/` (core profile + extension pack) against a parsed file. |
+| `facetquery` | Frontmatter-agnostic boolean facet-query language (`facetquery@1`) — parses a query string to an AST and evaluates it against any generic facet source; spec lives in `schemas/facetquery/`. |
+
+`frontmatter` depends on `facetquery` (a query, once parsed, matches against many files' frontmatter) — the only inter-crate dependency in the workspace today. A tree-sitter-based symbol-extraction crate is expected to join as a fourth member in a later navigator milestone.
+
 ## Install (dev)
 
 ```
@@ -24,6 +42,18 @@ python -m unittest discover -s tests -p "test_*.py"
 ```
 
 Requires Python >= 3.10. Stdlib-only in fact today — no third-party packages to install.
+
+### Rust
+
+```
+cd rust
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+```
+
+Requires a current stable Rust toolchain. CI runs the same commands per member crate across the
+`{linux, macos} x {x86_64, aarch64}` matrix — see the `rust-*` jobs in `.github/workflows/ci.yml`.
 
 ## Dependency policy
 
