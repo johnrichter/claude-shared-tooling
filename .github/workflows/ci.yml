@@ -1,6 +1,7 @@
 # CI for ai-shared-lib-public (the authority layer of the privacy guardrail).
-# Replaces the removed .gitlab-ci.yml — same shape: guardrail gates unit-tests
-# and the Rust arch matrix, which run independently of each other.
+# Replaces the removed .gitlab-ci.yml — same shape: guardrail gates unit-tests,
+# the Rust arch matrix, and the Go arch matrix, which run independently of
+# each other.
 #
 # Rust workspace (rust/) — arch matrix: {linux, macos} x {x86_64, aarch64}. Each
 # cell runs cargo fmt --check + cargo clippy -D warnings (zero-warnings lint
@@ -15,6 +16,12 @@
 #   macos-x86_64   -> no hosted native runner; cross-compiled on macos-latest,
 #                     fmt+clippy only (doc build is host-target and arch-independent
 #                     for this pure crate, already covered by macos-aarch64).
+#
+# Go workspace (go/build-helpers) — same four-cell matrix, GOOS/GOARCH in place
+# of the Rust target triple. Each cell runs gofmt -l (zero-diff lint bar) +
+# go vet + go build for that GOOS/GOARCH, plus go test where a GitHub-hosted
+# runner exists natively for that {os, arch} pair (same native/cross split as
+# the Rust matrix above — macos-x86_64 is build+lint only).
 
 name: CI
 
@@ -107,6 +114,69 @@ jobs:
       - name: Skip test execution (cross target, no native runner)
         if: ${{ !matrix.test_native }}
         run: echo "cross target ${{ matrix.target }} - fmt+clippy only (no hosted runner to execute the test binary natively)"
+
+  go:
+    name: go-${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    needs: guardrail
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            test_native: true
+          - name: linux-aarch64
+            os: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+            test_native: true
+          - name: macos-aarch64
+            os: macos-latest
+            goos: darwin
+            goarch: arm64
+            test_native: true
+          - name: macos-x86_64
+            os: macos-latest
+            goos: darwin
+            goarch: amd64
+            test_native: false
+    steps:
+      # go.mod is LFS-routed (the *.mod binary-extension rule also catches Go's
+      # go.mod), and go/.bin/* prebuilt binaries are LFS-routed too — lfs: true
+      # smudges both so the checkout is buildable, not pointer stubs.
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/build-helpers/go.mod
+      - name: gofmt --check
+        working-directory: go/build-helpers
+        run: |
+          fmt_diff="$(gofmt -l .)"
+          if [ -n "$fmt_diff" ]; then
+            echo "$fmt_diff"
+            exit 1
+          fi
+      - name: go vet
+        working-directory: go/build-helpers
+        run: go vet ./...
+      - name: go build (${{ matrix.goos }}/${{ matrix.goarch }})
+        working-directory: go/build-helpers
+        run: go build -trimpath -ldflags='-s -w' -o /dev/null .
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+      - name: go test (native only)
+        if: matrix.test_native
+        working-directory: go/build-helpers
+        run: go test ./...
+      - name: Skip test execution (cross target, no native runner)
+        if: ${{ !matrix.test_native }}
+        run: echo "cross target ${{ matrix.goos }}/${{ matrix.goarch }} - build+vet+fmt only (no hosted runner to execute the test binary natively)"
 
   # GH-specific caveat, no GitLab equivalent needed here: GitHub Advanced Security secret
   # scanning is a repo/org SETTING, not a workflow step — it cannot be replicated as a job

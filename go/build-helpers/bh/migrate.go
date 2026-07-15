@@ -64,8 +64,8 @@ type MigrateChange struct {
 	Target string `json:"target"`         // "plan" | "execution"
 	ID     string `json:"id,omitempty"`   // entity id when the change is entity-scoped
 	Field  string `json:"field"`          // the field upgraded
-	From   string `json:"from"`            // prior value ("" or "absent")
-	To     string `json:"to"`              // new value
+	From   string `json:"from"`           // prior value ("" or "absent")
+	To     string `json:"to"`             // new value
 	Note   string `json:"note,omitempty"` // why the change was made
 }
 
