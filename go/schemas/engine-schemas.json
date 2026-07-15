@@ -1,0 +1,42 @@
+{
+  "IMPL": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["summary", "acceptance", "sanity"],
+    "properties": {
+      "summary": { "type": "string", "maxLength": 2000, "description": "Concise prose only — NO code, diffs, or file contents (those are on disk). What you built and how, in a few sentences." },
+      "acceptance": { "type": "array", "maxItems": 30, "items": { "type": "object", "additionalProperties": false, "required": ["criterion", "met"], "properties": { "criterion": { "type": "string", "maxLength": 500 }, "met": { "type": "boolean" } } } },
+      "sanity": { "type": "string", "maxLength": 1500, "description": "Concise prose only — NO code, diffs, or file contents (those are on disk). build/lint/run result summary (counts + verdicts, not full logs)." },
+      "assumptions": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 500 } },
+      "notes": { "type": "string", "maxLength": 1500, "description": "Concise prose only — NO code, diffs, or file contents (those are on disk). Anything else; if detail overflows, write it to a $TMPDIR file and name the path here." }
+    }
+  },
+  "TEST": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["deliverable_type", "verdict", "acceptance"],
+    "properties": {
+      "deliverable_type": { "type": "string", "enum": ["code", "docs-report"] },
+      "verdict": { "type": "string", "enum": ["PASS", "FAIL"] },
+      "tested": { "type": "string", "maxLength": 2000, "description": "Concise prose only — NO code, diffs, or file contents (those are on disk). What you exercised — the suites/checks added or run and what they cover." },
+      "acceptance": { "type": "array", "maxItems": 30, "items": { "type": "object", "additionalProperties": false, "required": ["criterion", "result"], "properties": { "criterion": { "type": "string", "maxLength": 500 }, "result": { "type": "string", "enum": ["PASS", "FAIL"] } } } },
+      "coverage": { "type": "string", "maxLength": 2000, "description": "Concise prose only — NO code, diffs, or file contents (those are on disk). coverage figure + notable gaps (code), or validation summary (non-code)." },
+      "failures": { "type": "array", "maxItems": 30, "items": { "type": "string", "maxLength": 600, "description": "exact repro + location — the failing assertion/command, not a full log paste" } },
+      "ci": { "type": "string", "maxLength": 1000, "description": "Concise prose only — NO code, diffs, or file contents (those are on disk). CI/e2e or other automated-pipeline result, if run." }
+    }
+  },
+  "REVIEW": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["verdict", "findings"],
+    "properties": {
+      "verdict": { "type": "string", "enum": ["ACCEPT", "FIX-APPLIED", "RETURN"] },
+      "findings": { "type": "array", "maxItems": 25, "items": { "type": "object", "additionalProperties": false, "required": ["severity", "where", "what"], "properties": { "severity": { "type": "string", "enum": ["blocking", "major", "minor"] }, "where": { "type": "string", "maxLength": 400 }, "what": { "type": "string", "maxLength": 800, "description": "Concise prose only — NO code, diffs, or file contents (those are on disk). the problem + fix, described — not a diff" } } } },
+      "fixes_applied": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 500 } },
+      "reverification": { "type": "string", "maxLength": 1200 },
+      "test_assessment": { "type": "string", "maxLength": 1200, "description": "Concise prose only — NO code, diffs, or file contents (those are on disk). Is the test suite adequate? Gaps the test-engineer should close." },
+      "residual_risk": { "type": "string", "maxLength": 1200 },
+      "plan_feedback": { "type": "string", "maxLength": 2500, "description": "Concise prose only — NO code, diffs, or file contents (those are on disk). spec/plan corrections for the orchestrator." }
+    }
+  }
+}

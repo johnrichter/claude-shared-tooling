@@ -1,0 +1,128 @@
+{
+  "_schema_version": 1,
+  "_comment": "Canonical per-model rate + limit table for build-with-team (SC9). Replaces cost-rates.json — build-helpers reads this file directly. Dimension-selectable shape: top-level `model` and `pricing` dims, both populated here (full canonical source); build-helpers implements subset-selection + minification at read time, this on-disk copy stays fully populated and human-readable. `pricing.contract` is reserved empty — a consumer prefers a model's `contract` entry over `list` when present; no contract rates exist yet.",
+  "_source": "Anthropic Claude API docs. Rate table + context/output limits + batch discount + cache-rate multipliers cite platform.claude.com/docs pricing, models-overview, prompt-caching, and batch-processing pages. Two fields resolved via WebFetch on 2026-07-03: (1) `model.*.knowledge_cutoff` — https://platform.claude.com/docs/en/about-claude/models/overview.md (\"Reliable knowledge cutoff\" row); (2) `model.*.min_cacheable_prefix` — all 7 values taken from the same-day fetch of https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md (\"minimum cacheable prompt length\" list), superseding the spike's earlier figures for a single consistent provenance (see _min_cacheable_prefix_note).",
+  "_min_cacheable_prefix_note": "All 7 min_cacheable_prefix values come from one source: the 2026-07-03 live prompt-caching doc fetch (fable-5=512, opus-4-8=1024, opus-4-7=2048, opus-4-6=4096, sonnet-5=1024, sonnet-4-6=1024, haiku-4-5=4096). These supersede an earlier spike's figures, which predated this fetch. This field is non-load-bearing metadata — no SC2/SC5 consumer reads it — so re-verify all 7 against the live doc at the next anthropic-specs refresh.",
+  "_unit": "USD per 1,000,000 tokens",
+  "_as_of": "2026-07-03",
+  "model": {
+    "claude-fable-5": {
+      "max_output_tokens": 128000,
+      "context_window": 1000000,
+      "knowledge_cutoff": "2026-01",
+      "min_cacheable_prefix": 512,
+      "batch_discount": 0.5,
+      "status": "active",
+      "deprecation_date": null
+    },
+    "claude-opus-4-8": {
+      "max_output_tokens": 128000,
+      "context_window": 1000000,
+      "knowledge_cutoff": "2026-01",
+      "min_cacheable_prefix": 1024,
+      "batch_discount": 0.5,
+      "status": "active",
+      "deprecation_date": null
+    },
+    "claude-opus-4-7": {
+      "max_output_tokens": 128000,
+      "context_window": 1000000,
+      "knowledge_cutoff": "2026-01",
+      "min_cacheable_prefix": 2048,
+      "batch_discount": 0.5,
+      "status": "active",
+      "deprecation_date": null
+    },
+    "claude-opus-4-6": {
+      "max_output_tokens": 128000,
+      "context_window": 1000000,
+      "knowledge_cutoff": "2025-05",
+      "min_cacheable_prefix": 4096,
+      "batch_discount": 0.5,
+      "status": "active",
+      "deprecation_date": null
+    },
+    "claude-sonnet-5": {
+      "max_output_tokens": 128000,
+      "context_window": 1000000,
+      "knowledge_cutoff": "2026-01",
+      "min_cacheable_prefix": 1024,
+      "batch_discount": 0.5,
+      "status": "active; introductory pricing ends 2026-08-31",
+      "deprecation_date": null
+    },
+    "claude-sonnet-4-6": {
+      "max_output_tokens": 128000,
+      "context_window": 1000000,
+      "knowledge_cutoff": "2025-08",
+      "min_cacheable_prefix": 1024,
+      "batch_discount": 0.5,
+      "status": "active",
+      "deprecation_date": null
+    },
+    "claude-haiku-4-5": {
+      "max_output_tokens": 64000,
+      "context_window": 200000,
+      "knowledge_cutoff": "2025-02",
+      "min_cacheable_prefix": 4096,
+      "batch_discount": 0.5,
+      "status": "active (full id claude-haiku-4-5-20251001)",
+      "deprecation_date": null
+    }
+  },
+  "pricing": {
+    "list": {
+      "claude-fable-5": {
+        "input": 10.0,
+        "cache_write_5m": 12.50,
+        "cache_write_1h": 20.00,
+        "cache_read": 1.00,
+        "output": 50.0
+      },
+      "claude-opus-4-8": {
+        "input": 5.0,
+        "cache_write_5m": 6.25,
+        "cache_write_1h": 10.00,
+        "cache_read": 0.50,
+        "output": 25.0
+      },
+      "claude-opus-4-7": {
+        "input": 5.0,
+        "cache_write_5m": 6.25,
+        "cache_write_1h": 10.00,
+        "cache_read": 0.50,
+        "output": 25.0
+      },
+      "claude-opus-4-6": {
+        "input": 5.0,
+        "cache_write_5m": 6.25,
+        "cache_write_1h": 10.00,
+        "cache_read": 0.50,
+        "output": 25.0
+      },
+      "claude-sonnet-5": {
+        "input": 3.0,
+        "cache_write_5m": 3.75,
+        "cache_write_1h": 6.00,
+        "cache_read": 0.30,
+        "output": 15.0,
+        "_introductory_pricing": "Standard $3 in / $15 out applied above. $2 in / $10 out introductory rate applies through 2026-08-31, reverting to standard on 2026-09-01 — not applied here; refresh this file when the reversion lands if introductory-period accuracy is needed sooner."
+      },
+      "claude-sonnet-4-6": {
+        "input": 3.0,
+        "cache_write_5m": 3.75,
+        "cache_write_1h": 6.00,
+        "cache_read": 0.30,
+        "output": 15.0
+      },
+      "claude-haiku-4-5": {
+        "input": 1.0,
+        "cache_write_5m": 1.25,
+        "cache_write_1h": 2.00,
+        "cache_read": 0.10,
+        "output": 5.0
+      }
+    },
+    "contract": {}
+  }
+}
