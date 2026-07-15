@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"build-helpers/bh"
+	"gitlab.com/john-richter/ai/shared-tooling/go/build-helpers/bh"
 )
 
 func main() {
