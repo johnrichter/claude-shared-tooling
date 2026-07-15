@@ -13,7 +13,15 @@ lifecycle. Holds only deterministic, no-ML machinery.
   tokenizers (`Tokenizer::CaseSplit` default, `Tokenizer::WholeIdentifier`) are selectable at call
   time; the tokenizer is injected at `build` and reused at `search` so build/search agreement is
   structural. Deterministic, no ML. See `bm25/src/lib.rs` for the public-API surface and example.
-- (forward-looking) a tree-sitter-based symbol-extraction crate joins as a second workspace
+- **`frontmatter/`** — the one YAML-frontmatter-plus-Markdown-body parser for navigator, plus a
+  `validate` module that interprets the declarative schema in `schemas/frontmatter/` (core
+  profile + extension pack) against a parsed file. Every navigator subcommand consumes this
+  crate rather than each owning its own parse implementation. See `frontmatter/src/lib.rs`.
+- **`facetquery/`** — a pure, frontmatter-agnostic boolean facet-query language (`facetquery@1`):
+  parses a query string to an AST and evaluates it against any generic facet source. Normative
+  spec in `schemas/facetquery/`; `frontmatter/` depends on this crate so a parsed query matches
+  against many files. See `facetquery/src/lib.rs`.
+- (forward-looking) a tree-sitter-based symbol-extraction crate joins as a fourth workspace
   member in a later navigator milestone.
 
 ## Dependency policy
