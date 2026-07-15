@@ -611,7 +611,7 @@ func TestAdv_FailedIsEligible(t *testing.T) {
 	}
 }
 
-// ---- M13.P3.T4 (FB19): symbol-level disjointness screen + post-merge build gate ----
+// ---- symbol-level disjointness screen + post-merge build gate ----
 //
 // sharedPackageSymbolRisk and RunPostMergeBuildGate do not exist on pre-change code, so this
 // whole section fails to compile (not just fails an assertion) on pre-change code and compiles +
@@ -641,7 +641,7 @@ func TestSharedPackageSymbolRisk(t *testing.T) {
 }
 
 // A dir-kind package surface and a file inside that same package are a same-package
-// symbol-collision risk (FB19): fileSurfaceOverlap alone (literal path text, kind-blind) would
+// symbol-collision risk: fileSurfaceOverlap alone (literal path text, kind-blind) would
 // call "pkg" and "pkg/newfile.go" disjoint (differing depth, no ** bridge) and let them co-batch.
 func TestAdv_DirKindSurfaceForcesBatchOfOneWithFileInsideIt(t *testing.T) {
 	t1 := mkTask("M1.P1.T1", "")
@@ -653,7 +653,7 @@ func TestAdv_DirKindSurfaceForcesBatchOfOneWithFileInsideIt(t *testing.T) {
 	r := BatchTasks(ex, p, 8)
 	ids := batchIDs(r)
 	if len(ids) != 1 {
-		t.Fatalf("dir-kind package surface + a file inside it must not co-batch (FB19 symbol risk); got %v", ids)
+		t.Fatalf("dir-kind package surface + a file inside it must not co-batch (symbol risk); got %v", ids)
 	}
 }
 
@@ -691,12 +691,12 @@ func TestAdv_PlainSameDirFilesStillCoBatchUndecidableCase(t *testing.T) {
 	}
 }
 
-// ---- AC1/AC3: RunPostMergeBuildGate (always-on backstop) ----
+// ---- RunPostMergeBuildGate (always-on backstop) ----
 
 // writeGoFixtureModule writes a minimal go.mod so `go build ./...` resolves the temp package.
 func writeGoFixtureModule(t *testing.T, dir string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module fb19fixture\n\ngo 1.21\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module symbolcollisionfixture\n\ngo 1.21\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -708,7 +708,7 @@ func writeGoFixtureFile(t *testing.T, dir, name, content string) {
 	}
 }
 
-// The exact FB19 scenario: two file_surface-disjoint files (a.go, b.go — different literal
+// The exact symbol-collision scenario: two file_surface-disjoint files (a.go, b.go — different literal
 // paths, no glob overlap) each add an identically-named package-level symbol (Foo). Git's
 // text-merge sees no conflict (different files) and fileSurfaceOverlap sees no path overlap —
 // both would pass on pre-change code. Only compiling the merged tree catches the collision.

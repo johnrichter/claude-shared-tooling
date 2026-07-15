@@ -9,29 +9,27 @@ import (
 	"testing"
 )
 
-// M13.P7.T1 — the seam-integrity sweep (design.md line 105; plan.md M13.P7.T1).
+// The seam-integrity sweep.
 //
-// This is the ONE cross-reader test: it constructs data exercising every new M13 field —
-// typed file_surface {path,required,kind} (M13.P3.T1), pause-event {reason_enum,at,task_id?}
-// (M13.P4.T1), escalation-event {trigger,tier,route,at,task_id?} (M13.P4.T2), and the accounting
-// additions cost_status/specs_as_of/build_helpers_sha/identity/list_vs_actual_notes/per-task+
-// per-run Usage (M13.P2.T1/T3/T4/T5) — through its producer (the bh writer: InitExec/RecordTask/
-// RecordPauseEvent/RecordEscalationEvent/SetAccounting/SetAccountingUnresolved/
-// RecordListVsActualNote) AND every enumerated reader: retrieve (SC10), render (SC15),
-// migrate-project (SC14), archive (SC11, incl. archive×slip-count/firing-count), the
+// This is the ONE cross-reader test: it constructs data exercising every structured field on
+// ExecState/Plan — typed file_surface {path,required,kind}, pause-event {reason_enum,at,task_id?},
+// escalation-event {trigger,tier,route,at,task_id?}, and the accounting additions
+// cost_status/specs_as_of/build_helpers_sha/identity/list_vs_actual_notes/per-task+per-run Usage —
+// through its producer (the bh writer: InitExec/RecordTask/RecordPauseEvent/RecordEscalationEvent/
+// SetAccounting/SetAccountingUnresolved/RecordListVsActualNote) AND every enumerated reader:
+// retrieve, render, migrate-project, archive (incl. archive×slip-count/firing-count), the
 // schema-version-bump upgrade path (MigrateExec), and resume/next/batch/classify.
 //
-// Every assertion here targets behavior that did not exist before its corresponding M13 field
-// task landed — the typed Kind-aware batch disjointness check, the closed-set agreement between
-// RecordEscalationEvent and ClassifyEscalation, the lossless schema-version-bump round trip for
-// each new field, and the archive-preserves-telemetry invariant. Reverting any one of those field
-// tasks removes the very function/field this test calls, so the test fails to compile or fails
-// its assertion on pre-change code; it passes once every dependency (M13.P2.T1-T4, M13.P3.T1,
-// M13.P4.T1-T2, plus M13.P3.T3/T4 for a consistent batch.go) has landed.
+// Every assertion here targets behavior tied to one of these fields — the typed Kind-aware batch
+// disjointness check, the closed-set agreement between RecordEscalationEvent and
+// ClassifyEscalation, the lossless schema-version-bump round trip for each field, and the
+// archive-preserves-telemetry invariant. Removing the function/field a given assertion calls fails
+// that assertion (or fails to compile), so this test stays load-bearing against regression on any
+// of them.
 func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 	// seamPlan is the shared fixture: three independent (no-dep) tasks under one milestone/phase,
 	// carrying the typed file_surface shapes needed to exercise the kind-aware batch
-	// disjointness seam (a dir-kind entry nesting a file-kind entry — FB19) alongside the
+	// disjointness seam (a dir-kind entry nesting a file-kind entry) alongside the
 	// pause-event/escalation-event/accounting seams below.
 	seamPlan := func() Plan {
 		return Plan{
@@ -52,13 +50,13 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 		}
 	}
 
-	// ---- file_surface (M13.P3.T1) ----
+	// ---- file_surface ----
 	t.Run("file_surface", func(t *testing.T) {
 		p := seamPlan()
 		tasks := p.Milestones[0].Phases[0].Tasks
 		t1, t2 := tasks[0], tasks[1]
 
-		// producer: typed shape round-trips through JSON; the pre-M13.P3.T1 bare-string shape
+		// producer: typed shape round-trips through JSON; the legacy bare-string shape
 		// still parses (backward compat) and resolves to the file-kind default.
 		raw := mustBytes(t, p)
 		var reparsed Plan
@@ -86,7 +84,7 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 			t.Fatal("validate should reject an unknown file_surface kind")
 		}
 
-		// retrieve/SC10: typed shape projects at task- and field-level, without aliasing the
+		// retrieve: typed shape projects at task- and field-level, without aliasing the
 		// canonical plan (read-only contract).
 		got, err := RetrievePlan(p, RetrieveInput{Level: LevelTask, ID: "M1.P1.T1"})
 		if err != nil {
@@ -109,7 +107,7 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 			t.Fatalf("RetrievePlan(field) lost the typed file_surface: %+v", fs)
 		}
 
-		// render/SC15: plan.md surfaces path + resolved kind + the required marker.
+		// render: plan.md surfaces path + resolved kind + the required marker.
 		md := RenderPlan(p, PlanDocMeta{})
 		if !strings.Contains(md, "file surface: pkg/a (dir, required)") {
 			t.Fatalf("RenderPlan must surface the typed file_surface (path, kind, required); got:\n%s", md)
@@ -123,7 +121,7 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// migrate-project/SC14: an already-typed entry passes through untouched.
+		// migrate-project: an already-typed entry passes through untouched.
 		pm := seamPlan()
 		rep, err := MigrateProject(&pm, &ex, false)
 		if err != nil {
@@ -142,7 +140,7 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 		// kind-blind check (fileSurfaceOverlap on bare path text) cannot see that T2's file sits
 		// inside T1's declared directory — only the kind-aware layer (sharedPackageSymbolRisk,
 		// which reads Kind) does. Prove the kind-blind predicate alone would misjudge this pair
-		// disjoint (the exact FB19 defect), then prove BatchTasks — which runs BOTH layers —
+		// disjoint, then prove BatchTasks — which runs BOTH layers —
 		// still refuses to admit the pair together.
 		if fileSurfaceOverlap(surfacePaths(t1.FileSurface), surfacePaths(t2.FileSurface)) {
 			t.Fatal("test setup invalid: the kind-blind path predicate must NOT already catch this nesting (would defeat the point of this assertion)")
@@ -169,7 +167,7 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 			t.Fatalf("BatchTasks should still admit the disjoint T3 alongside whichever of T1/T2 it picked: %+v", batch.Tasks)
 		}
 
-		// archive/SC11: the typed entry survives into ArchivedTask verbatim.
+		// archive: the typed entry survives into ArchivedTask verbatim.
 		for _, id := range []string{"M1.P1.T1", "M1.P1.T2", "M1.P1.T3"} {
 			if err := RecordTask(&ex, id, RecordFields{Status: ptr(StatusDone), Test: ptrS("PASS"), Review: ptrS("ACCEPT"), Commit: ptrS("cafe123")}, at0); err != nil {
 				t.Fatal(err)
@@ -188,7 +186,7 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 		}
 	})
 
-	// ---- pause-event (M13.P4.T1) ----
+	// ---- pause-event ----
 	t.Run("pause_event", func(t *testing.T) {
 		p := seamPlan()
 		ex, err := InitExec(p, InitExecOptions{Slug: "seam", At: at0})
@@ -224,7 +222,7 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 			t.Fatal("pause-event telemetry must not affect batch scheduling")
 		}
 
-		// retrieve/SC10: the task-level projection is uncorrupted by the plan-level event log.
+		// retrieve: the task-level projection is uncorrupted by the plan-level event log.
 		outline, err := RetrieveExec(ex, RetrieveInput{Level: LevelOutline})
 		if err != nil {
 			t.Fatal(err)
@@ -233,7 +231,7 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 			t.Fatalf("RetrieveExec outline row count = %d, want 3 (pause events must not leak into the task projection)", got)
 		}
 
-		// render/SC15: the human-readable mirror's log section carries the pause narrative.
+		// render: the human-readable mirror's log section carries the pause narrative.
 		md := RenderExecution(ex, p)
 		if !strings.Contains(md, "PAUSE git M1.P1.T1") || !strings.Contains(md, "PAUSE approval") {
 			t.Fatalf("RenderExecution must surface the recorded pause events in the log; got:\n%s", md)
@@ -258,7 +256,7 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 			t.Fatalf("MigrateExec must preserve pause_events unchanged across the schema-version bump: got %+v, want %+v", reloaded.PauseEvents, ex.PauseEvents)
 		}
 
-		// migrate-project/SC14: same lossless-preservation contract through the higher-level tool.
+		// migrate-project: same lossless-preservation contract through the higher-level tool.
 		pm := seamPlan()
 		if _, err := MigrateProject(&pm, &ex, false); err != nil {
 			t.Fatal(err)
@@ -271,7 +269,7 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 			t.Fatalf("migrate-project must never alter pause_events: got %+v, want %+v", ex.PauseEvents, wantEvents)
 		}
 
-		// archive/SC11 × slip-count: archiving a wholly-done milestone must not touch the
+		// archive × slip-count: archiving a wholly-done milestone must not touch the
 		// plan-level pause-event log or its derived slip count — pause events are session-scoped,
 		// never per-task, so the archive op (which moves TASKS, not session state) cannot drop them.
 		for _, id := range []string{"M1.P1.T1", "M1.P1.T2", "M1.P1.T3"} {
@@ -293,7 +291,7 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 		}
 	})
 
-	// ---- escalation-event (M13.P4.T2) ----
+	// ---- escalation-event ----
 	t.Run("escalation_event", func(t *testing.T) {
 		p := seamPlan()
 		ex, err := InitExec(p, InitExecOptions{Slug: "seam", At: at0})
@@ -343,19 +341,19 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 			t.Fatal("escalation-event telemetry must not affect batch scheduling")
 		}
 
-		// retrieve/SC10: non-corruption of the task-level projection.
+		// retrieve: non-corruption of the task-level projection.
 		if _, err := RetrieveExec(ex, RetrieveInput{Level: LevelTask, ID: "M1.P1.T1"}); err != nil {
 			t.Fatalf("RetrieveExec must still project a task correctly alongside a populated escalation-event log: %v", err)
 		}
 
-		// render/SC15: the human-readable mirror's log carries the escalation narrative.
+		// render: the human-readable mirror's log carries the escalation narrative.
 		md := RenderExecution(ex, p)
 		wantLine := "ESCALATE " + string(trigger) + " -> " + RouteMagistrate + " (tier " + wantTier + ") M1.P1.T1"
 		if !strings.Contains(md, wantLine) {
 			t.Fatalf("RenderExecution must surface the recorded escalation event %q; got:\n%s", wantLine, md)
 		}
 
-		// schema-version-bump upgrade path (MigrateExec) + migrate-project/SC14: lossless
+		// schema-version-bump upgrade path (MigrateExec) + migrate-project: lossless
 		// preservation across both the direct upgrade and the higher-level migration tool.
 		legacy := ex
 		legacy.SchemaVersion = 0
@@ -381,7 +379,7 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 			t.Fatalf("migrate-project must never alter escalation_events: got %+v", ex.EscalationEvents)
 		}
 
-		// archive/SC11 × firing-count (the escalation-event analog of archive×slip-count):
+		// archive × firing-count (the escalation-event analog of archive×slip-count):
 		// archiving a wholly-done milestone must not touch the plan-level escalation-event log or
 		// its derived magistrate-firing count.
 		for _, id := range []string{"M1.P1.T1", "M1.P1.T2", "M1.P1.T3"} {
@@ -401,7 +399,7 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 	})
 
 	// ---- accounting: cost_status/specs_as_of/build_helpers_sha/identity/list_vs_actual_notes,
-	// per-task+per-run Usage (M13.P2.T1/T3/T4/T5) ----
+	// per-task+per-run Usage ----
 	t.Run("accounting", func(t *testing.T) {
 		rates := loadTestRates(t) // skips this subtest if the co-located specs fixture is absent
 		mainPath := filepath.Join(accountingDir, "orchestrator.jsonl")
@@ -418,9 +416,9 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// producer: SetAccounting derives O + the ACC5 identity and persists cost_status/
-		// specs_as_of/build_helpers_sha; RecordTask persists per-task Usage (ACC3's four token
-		// classes), recomputed into per-run Usage; RecordListVsActualNote appends the ACC5 §5 note.
+		// producer: SetAccounting derives O + the additive accounting identity and persists
+		// cost_status/specs_as_of/build_helpers_sha; RecordTask persists per-task Usage (all four
+		// token classes), recomputed into per-run Usage; RecordListVsActualNote appends the note.
 		SetAccounting(&ex, acct, mainPath, rates, true, "2026-07-05T00:00:00Z", "2026-07-03", "deadbeef123")
 		taskUsage := &Usage{InputTokens: 100, CacheCreationTokens: 20, CacheReadTokens: 30, OutputTokens: 40, TotalTokens: 190, Turns: 2}
 		if err := RecordTask(&ex, "M1.P1.T1", RecordFields{Usage: taskUsage}, "2026-07-05T00:05:00Z"); err != nil {
@@ -434,13 +432,13 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 			t.Fatalf("SetAccounting did not persist cost_status/specs_as_of/build_helpers_sha: %+v", acctState)
 		}
 		if acctState.Identity == nil {
-			t.Fatal("SetAccounting did not persist the ACC5 identity result")
+			t.Fatal("SetAccounting did not persist the identity result")
 		}
 		if len(acctState.ListVsActualNotes) != 1 {
 			t.Fatalf("RecordListVsActualNote did not persist a note: %+v", acctState.ListVsActualNotes)
 		}
 		if ex.RunConfig.Usage == nil || ex.RunConfig.Usage.TotalTokens != taskUsage.TotalTokens {
-			t.Fatalf("per-run Usage (ACC3) not recomputed from the per-task Usage: %+v", ex.RunConfig.Usage)
+			t.Fatalf("per-run Usage not recomputed from the per-task Usage: %+v", ex.RunConfig.Usage)
 		}
 
 		// resume/next/batch: scheduling is unaffected by the accounting snapshot's presence.
@@ -454,7 +452,7 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 			t.Fatal("the accounting snapshot must not affect batch scheduling")
 		}
 
-		// retrieve/SC10: per-task Usage (ACC3) projects at task- and field-level.
+		// retrieve: per-task Usage projects at task- and field-level.
 		got, err := RetrieveExec(ex, RetrieveInput{Level: LevelTask, ID: "M1.P1.T1"})
 		if err != nil {
 			t.Fatal(err)
@@ -471,7 +469,7 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 			t.Fatalf("RetrieveExec(field usage) = %+v, want %+v", fv, taskUsage)
 		}
 
-		// render/SC15: the human mirror surfaces the accounting-derived dollar total (the
+		// render: the human mirror surfaces the accounting-derived dollar total (the
 		// documentary sub-fields — cost_status/identity/list-vs-actual — are not separately
 		// printed, but their presence must not corrupt or suppress the figure that IS rendered).
 		md := RenderExecution(ex, p)
@@ -500,7 +498,7 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 			t.Fatalf("MigrateExec must preserve the accounting snapshot unchanged across a schema-version upgrade:\ngot=%+v\nwant=%+v", reloaded.RunConfig.Accounting, ex.RunConfig.Accounting)
 		}
 
-		// migrate-project/SC14: never fabricates or alters an existing accounting snapshot —
+		// migrate-project: never fabricates or alters an existing accounting snapshot —
 		// compared by independent JSON snapshots (not pointer identity) taken before/after.
 		beforeJSON := mustBytes(t, ex.RunConfig.Accounting)
 		pm := seamPlan()
@@ -512,7 +510,7 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 			t.Fatalf("migrate-project must never alter the accounting snapshot:\nbefore=%s\nafter=%s", beforeJSON, afterJSON)
 		}
 
-		// archive/SC11: a done task's Usage (ACC3) is preserved in its tombstone, the whole-session
+		// archive: a done task's Usage is preserved in its tombstone, the whole-session
 		// accounting snapshot is untouched, and the whole-project Usage total is unchanged by
 		// archiving (recomputeTotals sums live Tasks + Archived).
 		for _, id := range []string{"M1.P1.T1", "M1.P1.T2", "M1.P1.T3"} {
@@ -539,7 +537,7 @@ func TestSeamIntegrity_NewFieldsHandledByProducerAndEveryReader(t *testing.T) {
 			}
 		}
 		if tombUsage == nil || *tombUsage != *taskUsage {
-			t.Fatalf("archive must preserve the per-task Usage (ACC3) in its tombstone: %+v", tombUsage)
+			t.Fatalf("archive must preserve the per-task Usage in its tombstone: %+v", tombUsage)
 		}
 	})
 }

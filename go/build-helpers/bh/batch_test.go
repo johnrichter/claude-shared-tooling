@@ -292,7 +292,7 @@ func itoa(n int) string {
 	return string(b)
 }
 
-// ---- M8.P1.T3 archive-awareness (next/batch/classify/reconcile-exec + retrieval) ----
+// ---- archive-awareness (next/batch/classify/reconcile-exec + retrieval) ----
 //
 // crossArchiveDepPlan is the "live task depends on an archived task" shape archivePlan
 // (archive_test.go) deliberately leaves uncovered — M2 there has no cross-milestone dep on M1.
@@ -340,8 +340,8 @@ func TestBatchArchivedDepResolvesAsDone(t *testing.T) {
 
 // TestCrossSelector_ArchivedMilestoneConsistentAcrossEverySelector is the test-strategy's
 // named regression: place a newly-archived milestone whose task is a live dependency and assert
-// next, batch, reconcile-exec, classify, and retrieve all treat it consistently (archival-design.md
-// §4/§3). Fails on pre-fix code at the next/batch/reconcile-exec assertions.
+// next, batch, reconcile-exec, classify, and retrieve all treat it consistently. Fails on pre-fix
+// code at the next/batch/reconcile-exec assertions.
 func TestCrossSelector_ArchivedMilestoneConsistentAcrossEverySelector(t *testing.T) {
 	p := crossArchiveDepPlan()
 	ex, err := InitExec(p, InitExecOptions{Slug: "demo", At: at0, Pause: "none"})
@@ -427,11 +427,10 @@ func TestCrossSelector_ArchivedMilestoneConsistentAcrossEverySelector(t *testing
 	}
 }
 
-// ---- SCe: next/batch structurally refuse an orchestrator_only task for dispatch (M13.P3.T3) ----
+// ---- next/batch structurally refuse an orchestrator_only task for dispatch ----
 //
-// These tests fail on pre-M13.P3.T3 code: Task had no OrchestratorOnly field, so setting it was a
-// no-op and both NextTask and BatchTasks unconditionally returned the task in Task/Tasks for
-// dispatch — the exact bug this task closes (design.md SCe).
+// These tests guard against Task.OrchestratorOnly being a no-op: without this check, both
+// NextTask and BatchTasks would unconditionally return the task in Task/Tasks for dispatch.
 
 // orchestratorOnlyPlan is a single-task plan whose only task is orchestrator_only:true — the
 // simplest case where the guard must fire on the very next call (the task is the anchor).

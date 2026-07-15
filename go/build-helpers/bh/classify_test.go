@@ -40,7 +40,7 @@ func TestClassifyRoutes(t *testing.T) {
 // TestClassifyRouteUnaffectedByArchival — Classify decides from doc presence/staleness only,
 // never per-task completion (see Classify's doc comment), so an archived milestone (which shrinks
 // plan.json/execution.json's task lists but leaves the docs themselves present) must not change
-// the route (archival-design.md §4 point 6). The cross-selector regression in batch_test.go
+// the route. The cross-selector regression in batch_test.go
 // exercises this against an actual archived-milestone fixture end to end; this pins the
 // doc-presence contract directly.
 func TestClassifyRouteUnaffectedByArchival(t *testing.T) {
@@ -65,8 +65,8 @@ func TestPlanIsStale(t *testing.T) {
 
 // TestClassifyEscalationNamedTriggers — each of the four named triggers routes to the magistrate
 // with its trigger and a non-empty tier (acceptance 1), and persists as a well-formed
-// escalation-event {trigger,tier,route,at,task_id?} to execution.json (E2/SC8) — the recorded
-// event, not just the pure classify result, is what SC3a's equal-magistrate-firing void-check
+// escalation-event {trigger,tier,route,at,task_id?} to execution.json — the recorded
+// event, not just the pure classify result, is what the equal-magistrate-firing void-check
 // reads (execution.go's MagistrateFiringCount).
 func TestClassifyEscalationNamedTriggers(t *testing.T) {
 	for trigger, wantTier := range escalationTiers {

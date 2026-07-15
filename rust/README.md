@@ -1,18 +1,16 @@
 # rust — deterministic shared machinery (Cargo workspace)
 
-Sensitivity: **public** · Owner: **public** · Kind: **shared Rust workspace**
-
 The platform's first Rust workspace in this repo. Isolated under `rust/` so it never entangles
-the Python package (`ai_shared_lib_public/`) — separate `Cargo.toml`, separate build/test/lint
+the Python package (`claude_tooling/`) — separate `Cargo.toml`, separate build/test/lint
 lifecycle. Holds only deterministic, no-ML machinery.
 
 ## What lives here
 
-- **`bm25/`** — general-purpose, call-time-customizable BM25 ranking library. Complete as of the
-  M1 capstone (M1.P2.T3): both scoring variants (`OkapiIndex` flat, `BM25FIndex` fielded) and both
-  tokenizers (`Tokenizer::CaseSplit` default, `Tokenizer::WholeIdentifier`) are selectable at call
-  time; the tokenizer is injected at `build` and reused at `search` so build/search agreement is
-  structural. Deterministic, no ML. See `bm25/src/lib.rs` for the public-API surface and example.
+- **`bm25/`** — general-purpose, call-time-customizable BM25 ranking library: both scoring variants
+  (`OkapiIndex` flat, `BM25FIndex` fielded) and both tokenizers (`Tokenizer::CaseSplit` default,
+  `Tokenizer::WholeIdentifier`) are selectable at call time; the tokenizer is injected at `build`
+  and reused at `search` so build/search agreement is structural. Deterministic, no ML. See
+  `bm25/src/lib.rs` for the public-API surface and example.
 - **`frontmatter/`** — the one YAML-frontmatter-plus-Markdown-body parser for navigator, plus a
   `validate` module that interprets the declarative schema in `schemas/frontmatter/` (core
   profile + extension pack) against a parsed file. Every navigator subcommand consumes this
@@ -33,7 +31,7 @@ crate choice robustness-first (maintenance cadence, adoption, security-advisory 
 its license per the org policy, and pin the exact version.
 
 That preference is layered under the build constraint, not replaced by it: every member crate must
-stay **pure Rust** — no CGO, no C dependency — so it stays buildable as a static `musl` binary
+stay **pure Rust** — no C dependency — so it stays buildable as a static `musl` binary
 later (a binary-target concern; kept true of the library now so it is never retrofitted). A
 candidate crate that pulls in a C dependency fails the build-fit check regardless of how well it
 vets otherwise. Hand-roll only when no crate clears vetting, license, and the pure-Rust constraint

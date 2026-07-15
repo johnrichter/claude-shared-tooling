@@ -303,7 +303,7 @@ func runReconcile(rest []string) {
 	printJSON(ex)
 }
 
-// runArchive is the explicit, operator-invoked archive op (design SC11, archival-design.md): it
+// runArchive is the explicit, operator-invoked archive op: it
 // moves every task under each named --milestone (which must be wholly terminal) out of the live
 // plan.json/execution.json into the preserved archive.json, then rewrites all three files. This
 // is the ONE command that writes multiple files itself rather than leaving the atomic
@@ -376,11 +376,11 @@ func runMigrateProject(rest []string) {
 
 // discoverTranscripts resolves a session's transcript files from the main transcript path: the
 // main transcript itself plus every subagent transcript found by bh.DiscoverSubagentTranscripts —
-// the ONE recursive discovery seam (ACC2, M13.P2.T2) that also feeds discoverSubagents/attribution,
+// the ONE recursive discovery seam that also feeds discoverSubagents/attribution,
 // so the two views can never disagree on what counts as a subagent. Results are deduped by cleaned
 // absolute path and sorted so the walk and its watermark keys are stable across runs. resolved is
 // false when the main transcript cannot be stat'd (missing/unreadable) — the caller decides whether
-// that is fatal: readUsage (the `usage` command) dies on it; runRecordUsage treats it as the ACC1
+// that is fatal: readUsage (the `usage` command) dies on it; runRecordUsage treats it as the
 // unresolved-transcript condition (non-fatal marker, except a baseline-capture run — see
 // SetAccountingUnresolved). A subagents/ root that has nothing under it is simply absent (a run with
 // no subagents is valid). This is the whole-session set the old orchestrator-only parser missed, now
@@ -510,8 +510,8 @@ func runRecordUsage(rest []string) {
 	fs := flag.NewFlagSet("record-usage", flag.ContinueOnError)
 	transcript := fs.String("transcript", "", "main session transcript JSONL path (required); subagent transcripts are discovered alongside it")
 	specs := fs.String("specs", "", "anthropic-specifications.json path (default: resolved next to the executable)")
-	final := fs.Bool("final", false, "finish-time authoritative snapshot: re-parse every transcript in full, ignoring prior watermarks — mandatory at finish (ACC1)")
-	baselineCapture := fs.Bool("baseline-capture", false, "this run IS a baseline-capture measurement (e.g. SC3a); an unresolved transcript fails the run instead of writing the non-fatal cost_status:unresolved marker")
+	final := fs.Bool("final", false, "finish-time authoritative snapshot: re-parse every transcript in full, ignoring prior watermarks — mandatory at finish")
+	baselineCapture := fs.Bool("baseline-capture", false, "this run IS a baseline-capture measurement (e.g. a model-tier comparison); an unresolved transcript fails the run instead of writing the non-fatal cost_status:unresolved marker")
 	at := fs.String("at", "", "timestamp override (default: now UTC)")
 	parse(fs, rest[1:])
 	if *transcript == "" {
@@ -520,10 +520,10 @@ func runRecordUsage(rest []string) {
 	ex := readExec(pos[0])
 	when := orNow(*at)
 
-	// ACC1: the main transcript failing to open/read is "unresolved", not silently zero-valued
+	// The main transcript failing to open/read is "unresolved", not silently zero-valued
 	// accounting. Non-fatal by default (accounting never blocks a build) — a loud cost_status:
 	// unresolved marker is persisted and prior accounting is left untouched. A baseline-capture run
-	// (e.g. the SC3a model-tier measurement) cannot tolerate a silently-degraded O, so it fails instead.
+	// (e.g. a model-tier comparison measurement) cannot tolerate a silently-degraded O, so it fails instead.
 	paths, resolved := discoverTranscripts(*transcript)
 	if !resolved {
 		if *baselineCapture {
@@ -536,7 +536,7 @@ func runRecordUsage(rest []string) {
 
 	// Incremental by default (resume from prior per-file watermarks); --final forces a full re-parse
 	// from offset 0 so the finish-time snapshot is authoritative and self-heals any incremental drift.
-	// --final is mandatory at finish (ACC1) and is idempotent/resume-safe: a re-run always re-derives
+	// --final is mandatory at finish and is idempotent/resume-safe: a re-run always re-derives
 	// the same ledger/O from the transcripts on disk rather than accumulating on top of itself.
 	prior := ex.RunConfig.Accounting
 	if *final {
@@ -663,20 +663,20 @@ func runBatch(rest []string) {
 	plan := readPlan(pos[1])
 	res := bh.BatchTasks(ex, plan, *max)
 	printJSON(res)
-	// Structural refusal (design.md SCe) — same hard-error contract as `next`.
+	// Structural refusal — same hard-error contract as `next`.
 	exitOK(res.OrchestratorOnly == nil)
 }
 
 // runVerifySurface is the forward-direction file_surface re-assertion: looks up one or more
 // comma-separated taskIds' declared file_surface in plan.json and checks their UNION against
 // disk, rooted at --root (default the current directory). A single id is the engine's pre-done
-// assertion (M13.P3.T1) re-run independently by the orchestrator at the pre-commit site (SCa
-// site 2, M13.P3.T2) — the caller passes the task's own worktree. Comma-joined ids is the
-// post-merge site (SCa site 3): after an octopus merge, the orchestrator re-verifies every
-// merged task's surface in one call, rooted at the merged build-worktree tip — this is the ONE
-// check downstream of the merge itself, catching a path present at every task's own pre-commit
-// but dropped by the merge (FB1). Exit 1 (with the violation list) when any declared entry
-// fails its pinned match semantics (bh.VerifyFileSurface via bh.VerifyMergedSurface).
+// assertion re-run independently by the orchestrator at the pre-commit site — the caller passes
+// the task's own worktree. Comma-joined ids is the post-merge site: after an octopus merge, the
+// orchestrator re-verifies every merged task's surface in one call, rooted at the merged
+// build-worktree tip — this is the ONE check downstream of the merge itself, catching a path
+// present at every task's own pre-commit but dropped by the merge. Exit 1 (with the violation
+// list) when any declared entry fails its pinned match semantics (bh.VerifyFileSurface via
+// bh.VerifyMergedSurface).
 func runVerifySurface(rest []string) {
 	pos := positionals(rest, 2, "verify-surface <plan.json> <taskId>[,<taskId>…] [--root DIR]")
 	fs := flag.NewFlagSet("verify-surface", flag.ContinueOnError)
@@ -697,9 +697,9 @@ func runVerifySurface(rest []string) {
 	exitOK(res.OK)
 }
 
-// runCheckChangedSurface is the reverse-direction file_surface re-assertion (SCa, M13.P3.T2):
+// runCheckChangedSurface is the reverse-direction file_surface re-assertion:
 // every path in the git-derived changed-set must be covered by taskId's declared file_surface
-// (required or optional). An uncovered path is an off-surface write — the literal FB1 failure a
+// (required or optional). An uncovered path is an off-surface write that a
 // forward-only check (verify-surface) cannot see. --changed reads one bare path per line from a
 // file, or stdin when given "-"; the caller strips git status --porcelain's 2-char status +
 // separator before piping in (e.g. `git status --porcelain | cut -c4-`) — this command adds no
@@ -738,8 +738,8 @@ func runCheckChangedSurface(rest []string) {
 	exitOK(res.OK)
 }
 
-// isArchiveDoc sniffs a doc's shape ahead of isExecutionDoc's plan/exec fork (archival-design.md
-// §3): archive.json embeds a top-level "milestones" array too (each archived milestone carries its
+// isArchiveDoc sniffs a doc's shape ahead of isExecutionDoc's plan/exec fork:
+// archive.json embeds a top-level "milestones" array too (each archived milestone carries its
 // full plan-slice per task, bh/archive.go), which would otherwise misroute to RetrievePlan under
 // isExecutionDoc's presence-of-"milestones" test. archive.json's own "schema" key (ArchiveSchema)
 // is the one unambiguous discriminator, so this check MUST run before isExecutionDoc.
@@ -769,7 +769,7 @@ func isExecutionDoc(raw []byte) bool {
 	return probe.Milestones == nil
 }
 
-// runRetrieve serves the level-of-detail retrieval API (design SC10; T0 spike): a read-only,
+// runRetrieve serves the level-of-detail retrieval API: a read-only,
 // deterministic projection of plan.json, execution.json, or archive.json at the caller's chosen
 // granularity — outline (every entity) -> milestone/phase (one group's child tasks) -> task (one
 // task's full record) -> field (one named field). It never decides task eligibility; `next`/
@@ -803,7 +803,7 @@ func runRetrieve(rest []string) {
 	printJSON(result)
 }
 
-// runSelfCheck is the session-tier self-check (design SC7): resolves the LIVE session model and
+// runSelfCheck is the session-tier self-check: resolves the LIVE session model and
 // effort and enforces the caller-supplied floor/ceiling band (never hardcoded here — each skill
 // passes its own). Model: transcript latest message.model, fallback $ANTHROPIC_MODEL. Effort:
 // $CLAUDE_EFFORT, fallback settings.json effortLevel. An undetectable model is a hard usage error
@@ -812,11 +812,11 @@ func runRetrieve(rest []string) {
 // session-id mismatch), matching check-tiers/validate's ok-gate convention; a ceiling warning
 // still exits 0.
 //
-// SCf identity guard (FB26, opt-in): pass --session-id or --scratchpad-path to ALSO verify that
+// Identity guard (opt-in): pass --session-id or --scratchpad-path to ALSO verify that
 // --transcript's trailing lines carry THIS session's own sessionId before trusting it for
 // anything — closing the silent cross-session accounting poisoning a stale mtime-newest transcript
-// pick could cause. Omitting both flags preserves the exact pre-SCf behavior (model/effort tier
-// check only; SessionIDChecked stays false in the JSON result).
+// pick could cause. Omitting both flags preserves model/effort tier check only (SessionIDChecked
+// stays false in the JSON result).
 //
 // Exit-code contract: 0 in band and id verified (or id check not requested); 1 abort (below the
 // floor, and/or — when the identity guard is requested — a session-id mismatch); 2 usage/IO error
@@ -931,7 +931,7 @@ func resolveOwnSessionID(sessionIDFlag, scratchpadPathFlag string) (id, cwdSlug 
 	}
 }
 
-// runResolveTranscript is the SCf deterministic transcript resolver (FB26): given a session's own
+// runResolveTranscript is the deterministic transcript resolver: given a session's own
 // identity (--session-id or --scratchpad-path — the SAME derivation self-check's identity guard
 // uses, via resolveOwnSessionID), it prints the ONE transcript path that session owns. No
 // directory listing and no os.ModTime comparison occur anywhere in this resolution path — see
@@ -987,8 +987,8 @@ func runResolveTranscript(rest []string) {
 }
 
 // resolveSessionModel resolves the live session model: transcript latest message.model, falling
-// back to $ANTHROPIC_MODEL (a launch-time setting that misses a mid-session /model override, per
-// spikes/pre-kickoff-findings.md). An empty transcriptPath or an unreadable/model-less transcript
+// back to $ANTHROPIC_MODEL (a launch-time setting that misses a mid-session /model override).
+// An empty transcriptPath or an unreadable/model-less transcript
 // simply falls through to the env var; ok is false only when NEITHER source names a model.
 func resolveSessionModel(transcriptPath string) (bh.Model, bool) {
 	if transcriptPath != "" {
@@ -1021,10 +1021,10 @@ func resolveSessionEffort(settingsPath string) (bh.Effort, bool) {
 	return "", false
 }
 
-// ---- feedback register (SC13): feedback.json canonical, feedback.md rendered mirror ----
+// ---- feedback register: feedback.json canonical, feedback.md rendered mirror ----
 
-// runFeedback dispatches the feedback subcommands: `add` (M13.P1.T1, writes) and `list`
-// (M13.P1.T2, read-only query) — list never touches add's write path.
+// runFeedback dispatches the feedback subcommands: `add` (writes) and `list`
+// (read-only query) — list never touches add's write path.
 func runFeedback(rest []string) {
 	if len(rest) == 0 {
 		die(2, "usage: feedback {add|list} <feedback.json> [flags]\n")
@@ -1044,13 +1044,13 @@ func runFeedback(rest []string) {
 
 // runFeedbackAdd validates and appends one entry to feedback.json, then re-renders feedback.md
 // from the SAME updated register in the same call — the write that keeps canonical and mirror
-// from ever diverging (SC13 acceptance). feedback.md's path is derived from feedback.json's,
+// from ever diverging. feedback.md's path is derived from feedback.json's,
 // mirroring the plan.json/plan.md and execution.json/execution.md sibling-file convention.
 func runFeedbackAdd(rest []string) {
 	pos := positionals(rest, 1, "feedback add <feedback.json> --title … --feedback … --impact N --urgency N [--source-task … --proposed-solution … --why-it-matters … --at …]")
 	fs := flag.NewFlagSet("feedback add", flag.ContinueOnError)
 	var in bh.FeedbackInput
-	fs.StringVar(&in.Title, "title", "", "short human name (SC15) — required")
+	fs.StringVar(&in.Title, "title", "", "short human name — required")
 	fs.StringVar(&in.SourceTaskID, "source-task", "", "originating task id")
 	fs.StringVar(&in.Feedback, "feedback", "", "the feedback itself — required")
 	fs.StringVar(&in.ProposedSolution, "proposed-solution", "", "proposed fix")
@@ -1073,7 +1073,7 @@ func runFeedbackAdd(rest []string) {
 // runFeedbackList reads feedback.json (never writes it or its mirror) and prints entries matching
 // the supplied filters — --by-task, --min-impact, --min-urgency compose with AND; omitting all
 // three lists every entry. Output is one line per entry, ranked by criticality descending, in the
-// exact "<id> — <title>" form SC15 specifies for every feedback readout.
+// exact "<id> — <title>" form every feedback readout uses.
 func runFeedbackList(rest []string) {
 	pos := positionals(rest, 1, "feedback list <feedback.json> [--by-task ID] [--min-impact N] [--min-urgency N]")
 	fs := flag.NewFlagSet("feedback list", flag.ContinueOnError)
@@ -1089,8 +1089,8 @@ func runFeedbackList(rest []string) {
 	}
 }
 
-// runFeedbackGate partitions the ranked register at the configurable criticality threshold
-// (M13.P2.T2), emitting the full gate result as JSON: amend_now is the ranked reconcile-exec
+// runFeedbackGate partitions the ranked register at the configurable criticality threshold,
+// emitting the full gate result as JSON: amend_now is the ranked reconcile-exec
 // amendment input the magistrate consumes; deferred entries are applied to the supplied plan as
 // the standing feedback-review milestone (the emitted `plan` is the new-plan.json for
 // reconcile-exec's sub-threshold restacking). Read-only — writes nothing; the magistrate/skill
@@ -1329,19 +1329,19 @@ Usage:
   build-helpers render-exec    <execution.json> <plan.json>         -> execution.md
   build-helpers next           <execution.json> <plan.json>         -> {task}|{done}|{blocked}
   build-helpers batch          <execution.json> <plan.json> [--max N] -> {tasks}|{done}|{blocked}
-  build-helpers verify-surface <plan.json> <taskId>[,<taskId>…] [--root DIR] -> {ok,violations}; exit 1 if not ok. FORWARD direction (SCa): checks the UNION of the listed tasks' declared file_surface against disk (glob >=1 match, dir non-empty, required entries non-trivial/non-empty) rooted at --root (default cwd). One id = pre-commit re-assertion (a task's own worktree); comma-joined ids = post-merge re-assertion (the merged build-worktree tip, unioned across the merged batch).
-  build-helpers check-changed-surface <plan.json> <taskId> --changed FILE|- -> {ok,off_surface}; exit 1 if not ok. REVERSE direction (SCa): every path in a git-derived changed-set (one bare path per line, e.g. 'git status --porcelain | cut -c4-', "-" reads stdin) must be covered by taskId's declared file_surface (required or optional); an uncovered path is an off-surface write (FB1).
+  build-helpers verify-surface <plan.json> <taskId>[,<taskId>…] [--root DIR] -> {ok,violations}; exit 1 if not ok. FORWARD direction: checks the UNION of the listed tasks' declared file_surface against disk (glob >=1 match, dir non-empty, required entries non-trivial/non-empty) rooted at --root (default cwd). One id = pre-commit re-assertion (a task's own worktree); comma-joined ids = post-merge re-assertion (the merged build-worktree tip, unioned across the merged batch).
+  build-helpers check-changed-surface <plan.json> <taskId> --changed FILE|- -> {ok,off_surface}; exit 1 if not ok. REVERSE direction: every path in a git-derived changed-set (one bare path per line, e.g. 'git status --porcelain | cut -c4-', "-" reads stdin) must be covered by taskId's declared file_surface (required or optional); an uncovered path is an off-surface write.
   build-helpers record         <execution.json> <taskId> [flags]    -> execution.json
   build-helpers log-note       <execution.json> --note "…" [--at …] -> execution.json
   build-helpers reconcile-exec <execution.json> <old> <new> [flags] -> execution.json
   build-helpers archive        <plan.json> <execution.json> <archive.json> --milestone ID[,ID…] [--at …] -> {archived,skipped}; rewrites all three files. Operator-invoked ONLY — never call from the build loop. Refuses (no partial write) unless every task under each named milestone is done|superseded.
-  build-helpers migrate-project <plan.json> <execution.json> [--dry-run] -> {already_v2,dry_run,changes,warnings}; upgrades an in-flight v1 project to the v2 shapes (SC15 entity names, execution schema_version stamp, retired-enum remap). Lossless (done/SHA/cost/verdicts preserved), idempotent (already-v2 rewrites nothing), --dry-run previews without writing.
+  build-helpers migrate-project <plan.json> <execution.json> [--dry-run] -> {already_v2,dry_run,changes,warnings}; upgrades an in-flight v1 project to the v2 shapes (entity names, execution schema_version stamp, retired-enum remap). Lossless (done/SHA/cost/verdicts preserved), idempotent (already-v2 rewrites nothing), --dry-run previews without writing.
   build-helpers usage          <transcript.jsonl>                   -> {input,output,cache,total,turns} true tokens (whole session incl. subagents)
   build-helpers record-usage   <execution.json> --transcript P [--specs P --final --baseline-capture] -> execution.json (folds per-model true-cost accounting + per-file watermarks + orchestrator-only O into run config; --final mandatory at finish; an unresolved transcript sets cost_status:unresolved — non-fatal, unless --baseline-capture)
   build-helpers attribute      <execution.json> --transcript P [--tasks id,id,… --specs P] -> {tasks:{id:{cost_usd,cost_attribution:"measured",…}},even_split,unmappable} MEASURED per-task cost from subagent transcripts
   build-helpers retrieve       <plan.json|execution.json|archive.json> --level {outline|milestone|phase|task|field} [--id ID --field NAME] -> read-only detail-level projection (never decides eligibility); archive.json serves archived detail at the same four levels
-  build-helpers self-check     --floor-model M --floor-effort E --ceiling-model M --ceiling-effort E [--transcript P --settings P --session-id ID | --scratchpad-path P] -> {model,effort,effort_detected,abort,warnings,reason,session_id_checked,session_id_match} session-tier self-check against a caller-supplied band; --session-id/--scratchpad-path additionally hard-aborts (SCf) if --transcript's trailing lines don't name that session id. Exit 0 ok; 1 abort (below floor and/or session-id mismatch); 2 usage/IO error (missing band flags, undeterminable model, or — with the identity guard — unparseable session id / unreadable / empty / all-malformed / no-sessionId transcript)
-  build-helpers resolve-transcript --session-id ID | --scratchpad-path P [--cwd DIR --projects-dir DIR] -> prints the ONE deterministic transcript path for that session (SCf: id-based path join, never a directory mtime scan). Exit 0 ok (path on stdout); 2 usage/IO error (bad/missing id, unresolvable cwd/$HOME, or the path doesn't exist)
+  build-helpers self-check     --floor-model M --floor-effort E --ceiling-model M --ceiling-effort E [--transcript P --settings P --session-id ID | --scratchpad-path P] -> {model,effort,effort_detected,abort,warnings,reason,session_id_checked,session_id_match} session-tier self-check against a caller-supplied band; --session-id/--scratchpad-path additionally hard-aborts if --transcript's trailing lines don't name that session id. Exit 0 ok; 1 abort (below floor and/or session-id mismatch); 2 usage/IO error (missing band flags, undeterminable model, or — with the identity guard — unparseable session id / unreadable / empty / all-malformed / no-sessionId transcript)
+  build-helpers resolve-transcript --session-id ID | --scratchpad-path P [--cwd DIR --projects-dir DIR] -> prints the ONE deterministic transcript path for that session (id-based path join, never a directory mtime scan). Exit 0 ok (path on stdout); 2 usage/IO error (bad/missing id, unresolvable cwd/$HOME, or the path doesn't exist)
   build-helpers feedback add   <feedback.json> --title … --feedback … --impact N --urgency N [--source-task … --proposed-solution … --why-it-matters … --at …] -> feedback.json (writes feedback.json AND regenerates the sibling feedback.md mirror in one call)
   build-helpers feedback list  <feedback.json> [--by-task ID --min-impact N --min-urgency N] -> stdout, one "<id> — <title>" line per matching entry, ranked by criticality descending (read-only; filters compose with AND)
   build-helpers feedback gate  <feedback.json> --plan <plan.json> --threshold N -> {threshold,amend_now,deferred,plan} partition the ranked register at the inclusive criticality floor: amend_now is ranked reconcile-exec amendment input; deferred entries are applied to plan as the standing feedback-review milestone (read-only; the returned plan is the new-plan.json for reconcile-exec)

@@ -119,7 +119,7 @@ type FileSurfaceEntry struct {
 }
 
 // UnmarshalJSON accepts either the typed object form {path,required,kind} or a bare JSON string
-// (the pre-M13.P3.T1 file_surface shape). A bare string maps to {Path:s} with Required=false and
+// (the legacy file_surface shape). A bare string maps to {Path:s} with Required=false and
 // an empty Kind — which Resolve() treats as the file default — so every existing plain-string
 // plan.json stays parseable with no migration and no data loss, while new plans emit the typed
 // object form. batch.go's overlap predicate and VerifyFileSurface read the resolved struct either
@@ -222,9 +222,9 @@ func (e Effort) Known() bool {
 	return false
 }
 
-// ---- pause events (E1/SC1) ----
+// ---- pause events ----
 
-// PauseReason categorizes why a build paused. The set is closed so SC1's mechanical-slip count
+// PauseReason categorizes why a build paused. The set is closed so the mechanical-slip count
 // is machine-derivable instead of grepped from free-text: git|state|merge are tooling-forced
 // (mechanical) pauses; design-level|approval|budget|signing are operator-facing gates and are
 // never counted as mechanical slips (see Mechanical).
@@ -248,7 +248,7 @@ func (r PauseReason) Known() bool {
 	return false
 }
 
-// Mechanical reports whether r is one of the tooling-forced pause reasons (git|state|merge) SC1's
+// Mechanical reports whether r is one of the tooling-forced pause reasons (git|state|merge) the
 // mechanical-slip count is derived from. design-level/approval/budget/signing are operator-facing
 // gates, never mechanical slips.
 func (r PauseReason) Mechanical() bool {
@@ -259,7 +259,7 @@ func (r PauseReason) Mechanical() bool {
 	return false
 }
 
-// PauseEvent is one structured pause occurrence (E1/SC1). TaskID is set when the pause is tied to
+// PauseEvent is one structured pause occurrence. TaskID is set when the pause is tied to
 // a specific task; empty for a plan-level pause. Append-only — RecordPauseEvent is the sole writer.
 type PauseEvent struct {
 	ReasonEnum PauseReason `json:"reason_enum"`
@@ -267,11 +267,11 @@ type PauseEvent struct {
 	TaskID     string      `json:"task_id,omitempty"`
 }
 
-// EscalationEvent is one structured magistrate-firing occurrence (E2/SC8): a named trigger from
+// EscalationEvent is one structured magistrate-firing occurrence: a named trigger from
 // classify.go's closed EscalationTrigger set (never an out-of-set condition — RecordEscalationEvent
 // rejects those) fired the magistrate at the given tier via the given route. TaskID is set when the
 // firing is tied to a specific task; empty for a plan-level firing. Append-only —
-// RecordEscalationEvent is the sole writer. Counting these events is SC3a's equal-magistrate-firing
+// RecordEscalationEvent is the sole writer. Counting these events is the equal-magistrate-firing
 // void-check input (MagistrateFiringCount): the two runs of a model-tier pair must fire the
 // magistrate an EQUAL number of times, or the pair is voided as workload-divergent rather than
 // tier-comparable.
@@ -333,8 +333,7 @@ func (s Status) Emoji() string {
 // stamps today; bump it and extend MigrateExec whenever a future change needs field-level upgrade
 // logic. Both are exported so main.go's future-version guard can report exact numbers.
 //
-// v3 adds ExecState.Archived (the archive op's compact tombstone index, M8.P1.T2) — see
-// archival-design.md.
+// v3 adds ExecState.Archived, the archive op's compact tombstone index.
 const (
 	LegacyExecSchemaVersion  = 1
 	CurrentExecSchemaVersion = 3
@@ -360,16 +359,16 @@ type ExecState struct {
 	// of Tasks into archive.json — exactly the fields the resume hot path (dependency-done
 	// resolution, whole-project cost recompute) needs in-band, so archive-awareness costs no
 	// extra file read. Full fidelity for these tasks lives only in archive.json. Absent/nil on
-	// any execution.json never archived — see archival-design.md.
+	// any execution.json never archived.
 	Archived []Tombstone `json:"archived,omitempty"`
 	Log      []string    `json:"log"`
-	// PauseEvents is the structured pause-event log (E1/SC1): every pause records
+	// PauseEvents is the structured pause-event log: every pause records
 	// {reason_enum,at,task_id?} here, so the mechanical-slip count (git|state|merge,
 	// MechanicalSlipCount) is machine-derivable instead of grepped from free-text Log lines.
 	// Append-only; absent/nil on any execution.json with no pause events yet.
 	PauseEvents []PauseEvent `json:"pause_events,omitempty"`
-	// EscalationEvents is the structured magistrate-firing log (E2/SC8): every magistrate firing
-	// records {trigger,tier,route,at,task_id?} here, so SC3a's equal-magistrate-firing void-check
+	// EscalationEvents is the structured magistrate-firing log: every magistrate firing
+	// records {trigger,tier,route,at,task_id?} here, so the equal-magistrate-firing void-check
 	// (MagistrateFiringCount) is machine-derivable instead of un-countable. Append-only; absent/nil
 	// on any execution.json with no escalation events yet.
 	EscalationEvents []EscalationEvent `json:"escalation_events,omitempty"`

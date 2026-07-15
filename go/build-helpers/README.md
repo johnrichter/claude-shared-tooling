@@ -119,7 +119,7 @@ that need operator review rather than being silently rewritten.
 - `execution.json` `schema_version` stamp — absent on every pre-v2 file; stamped to the current
   version via the same tested `MigrateExec` upgrade path used elsewhere. A file newer than this
   build supports is a hard error, not a silent field drop.
-- Entity `name` backfill (SC15) — v1 milestones/phases/tasks and the execution doc name can be
+- Entity `name` backfill — v1 milestones/phases/tasks and the execution doc name can be
   empty or absent; backfilled deterministically (milestone/phase from id, task name from the first
   sentence of its summary, execution doc name from `<project> — Execution`). `ExecTask` has no
   per-row name field in v2, so there is nothing to add there.

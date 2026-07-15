@@ -38,8 +38,8 @@ func WalkTasks(p Plan) []TaskRef {
 
 // TaskByID looks up one task by id via WalkTasks, returning its TaskRef and whether it was
 // found. The one shared lookup every id-keyed caller uses — the engine pre-done gate's
-// verify-surface CLI (M13.P3.T1) and the orchestrator's bidirectional re-assertion CLI
-// (verify-surface's post-merge union form + check-changed-surface, M13.P3.T2) — instead of each
+// verify-surface CLI and the orchestrator's bidirectional re-assertion CLI
+// (verify-surface's post-merge union form + check-changed-surface) — instead of each
 // hand-rolling the same WalkTasks scan.
 func TaskByID(p Plan, id string) (TaskRef, bool) {
 	for _, r := range WalkTasks(p) {

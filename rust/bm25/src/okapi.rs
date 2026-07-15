@@ -1,38 +1,37 @@
 //! Okapi BM25: the classic flat, single-bag-of-tokens-per-document scorer.
 //!
-//! Ported faithfully from ka's `retrieve::bm25` (the seed) — same constants
-//! (`K1 = 1.5`, `B = 0.75`), same inverted-index shape (term → doc → term
-//! frequency), same scoring formula. Two things differ from ka on purpose:
+//! Standard Okapi BM25 — same constants (`K1 = 1.5`, `B = 0.75`), same
+//! inverted-index shape (term → doc → term frequency), same scoring formula
+//! as the textbook algorithm. Two design commitments matter here:
 //!
-//! 1. **Determinism.** ka accumulates per-document scores in a `HashMap` and
-//!    returns them via that map's iteration order, which Rust's `HashMap`
-//!    never guarantees is stable — the same corpus/query can rank
-//!    identically-scored documents in a different order run to run. This
-//!    module never lets a `HashMap` iteration order reach the caller: ranked
-//!    output is always sorted into a total order (score descending, then
-//!    document id ascending as the tie-break), so identical inputs produce
-//!    byte-identical output on every run, platform, and process.
-//! 2. **Library shape.** ka's index is `pub(crate)` and keyed by a bare
-//!    `usize` row id into ka's own chunk table. This module is a public,
-//!    freestanding library type keyed by a caller-supplied `String` id, so
-//!    it carries no assumption about the caller's storage.
+//! 1. **Determinism.** A naive accumulator scores per-document totals into a
+//!    `HashMap` and returns them via that map's iteration order, which
+//!    Rust's `HashMap` never guarantees is stable — the same corpus/query
+//!    could rank identically-scored documents in a different order run to
+//!    run. This module never lets a `HashMap` iteration order reach the
+//!    caller: ranked output is always sorted into a total order (score
+//!    descending, then document id ascending as the tie-break), so identical
+//!    inputs produce byte-identical output on every run, platform, and
+//!    process.
+//! 2. **Library shape.** This is a public, freestanding library type keyed
+//!    by a caller-supplied `String` id, not an index bound to any one
+//!    caller's internal row/chunk storage — so it carries no assumption
+//!    about how the caller stores documents.
 //!
-//! # M1.P2.T1
+//! # Sibling to BM25F
 //! The fielded BM25F variant (per-field weights, multi-field documents)
-//! lands as a sibling type in this crate — it does not touch
-//! `Okapi Index`'s flat single-field model. The two variants share nothing
-//! but the tokenizer seam (`crate::tokenize`) and the ranked-output shape
-//! (score-desc, id-asc total order) — both concerns already factored out
-//! here rather than inlined, precisely so BM25F can reuse them.
+//! is a sibling type in this crate — it does not touch `OkapiIndex`'s flat
+//! single-field model. The two variants share nothing but the tokenizer
+//! seam (`crate::tokenize`) and the ranked-output shape (score-desc, id-asc
+//! total order) — both concerns are factored out here rather than inlined,
+//! precisely so BM25F can reuse them.
 //!
-//! # M1.P2.T3 (landed)
-//! [`OkapiIndex::build`] now takes a [`Tokenizer`] and stores it — the index
+//! [`OkapiIndex::build`] takes a [`Tokenizer`] and stores it — the index
 //! OWNS its tokenizer, so [`OkapiIndex::search`] always reuses the exact
 //! same one `build` used; there is no API to call `search` with a different
 //! tokenizer than the index was built with (build/search agreement is
-//! structural, not a caller discipline). `ScoredDocument` moved to
-//! [`crate::result`] (a neutral module both variants depend on) in this
-//! same task.
+//! structural, not a caller discipline). `ScoredDocument` lives in
+//! [`crate::result`], a neutral module both variants depend on.
 
 use std::collections::HashMap;
 
@@ -165,7 +164,8 @@ impl OkapiIndex {
     /// (kept positive so common terms never flip a score negative):
     /// `ln(1 + (N - df + 0.5) / (df + 0.5))`. Returns `0.0` for a term with
     /// zero document frequency (absent from the corpus) rather than `ln(1)`
-    /// of an undefined ratio — matches ka's early-exit.
+    /// of an undefined ratio — the standard early-exit for a term with no
+    /// documents to compare against.
     fn idf(&self, term: &str) -> f64 {
         let df = self.postings.get(term).map_or(0, HashMap::len);
         if df == 0 {
@@ -183,10 +183,10 @@ impl OkapiIndex {
     /// Scores every document against `query` and returns them ranked.
     ///
     /// Query tokens are deduplicated (a repeated query term contributes its
-    /// idf-weighted score once, matching ka) and tokenized with this
+    /// idf-weighted score once) and tokenized with this
     /// index's own [`Tokenizer`] (the one passed to [`build`](Self::build))
     /// — a query and a document always tokenize identically, so e.g.
-    /// exact-identifier queries (`dd_trace`) match documents containing
+    /// exact-identifier queries (`foo_bar`) match documents containing
     /// that exact identifier under [`Tokenizer::WholeIdentifier`].
     ///
     /// Only documents sharing at least one query term score above `0.0` and
@@ -259,18 +259,18 @@ mod tests {
     // not `///` doc comment, so `clippy::doc_markdown` doesn't require
     // backticking every code-like term in dense prose math.
     //
-    // Golden ranking parity vs ka's exact Okapi formula (K1=1.5, B=0.75).
+    // Golden ranking parity vs the exact Okapi formula (K1=1.5, B=0.75).
     //
     // Corpus (3 docs, hand-tokenized with the whole-identifier tokenizer):
-    //   doc "a": "dd_trace span init"        -> 3 tokens
-    //   doc "b": "dd_trace dd_trace context" -> 3 tokens (dd_trace tf=2)
-    //   doc "c": "span context handler"      -> 3 tokens, no dd_trace
+    //   doc "a": "foo_bar span init"        -> 3 tokens
+    //   doc "b": "foo_bar foo_bar context" -> 3 tokens (foo_bar tf=2)
+    //   doc "c": "span context handler"      -> 3 tokens, no foo_bar
     // avgdl = (3+3+3)/3 = 3.0; every doc_len/avgdl ratio = 1.0, so the
     // length-normalization term is identical for all three docs — isolating
     // the tf/idf effect being tested.
     //
-    // Query: "dd_trace".
-    //   df("dd_trace") = 2 (docs a, b), N = 3.
+    // Query: "foo_bar".
+    //   df("foo_bar") = 2 (docs a, b), N = 3.
     //   idf = ln(1 + (3 - 2 + 0.5)/(2 + 0.5)) = ln(1 + 1.5/2.5) = ln(1.6)
     //       = 0.4700036292457356 (computed independently in Python via
     //         math.log(1.6) to cross-check the Rust ln() call).
@@ -279,20 +279,20 @@ mod tests {
     //   doc a: tf=1 -> score = idf * (1*2.5)/(1+1.5) = idf * 2.5/2.5 = idf.
     //   doc b: tf=2 -> score = idf * (2*2.5)/(2+1.5) = idf * 5/3.5
     //       = idf * 1.4285714285714286.
-    //   doc c: tf=0 -> no "dd_trace" posting -> absent from results.
+    //   doc c: tf=0 -> no "foo_bar" posting -> absent from results.
     //   Expected ranking: b (higher tf) > a; c excluded (zero overlap).
     #[test]
-    fn golden_ranking_matches_ka_okapi_formula() {
+    fn golden_ranking_matches_exact_okapi_formula() {
         let index = OkapiIndex::build(
             Tokenizer::WholeIdentifier,
             [
                 Document {
                     id: "a",
-                    text: "dd_trace span init",
+                    text: "foo_bar span init",
                 },
                 Document {
                     id: "b",
-                    text: "dd_trace dd_trace context",
+                    text: "foo_bar foo_bar context",
                 },
                 Document {
                     id: "c",
@@ -301,7 +301,7 @@ mod tests {
             ],
         );
 
-        let results = index.search("dd_trace", 10);
+        let results = index.search("foo_bar", 10);
 
         assert_eq!(results.len(), 2, "doc c has zero overlap and is excluded");
         assert_eq!(results[0].id, "b");
@@ -315,8 +315,8 @@ mod tests {
         assert!((results[0].score - expected_b).abs() < 1e-12);
     }
 
-    /// Repeated query terms are deduplicated, matching ka — a query with
-    /// `dd_trace` twice scores identically to a query with it once.
+    /// Repeated query terms are deduplicated — a query with a term twice
+    /// scores identically to a query with it once.
     #[test]
     fn duplicate_query_terms_are_deduplicated() {
         let index = OkapiIndex::build(
@@ -324,7 +324,7 @@ mod tests {
             [
                 Document {
                     id: "a",
-                    text: "dd_trace span",
+                    text: "foo_bar span",
                 },
                 Document {
                     id: "b",
@@ -332,8 +332,8 @@ mod tests {
                 },
             ],
         );
-        let once = index.search("dd_trace", 10);
-        let twice = index.search("dd_trace dd_trace", 10);
+        let once = index.search("foo_bar", 10);
+        let twice = index.search("foo_bar foo_bar", 10);
         assert_eq!(once, twice);
     }
 
@@ -351,17 +351,17 @@ mod tests {
             [
                 Document {
                     id: "z",
-                    text: "dd_trace span",
+                    text: "foo_bar span",
                 },
                 Document {
                     id: "a",
-                    text: "dd_trace span",
+                    text: "foo_bar span",
                 },
             ],
         );
 
-        let first_run = index.search("dd_trace", 10);
-        let second_run = index.search("dd_trace", 10);
+        let first_run = index.search("foo_bar", 10);
+        let second_run = index.search("foo_bar", 10);
         assert_eq!(first_run, second_run, "repeated runs must be identical");
         assert_eq!(
             first_run.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
@@ -379,19 +379,19 @@ mod tests {
             [
                 Document {
                     id: "a",
-                    text: "dd_trace dd_trace dd_trace",
+                    text: "foo_bar foo_bar foo_bar",
                 },
                 Document {
                     id: "b",
-                    text: "dd_trace dd_trace",
+                    text: "foo_bar foo_bar",
                 },
                 Document {
                     id: "c",
-                    text: "dd_trace",
+                    text: "foo_bar",
                 },
             ],
         );
-        let top1 = index.search("dd_trace", 1);
+        let top1 = index.search("foo_bar", 1);
         assert_eq!(top1.len(), 1);
         assert_eq!(top1[0].id, "a");
     }
@@ -402,7 +402,7 @@ mod tests {
     fn empty_corpus_and_empty_documents_do_not_panic_or_produce_nan() {
         let empty_index = OkapiIndex::build(Tokenizer::WholeIdentifier, std::iter::empty());
         assert!(empty_index.is_empty());
-        assert_eq!(empty_index.search("dd_trace", 10), Vec::new());
+        assert_eq!(empty_index.search("foo_bar", 10), Vec::new());
 
         let zero_len_index = OkapiIndex::build(
             Tokenizer::WholeIdentifier,
@@ -411,7 +411,7 @@ mod tests {
                 Document { id: "b", text: "" },
             ],
         );
-        assert_eq!(zero_len_index.search("dd_trace", 10), Vec::new());
+        assert_eq!(zero_len_index.search("foo_bar", 10), Vec::new());
     }
 
     /// An empty query yields no results (no terms to score against).
@@ -421,7 +421,7 @@ mod tests {
             Tokenizer::WholeIdentifier,
             [Document {
                 id: "a",
-                text: "dd_trace span",
+                text: "foo_bar span",
             }],
         );
         assert_eq!(index.search("", 10), Vec::new());
@@ -437,10 +437,10 @@ mod tests {
             Tokenizer::WholeIdentifier,
             [Document {
                 id: "only",
-                text: "dd_trace dd_trace span",
+                text: "foo_bar foo_bar span",
             }],
         );
-        let results = index.search("dd_trace", 10);
+        let results = index.search("foo_bar", 10);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "only");
 
@@ -461,14 +461,14 @@ mod tests {
             Tokenizer::WholeIdentifier,
             [Document {
                 id: "a",
-                text: "dd_trace span",
+                text: "foo_bar span",
             }],
         );
         assert_eq!(index.search("nonexistent_term", 10), Vec::new());
         // Mixed query: one present term, one absent -> only the present
         // term's contribution counts (absent term adds 0.0, not NaN/error).
-        let mixed = index.search("dd_trace nonexistent_term", 10);
-        let present_only = index.search("dd_trace", 10);
+        let mixed = index.search("foo_bar nonexistent_term", 10);
+        let present_only = index.search("foo_bar", 10);
         assert_eq!(mixed, present_only);
     }
 
@@ -486,19 +486,19 @@ mod tests {
             [
                 Document {
                     id: "doc_a",
-                    text: "dd_trace span",
+                    text: "foo_bar span",
                 },
                 Document {
                     id: "doc_b",
-                    text: "dd_trace span",
+                    text: "foo_bar span",
                 },
                 Document {
                     id: "doc_c",
-                    text: "dd_trace span",
+                    text: "foo_bar span",
                 },
                 Document {
                     id: "doc_d",
-                    text: "dd_trace context",
+                    text: "foo_bar context",
                 },
             ],
         );
@@ -507,19 +507,19 @@ mod tests {
             [
                 Document {
                     id: "doc_d",
-                    text: "dd_trace context",
+                    text: "foo_bar context",
                 },
                 Document {
                     id: "doc_c",
-                    text: "dd_trace span",
+                    text: "foo_bar span",
                 },
                 Document {
                     id: "doc_b",
-                    text: "dd_trace span",
+                    text: "foo_bar span",
                 },
                 Document {
                     id: "doc_a",
-                    text: "dd_trace span",
+                    text: "foo_bar span",
                 },
             ],
         );
@@ -528,26 +528,26 @@ mod tests {
             [
                 Document {
                     id: "doc_b",
-                    text: "dd_trace span",
+                    text: "foo_bar span",
                 },
                 Document {
                     id: "doc_d",
-                    text: "dd_trace context",
+                    text: "foo_bar context",
                 },
                 Document {
                     id: "doc_a",
-                    text: "dd_trace span",
+                    text: "foo_bar span",
                 },
                 Document {
                     id: "doc_c",
-                    text: "dd_trace span",
+                    text: "foo_bar span",
                 },
             ],
         );
 
-        let forward_results = forward.search("dd_trace span", 10);
-        let reversed_results = reversed.search("dd_trace span", 10);
-        let shuffled_results = shuffled.search("dd_trace span", 10);
+        let forward_results = forward.search("foo_bar span", 10);
+        let reversed_results = reversed.search("foo_bar span", 10);
+        let shuffled_results = shuffled.search("foo_bar span", 10);
 
         assert_eq!(forward_results, reversed_results);
         assert_eq!(forward_results, shuffled_results);
@@ -568,7 +568,7 @@ mod tests {
     /// re-implementing the textbook Okapi BM25 formula from scratch and
     /// printing `repr()` of the results, which are hardcoded here as float
     /// literals. This is deliberately NOT the same shape as
-    /// `golden_ranking_matches_ka_okapi_formula` above, whose expected values
+    /// `golden_ranking_matches_exact_okapi_formula` above, whose expected values
     /// are computed inline in Rust using the same closed-form expression the
     /// implementation uses — a regression that changed the formula in both
     /// `okapi.rs` and that inline expression in lock-step would still pass
@@ -581,10 +581,10 @@ mod tests {
     /// import math
     /// K1, B = 1.5, 0.75
     /// docs = {
-    ///     "alpha": "dd_trace span init handler",
-    ///     "beta":  "dd_trace context handler retry retry",
+    ///     "alpha": "foo_bar span init handler",
+    ///     "beta":  "foo_bar context handler retry retry",
     ///     "gamma": "span context handler",
-    ///     "delta": "dd_trace dd_trace dd_trace context",
+    ///     "delta": "foo_bar foo_bar foo_bar context",
     /// }
     /// import re
     /// toks = {k: re.findall(r"[a-z0-9_]+", v.lower()) for k, v in docs.items()}
@@ -602,7 +602,7 @@ mod tests {
     ///     denom = f + K1 * (1 - B + B * doc_len[d] / avgdl)
     ///     return idf(t) * (f * (K1 + 1)) / denom
     /// for d in docs:
-    ///     print(d, sum(score(t, d) for t in ["dd_trace", "handler"]))
+    ///     print(d, sum(score(t, d) for t in ["foo_bar", "handler"]))
     /// ```
     /// Output (frozen, hardcoded below):
     ///   alpha 0.7133498878774648
@@ -618,11 +618,11 @@ mod tests {
             [
                 Document {
                     id: "alpha",
-                    text: "dd_trace span init handler",
+                    text: "foo_bar span init handler",
                 },
                 Document {
                     id: "beta",
-                    text: "dd_trace context handler retry retry",
+                    text: "foo_bar context handler retry retry",
                 },
                 Document {
                     id: "gamma",
@@ -630,12 +630,12 @@ mod tests {
                 },
                 Document {
                     id: "delta",
-                    text: "dd_trace dd_trace dd_trace context",
+                    text: "foo_bar foo_bar foo_bar context",
                 },
             ],
         );
 
-        let results = index.search("dd_trace handler", 10);
+        let results = index.search("foo_bar handler", 10);
 
         let expected: &[(&str, f64)] = &[
             ("alpha", 0.713_349_887_877_464_8),

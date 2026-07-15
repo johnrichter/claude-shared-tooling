@@ -133,7 +133,7 @@ func TestClassifyFeedbackCriticalityDeterministic(t *testing.T) {
 }
 
 // TestFeedbackReviewTasksAreSchemaValid: sub-threshold entries become tasks that ValidatePlanBytes
-// accepts when embedded in a plan, and each carries id + name + acceptance (the SC15/reconcile-exec
+// accepts when embedded in a plan, and each carries id + name + acceptance (the reconcile-exec
 // requirement).
 func TestFeedbackReviewTasksAreSchemaValid(t *testing.T) {
 	reg := gateFixture(t)

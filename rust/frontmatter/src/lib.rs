@@ -3,12 +3,12 @@
 //! this crate's [`ParsedFrontmatter`] — there is exactly one parse
 //! implementation in navigator, not one per consumer.
 //!
-//! # Scope (`M2.P2.T1a` — this task)
+//! # Scope
 //! Parsing only: split a document into its frontmatter block and Markdown
 //! body, decode the YAML, and hand back a typed, order-preserving result.
 //! No schema validation, no required-field checks, no `FrontmatterEntry`
-//! shape -- those are `M2.P2.T1b`'s `validate` module, landing next in this
-//! same crate (see "Module layout" below).
+//! shape -- those live in this crate's `validate` module (see "Module
+//! layout" below).
 //!
 //! # What's here
 //! - [`ParsedFrontmatter`] -- the crate's one public result type. Four
@@ -28,28 +28,26 @@
 //!   the crate accepts. A document with NO frontmatter at all is not an
 //!   error -- see [`parse::parse`]'s doc comment.
 //!
-//! # Module layout (and where `validate` slots in next)
-//! - `parse` -- this task's parser. Owns the only `yaml_rust2` import in
-//!   the crate.
+//! # Module layout
+//! - `parse` -- the parser. Owns the only `yaml_rust2` import in the crate.
 //! - `value` -- [`FrontmatterValue`] and [`RawFields`], the backend-agnostic
 //!   result shape `parse` produces and any future module consumes.
 //! - `error` -- [`FrontmatterParseError`].
 //! - (this file) -- [`ParsedFrontmatter`] and the crate's public
 //!   re-exports.
 //!
-//! `M2.P2.T1b` adds two sibling modules:
+//! Two sibling modules build on top of `parse`:
 //! - `profile` -- [`Profile`], the deserialized declarative schema (core
 //!   profile + extension pack) `validate` interprets. Embeds the core
 //!   profile at compile time (`include_str!`), plus a small set of named
-//!   extension packs (`default@1`/`reports@1`) resolvable only as opt-in bundles
+//!   extension packs (`default@1.0.0`/`reports@1.0.0`) resolvable only as opt-in bundles
 //!   via [`embedded_pack_json`] -- the library never constructs a
 //!   `Profile` from one on its own. Also accepts an external pack's JSON
 //!   text, for a foreign repo's own vocabulary.
 //! - `validate` -- [`validate::validate`], taking a `&ParsedFrontmatter`
 //!   (specifically its `raw_fields`) and a [`Profile`], producing the
 //!   schema-checked [`validate::FrontmatterEntry`] shape. It needs nothing
-//!   from `parse` beyond the already-public [`ParsedFrontmatter`] type, so
-//!   it slots in as a new sibling module with no change to this task's code.
+//!   from `parse` beyond the already-public [`ParsedFrontmatter`] type.
 //! - `query` -- [`query::FrontmatterFacetSource`] and [`query::matches`],
 //!   bridging `ParsedFrontmatter` + `Profile` to the `facetquery` crate's
 //!   generic `FacetSource` trait, so a `facetquery@1` query string can be
@@ -93,8 +91,8 @@ pub use value::{FrontmatterValue, RawFields};
 /// populated when the corresponding top-level frontmatter key is present
 /// AND holds the expected shape (a sequence for `tags`, a scalar for the
 /// other three); otherwise it is `None`/empty, never an error -- a
-/// wrong-typed or absent convenience field is a validation concern
-/// (`M2.P2.T1b`), not a parse failure.
+/// wrong-typed or absent convenience field is a validation concern, not a
+/// parse failure.
 ///
 /// `raw_fields` is the source of truth for every top-level key this
 /// document had, in source order, typed enough to distinguish
@@ -365,14 +363,14 @@ body\n";
         assert_eq!(first, second);
     }
 
-    // -- workspace: nested-map descent (M2.P2.T1b's whole reason for the
+    // -- workspace: nested-map descent (the reason FrontmatterValue has a
     // -- Mapping variant) -------------------------------------------------
 
     #[test]
     fn skill_style_workspace_nested_map_descends_into_scalar_and_sequence_children() {
         // Realistic Skill/Agent frontmatter shape: top-level CC fields
         // (name/description) plus a nested `workspace:` map carrying this
-        // crate's own fields (id/tags/description/updated) -- T1b's
+        // crate's own fields (id/tags/description/updated) -- the
         // validator must be able to reach every one of those nested keys
         // through the same `RawFields` API it uses at the top level.
         // NB: built with concatenated `\n`-terminated literals, not
@@ -448,8 +446,8 @@ body\n";
         // Deliberately distinct from `name:` with nothing after it (that
         // is a YAML null -> `Other`, see the null/tilde pin in
         // `sdet_adversarial_tests`). An explicit `""` is a real, present
-        // scalar value that happens to be empty -- the validator (T1b) must
-        // be able to tell "present but empty" apart from "absent" or
+        // scalar value that happens to be empty -- the validator must be
+        // able to tell "present but empty" apart from "absent" or
         // "explicit null".
         let input = "---\nname: \"\"\n---\nbody\n";
         let parsed = parse(input).unwrap();
@@ -504,7 +502,7 @@ body\n";
     }
 }
 
-/// SDET adversarial probing for `M2.P2.T1a` verification -- targets the
+/// Adversarial probing for the parser -- targets the
 /// robustness + determinism contract this crate promises the sole
 /// platform-wide validator that consumes it: CRLF, duplicate keys,
 /// non-string mapping keys, non-mapping top levels, YAML features that could
@@ -620,12 +618,10 @@ mod sdet_adversarial_tests {
 
     #[test]
     fn anchors_and_aliases_are_rejected_not_resolved() {
-        // BLOCKING finding 1+2 remediation: frontmatter never legitimately
-        // uses anchors/aliases, and resolving one is the mechanism behind
-        // the billion-laughs amplification attack -- `prescan_events`
-        // rejects any document containing an alias outright, rather than
-        // resolving it (superseded behavior: this used to resolve `*a` to
-        // `"foo"`).
+        // Frontmatter never legitimately uses anchors/aliases, and
+        // resolving one is the mechanism behind the billion-laughs
+        // amplification attack -- `prescan_events` rejects any document
+        // containing an alias outright, rather than resolving it.
         let input = "---\nname: &a foo\nid: *a\n---\nbody\n";
         let result = parse(input);
         assert!(

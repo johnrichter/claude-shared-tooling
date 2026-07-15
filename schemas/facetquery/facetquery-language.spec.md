@@ -1,17 +1,3 @@
----
-name: "facetquery Language Specification (facetquery@1)"
-description: "facetquery@1 grammar spec: boolean facet-query language syntax, operators, precedence, wildcards, ranges, escaping, exists/not-exists, parse-time vs eval-time diagnostics, full edge-case table -- conformance oracle for the facetquery crate parser"
-id: "schema:facetquery:language-spec"
-tags:
-  - type:knowledge
-  - topic:tooling
-  - status:complete
-  - privacy:public
-  - owner:public
-links: []
-updated: 2026-07-13T00:00:00Z
----
-
 # facetquery — boolean facet-query language (`facetquery@1`)
 
 Canonical, versioned specification of the `facetquery` language: a small boolean query language over

@@ -1,4 +1,4 @@
-"""ai_shared_lib_public — public shared tools for AI-agent workspaces.
+"""claude_tooling — public shared tools for AI-agent workspaces.
 
 Dependency policy: stdlib is preferred for portability, but a justified third-party
 dependency is permitted when vendored via the standard mechanism (subject to OSS-license

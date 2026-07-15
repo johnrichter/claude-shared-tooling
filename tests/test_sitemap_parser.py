@@ -1,5 +1,5 @@
 """
-test_sitemap_parser.py — Unit tests for ai_shared_lib_public.sitemap_parser
+test_sitemap_parser.py — Unit tests for claude_tooling.sitemap_parser
 
 Run with: python -m unittest discover -s tests -p "test_*.py" -v
 or:       python -m pytest tests/ -v
@@ -34,7 +34,7 @@ _HERE = Path(__file__).parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from ai_shared_lib_public import sitemap_parser as sm
+from claude_tooling import sitemap_parser as sm
 
 
 FLAT_URLSET = b"""<?xml version="1.0" encoding="UTF-8"?>
@@ -227,7 +227,7 @@ class TestPrefixFilter(unittest.TestCase):
 
 class TestFetchFailure(unittest.TestCase):
     def test_urlerror_returns_none_and_warns(self):
-        with patch("ai_shared_lib_public.sitemap_parser.urlopen", side_effect=URLError("simulated unreachable")):
+        with patch("claude_tooling.sitemap_parser.urlopen", side_effect=URLError("simulated unreachable")):
             stderr = io.StringIO()
             with redirect_stderr(stderr):
                 result = sm.fetch_sitemap("https://unreachable.example.com/sitemap.xml")
@@ -235,7 +235,7 @@ class TestFetchFailure(unittest.TestCase):
         self.assertIn("WARNING", stderr.getvalue())
 
     def test_parse_sitemap_url_returns_empty_list_on_fetch_failure(self):
-        with patch("ai_shared_lib_public.sitemap_parser.urlopen", side_effect=URLError("simulated unreachable")):
+        with patch("claude_tooling.sitemap_parser.urlopen", side_effect=URLError("simulated unreachable")):
             stderr = io.StringIO()
             with redirect_stderr(stderr):
                 records = sm.parse_sitemap_url("https://unreachable.example.com/sitemap.xml")
@@ -243,7 +243,7 @@ class TestFetchFailure(unittest.TestCase):
 
     def test_cli_exits_0_and_prints_empty_array_on_fetch_failure(self):
         proc = subprocess.run(
-            [sys.executable, "-m", "ai_shared_lib_public.sitemap_parser", "--url", "http://127.0.0.1:1/does-not-exist.xml"],
+            [sys.executable, "-m", "claude_tooling.sitemap_parser", "--url", "http://127.0.0.1:1/does-not-exist.xml"],
             capture_output=True,
             text=True,
             timeout=20,
@@ -264,7 +264,7 @@ class TestCliOutput(unittest.TestCase):
         try:
             file_url = Path(tmp_path).as_uri()
             proc = subprocess.run(
-                [sys.executable, "-m", "ai_shared_lib_public.sitemap_parser", "--url", file_url, "--prefix", "/news/"],
+                [sys.executable, "-m", "claude_tooling.sitemap_parser", "--url", file_url, "--prefix", "/news/"],
                 capture_output=True,
                 text=True,
                 timeout=20,

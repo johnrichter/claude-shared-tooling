@@ -22,7 +22,7 @@ Candidate set is mode-dependent:
              committed in the past) — the full tracked tree: `git ls-files`.
 
 Paths that no longer exist on disk (e.g. staged deletions) are skipped — there
-is no content left to inspect. SKIP_DIRS mirrors check_privacy.py's build/venv/
+is no content left to inspect. SKIP_DIRS mirrors check_secrets.py's build/venv/
 VCS exclusions; RAW_BINARY_ALLOWLIST is an explicit, currently-empty escape
 hatch for a future documented exception (add a path, never a glob, with a
 comment justifying it).
@@ -40,7 +40,7 @@ import sys
 from pathlib import Path
 
 # Directories never scanned (VCS internals, build/venv/test-cache artifacts).
-# Mirrors check_privacy.py's SKIP_DIRS so the two guardrails agree on what a
+# Mirrors check_secrets.py's SKIP_DIRS so the two guardrails agree on what a
 # "real" repo path is (shared-directory-enumerator-drift).
 SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", ".pytest_cache", ".cache", ".mypy_cache", ".ruff_cache", "node_modules", "dist", "build"}
 SKIP_SUFFIX_DIRS = (".egg-info",)

@@ -1,9 +1,9 @@
 {
   "kind": "extension-pack",
   "profile": "default",
-  "version": "default@1",
-  "extends": "core@2",
-  "description": "The embedded DEFAULT extension pack -- a generic, workspace-agnostic vocabulary that instantiates `frontmatter-core.schema.json` (core@2) with a minimal, broadly-applicable tagging scheme: the six required fields + their fix-tier authorship, description caps by file_class, the `type`/`status`/`topic` namespace vocabulary, the file_class classification globs, and a small generated/exempt taxonomy. Carries NO report vocabulary and NO conditional rule-sets -- the report namespaces (`source`/`period`/`audience`/`cadence`) and the `type:report` rule-set live only in the separate, opt-in `reports@1` pack. A repo layers this pack (optionally with `reports@1` and its own domain-specific pack) via its `navigator.toml`, or replaces it outright with its own vocabulary.",
+  "version": "default@1.0.0",
+  "extends": "core@2.0.0",
+  "description": "The embedded DEFAULT extension pack -- a generic, workspace-agnostic vocabulary that instantiates `frontmatter-core.schema.json` (core@2.0.0) with a minimal, broadly-applicable tagging scheme: the six required fields + their fix-tier authorship, description caps by file_class, the `type`/`status`/`topic` namespace vocabulary, the file_class classification globs, and a small generated/exempt taxonomy. Carries NO report vocabulary and NO conditional rule-sets -- the report namespaces (`source`/`period`/`audience`/`cadence`) and the `type:report` rule-set live only in the separate, opt-in `reports@1.0.0` pack. A repo layers this pack (optionally with `reports@1.0.0` and its own domain-specific pack) via its `navigator.toml`, or replaces it outright with its own vocabulary.",
   "required_fields": [
     { "field": "name", "authorship": "human_authored", "source": "A semantic title -- not mechanically inferable." },
     { "field": "description", "authorship": "human_authored", "source": "Routing prose, capped by file_class (see description_caps)." },

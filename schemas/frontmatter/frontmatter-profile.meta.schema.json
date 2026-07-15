@@ -1,14 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://datadoghq.com/ai-shared-lib-public/schemas/frontmatter/frontmatter-profile.meta.schema.json",
+  "$id": "https://github.com/johnrichter/claude-shared-tooling/schemas/frontmatter/frontmatter-profile.meta.schema.json",
   "title": "Frontmatter validation profile — meta-schema",
-  "description": "Meta-schema for the frontmatter validation profile family. A conforming document is EITHER a core-profile (mechanisms, e.g. frontmatter-core.schema.json, `core@2`) OR an extension-pack (concrete vocab, e.g. frontmatter-default.pack.json), discriminated by `kind`. Validate each profile/pack file against this meta-schema to prove structural well-formedness. Behavior-modifying conditional rules are a GENERAL `{match, apply}` rule-set construct (`rule_sets`): a criterion selects files, extra `apply` rules bind only to the matching (or, for `forbidden_unless_matched`, the non-matching) files. The report axis is one instance of this construct (a rule-set matching `type:report`) — there is no report-named special case in this meta-schema or in any interpreter of it. JSON Schema 2020-12; validate with any 2020-12 validator, e.g. `python -m jsonschema -i <file> frontmatter-profile.meta.schema.json`.",
+  "version": "1.0.0",
+  "description": "Meta-schema for the frontmatter validation profile family. A conforming document is EITHER a core-profile (mechanisms, e.g. frontmatter-core.schema.json, `core@2.0.0`) OR an extension-pack (concrete vocab, e.g. frontmatter-default.pack.json), discriminated by `kind`. Validate each profile/pack file against this meta-schema to prove structural well-formedness. Behavior-modifying conditional rules are a GENERAL `{match, apply}` rule-set construct (`rule_sets`): a criterion selects files, extra `apply` rules bind only to the matching (or, for `forbidden_unless_matched`, the non-matching) files. The report axis is one instance of this construct (a rule-set matching `type:report`) — there is no report-named special case in this meta-schema or in any interpreter of it. JSON Schema 2020-12; validate with any 2020-12 validator, e.g. `python -m jsonschema -i <file> frontmatter-profile.meta.schema.json`. This meta-schema's own `version` (above) is a plain semver string, distinct from the `name@MAJOR.MINOR.PATCH` profile/pack identities it validates.",
   "type": "object",
   "required": ["kind", "profile", "version", "description"],
   "properties": {
     "kind": { "type": "string", "enum": ["core-profile", "extension-pack"] },
     "profile": { "type": "string", "minLength": 1 },
-    "version": { "type": "string", "pattern": "^[a-z0-9-]+@[0-9]+$" },
+    "version": { "type": "string", "pattern": "^[a-z0-9-]+@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" },
     "description": { "type": "string", "minLength": 1 }
   },
   "oneOf": [
@@ -110,7 +111,7 @@
       "required": ["kind", "extends", "required_fields", "description_caps", "file_class", "namespaces", "exempt"],
       "properties": {
         "kind": { "const": "extension-pack" },
-        "extends": { "type": "string", "pattern": "^[a-z0-9-]+@[0-9]+$" },
+        "extends": { "type": "string", "pattern": "^[a-z0-9-]+@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" },
         "removes": {
           "type": "array",
           "items": {

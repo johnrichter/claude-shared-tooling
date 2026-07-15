@@ -10,11 +10,9 @@
 #
 
 #
-# Repo-local — extensionless prebuilt binaries under .bin/, matched by name
+# Repo-local — extensionless prebuilt binaries under go/.bin/, matched by name
 # glob since they carry no extension for the class rules below to catch.
 #
-# Knowledge-agent `ka` binaries (one per OS/arch)
-.bin/ka-* filter=lfs diff=lfs merge=lfs -text
 # build-helpers prebuilt binaries (one per OS/arch)
 go/.bin/* filter=lfs diff=lfs merge=lfs -text
 

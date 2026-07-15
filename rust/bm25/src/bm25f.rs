@@ -3,8 +3,8 @@
 //! Unlike [`crate::okapi::OkapiIndex`] (one bag of tokens per document),
 //! BM25F treats a document as a fixed set of NAMED fields (e.g. `name`,
 //! `description`, `body`), each with its own weight and length-normalization
-//! strength `b`. This is NEW work relative to ka's seed — ka's
-//! `retrieve::bm25` is flat single-field and has no fielded concept at all.
+//! strength `b`. Okapi's flat model (see [`crate::okapi::OkapiIndex`]) has no
+//! fielded concept at all — this is a separate scorer, not a variant of it.
 //!
 //! # Formula
 //! For query term `t` and document `d`, per configured field `f`:
@@ -26,7 +26,7 @@
 //! `ln(1 + (N - df + 0.5) / (df + 0.5))`, `df` = number of documents
 //! containing `t` in ANY configured field. Always `>= 0.0`.
 //!
-//! # Determinism (the named risk for this task)
+//! # Determinism
 //! Two sums are float-associativity-sensitive, and both are pinned to a
 //! FIXED, non-`HashMap` order:
 //! - **Query terms**, deduped into a `Vec` in left-to-right tokenize order
@@ -47,20 +47,17 @@
 //! the same total order `okapi` uses: score descending
 //! (`f64::total_cmp`), then `id` ascending as the tie-break.
 //!
-//! # M1.P2.T3 (landed)
-//! [`BM25FIndex::build`] now takes a [`Tokenizer`] and stores it -- same
+//! [`BM25FIndex::build`] takes a [`Tokenizer`] and stores it -- same
 //! build/search-agreement guarantee as [`crate::okapi::OkapiIndex`]:
 //! [`BM25FIndex::search`] always reuses the exact tokenizer `build` was
-//! given, structurally, not by caller discipline. `ScoredDocument` moved to
-//! [`crate::result`] in this same task (was `crate::okapi::ScoredDocument`).
+//! given, structurally, not by caller discipline. `ScoredDocument` lives in
+//! [`crate::result`].
 //!
-//! # M1.P3.T1 (landed)
-//! [`BM25FConfig::with_field`]'s old contract PANICKED on an out-of-domain
-//! `weight`/`b`. Replaced with the [`Weight`]/[`FieldB`] clamping newtypes:
-//! construction is now infallible (never panics, never a `Result`) — an
-//! invalid raw `f64` is normalized into a valid value before it can ever
-//! reach [`FieldWeight`] or the scorer, rather than being rejected at the
-//! call site. See each newtype's doc for its exact clamp mapping.
+//! [`BM25FConfig::with_field`] construction is infallible (never panics,
+//! never a `Result`): an invalid raw `f64` `weight`/`b` is normalized into
+//! a valid value via the [`Weight`]/[`FieldB`] clamping newtypes before it
+//! can ever reach [`FieldWeight`] or the scorer, rather than being rejected
+//! at the call site. See each newtype's doc for its exact clamp mapping.
 
 use std::collections::{HashMap, HashSet};
 
@@ -631,19 +628,19 @@ mod tests {
                 match id {
                     "doc_a" => Document {
                         id: "doc_a",
-                        fields: vec![("title", "dd_trace"), ("body", "span")],
+                        fields: vec![("title", "foo_bar"), ("body", "span")],
                     },
                     "doc_b" => Document {
                         id: "doc_b",
-                        fields: vec![("title", "dd_trace"), ("body", "span")],
+                        fields: vec![("title", "foo_bar"), ("body", "span")],
                     },
                     "doc_c" => Document {
                         id: "doc_c",
-                        fields: vec![("title", "dd_trace"), ("body", "span")],
+                        fields: vec![("title", "foo_bar"), ("body", "span")],
                     },
                     "doc_d" => Document {
                         id: "doc_d",
-                        fields: vec![("title", "dd_trace"), ("body", "context")],
+                        fields: vec![("title", "foo_bar"), ("body", "context")],
                     },
                     _ => unreachable!(),
                 }
@@ -659,9 +656,9 @@ mod tests {
         let reversed = make(["doc_d", "doc_c", "doc_b", "doc_a"]);
         let shuffled = make(["doc_b", "doc_d", "doc_a", "doc_c"]);
 
-        let forward_results = forward.search("dd_trace span", 10);
-        let reversed_results = reversed.search("dd_trace span", 10);
-        let shuffled_results = shuffled.search("dd_trace span", 10);
+        let forward_results = forward.search("foo_bar span", 10);
+        let reversed_results = reversed.search("foo_bar span", 10);
+        let shuffled_results = shuffled.search("foo_bar span", 10);
 
         assert_eq!(forward_results, reversed_results);
         assert_eq!(forward_results, shuffled_results);
@@ -686,17 +683,17 @@ mod tests {
             [
                 Document {
                     id: "z",
-                    fields: vec![("body", "dd_trace span")],
+                    fields: vec![("body", "foo_bar span")],
                 },
                 Document {
                     id: "a",
-                    fields: vec![("body", "dd_trace span")],
+                    fields: vec![("body", "foo_bar span")],
                 },
             ],
         );
 
-        let first_run = index.search("dd_trace", 10);
-        let second_run = index.search("dd_trace", 10);
+        let first_run = index.search("foo_bar", 10);
+        let second_run = index.search("foo_bar", 10);
         assert_eq!(first_run, second_run);
         assert_eq!(
             first_run.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
@@ -718,7 +715,7 @@ mod tests {
         let empty_index =
             BM25FIndex::build(&config, Tokenizer::WholeIdentifier, std::iter::empty());
         assert!(empty_index.is_empty());
-        assert_eq!(empty_index.search("dd_trace", 10), Vec::new());
+        assert_eq!(empty_index.search("foo_bar", 10), Vec::new());
 
         // Empty field text, and a field entirely absent from a document.
         let index = BM25FIndex::build(
@@ -727,15 +724,15 @@ mod tests {
             [
                 Document {
                     id: "empty_title",
-                    fields: vec![("title", ""), ("body", "dd_trace")],
+                    fields: vec![("title", ""), ("body", "foo_bar")],
                 },
                 Document {
                     id: "missing_title",
-                    fields: vec![("body", "dd_trace")],
+                    fields: vec![("body", "foo_bar")],
                 },
             ],
         );
-        let results = index.search("dd_trace", 10);
+        let results = index.search("foo_bar", 10);
         assert_eq!(results.len(), 2);
         for doc in &results {
             assert!(doc.score.is_finite());
@@ -748,10 +745,10 @@ mod tests {
             Tokenizer::WholeIdentifier,
             [Document {
                 id: "only",
-                fields: vec![("title", "dd_trace"), ("body", "span")],
+                fields: vec![("title", "foo_bar"), ("body", "span")],
             }],
         );
-        let single_results = single.search("dd_trace", 10);
+        let single_results = single.search("foo_bar", 10);
         assert_eq!(single_results.len(), 1);
         assert!(single_results[0].score.is_finite());
 
@@ -906,10 +903,10 @@ mod tests {
     /// def tokenize(s): return re.findall(r"[a-z0-9_]+", s.lower())
     /// config = [("title", 3.0, 0.75), ("tags", 2.0, 0.75), ("body", 1.0, 0.75)]
     /// docs = [
-    ///     ("alpha", [("title","dd_trace parser"), ("tags","rust config"),
+    ///     ("alpha", [("title","foo_bar parser"), ("tags","rust config"),
     ///                ("body","span init handler")]),
-    ///     ("beta",  [("title","span handler"), ("tags","dd_trace"),
-    ///                ("body","context retry retry dd_trace")]),
+    ///     ("beta",  [("title","span handler"), ("tags","foo_bar"),
+    ///                ("body","context retry retry foo_bar")]),
     ///     ("gamma", [("title","handler"), ("tags","context"),
     ///                ("body","span context handler")]),
     /// ]
@@ -950,7 +947,7 @@ mod tests {
     ///         s += i * tf_hat/(K1 + tf_hat)
     ///     return s
     /// for row, doc_id in enumerate(doc_ids):
-    ///     print(doc_id, repr(score(row, ["dd_trace", "handler"])))
+    ///     print(doc_id, repr(score(row, ["foo_bar", "handler"])))
     /// ```
     /// Output (frozen, hardcoded below):
     ///   alpha 0.35434438180545286
@@ -971,7 +968,7 @@ mod tests {
                 Document {
                     id: "alpha",
                     fields: vec![
-                        ("title", "dd_trace parser"),
+                        ("title", "foo_bar parser"),
                         ("tags", "rust config"),
                         ("body", "span init handler"),
                     ],
@@ -980,8 +977,8 @@ mod tests {
                     id: "beta",
                     fields: vec![
                         ("title", "span handler"),
-                        ("tags", "dd_trace"),
-                        ("body", "context retry retry dd_trace"),
+                        ("tags", "foo_bar"),
+                        ("body", "context retry retry foo_bar"),
                     ],
                 },
                 Document {
@@ -995,7 +992,7 @@ mod tests {
             ],
         );
 
-        let results = index.search("dd_trace handler", 10);
+        let results = index.search("foo_bar handler", 10);
 
         let expected: &[(&str, f64)] = &[
             ("beta", 0.408_854_951_664_016_6),

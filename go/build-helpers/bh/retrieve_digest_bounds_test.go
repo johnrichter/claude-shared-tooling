@@ -97,9 +97,8 @@ func TestActiveBatchL3BytesIndependentOfPlanSize(t *testing.T) {
 	wholeGrowthRatio := float64(largeWhole) / float64(smallWhole)
 
 	// L1 outline (fetched once at orientation, not per turn) DOES grow with total entity count —
-	// that is expected and out of this task's scope: capping it is M8's archival work (SC11; T0
-	// spike section 5). Logged for honesty, asserted nowhere — it is not part of the per-turn
-	// active-batch payload this task bounds.
+	// that is expected and out of scope here: capping it is the archive op's job. Logged for
+	// honesty, asserted nowhere — it is not part of the per-turn active-batch payload bounded above.
 	smallOutline, err := RetrievePlan(small, RetrieveInput{Level: LevelOutline})
 	if err != nil {
 		t.Fatal(err)

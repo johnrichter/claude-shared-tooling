@@ -32,7 +32,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ai_shared_lib_public import resign_commits
+from claude_tooling import resign_commits
 
 
 def _run(args, cwd, *, env=None, check=True, inp=None):

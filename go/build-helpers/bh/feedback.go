@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// ---- feedback.json (canonical register) / feedback.md (rendered mirror) — SC13 ----
+// ---- feedback.json (canonical register) / feedback.md (rendered mirror) ----
 //
 // A per-project feedback
 // register, populated by a session-finish wrap-up step, queried by the magistrate for
@@ -20,8 +20,8 @@ import (
 const FeedbackSchema = "feedback-register/v1"
 
 // FeedbackEntry is one register row. ID and Criticality are always derived by AddFeedback, never
-// caller-supplied — they are output-only fields on this type. Title is the short human name SC15
-// requires alongside ID (every readout prints "<id> — <title>").
+// caller-supplied — they are output-only fields on this type. Title is the short human name
+// required alongside ID (every readout prints "<id> — <title>").
 type FeedbackEntry struct {
 	ID               string `json:"id"`
 	Title            string `json:"title"`
@@ -36,7 +36,7 @@ type FeedbackEntry struct {
 }
 
 // FeedbackRegister is the canonical feedback.json document: an append-only, project-scoped list
-// of FeedbackEntry. Entries are never reordered or removed by `add` — M13.P2.T2's threshold gate
+// of FeedbackEntry. Entries are never reordered or removed by `add` — the threshold gate
 // reads this list, ranks it, and routes each entry exactly once.
 type FeedbackRegister struct {
 	Schema  string          `json:"schema"`
@@ -60,7 +60,7 @@ type FeedbackInput struct {
 // ValidScore reports whether a 1-5 impact/urgency score is in range.
 func ValidScore(v int) bool { return v >= 1 && v <= 5 }
 
-// Criticality derives the single ranking score M13.P2.T2's threshold gate acts on. Documented
+// Criticality derives the single ranking score the threshold gate acts on. Documented
 // rule: criticality = impact * urgency (risk-matrix convention — a fix must score high on BOTH
 // axes to rank as truly critical; a bounded additive rule would let a lopsided high/low pair tie
 // a balanced medium/medium pair, losing exactly the signal the gate needs). Range: 1-25.
@@ -104,7 +104,7 @@ func AddFeedback(reg FeedbackRegister, in FeedbackInput, at string) (FeedbackReg
 	return out, nil
 }
 
-// FeedbackFilter is the composable predicate set `feedback list` (M13.P1.T2) applies. Every
+// FeedbackFilter is the composable predicate set `feedback list` applies. Every
 // non-zero field narrows the result; all supplied fields AND together — the zero value (no
 // SourceTaskID, MinImpact/MinUrgency 0) matches every entry, giving list-all-ranked for free.
 type FeedbackFilter struct {
@@ -130,7 +130,7 @@ func (f FeedbackFilter) matches(e FeedbackEntry) bool {
 }
 
 // ListFeedback returns reg's entries matching f (composed AND), ranked by criticality descending
-// — the order M13.P2.T2's threshold gate and any operator readout (SC15: "<id> — <title>") rely
+// — the order the threshold gate and any operator readout ("<id> — <title>") rely
 // on. Ties break by id ascending: ids are monotonic-by-add-order (FB<n>), so this also recovers
 // append order among equal-criticality entries, deterministically, regardless of Entries' slice
 // order. Never mutates reg.
@@ -189,7 +189,7 @@ func RenderFeedback(reg FeedbackRegister) string {
 	return b.String()
 }
 
-// ---- criticality-threshold gate (M13.P2.T2): magistrate-consumes-feedback logic ----
+// ---- criticality-threshold gate: magistrate-consumes-feedback logic ----
 //
 // The gate partitions the ranked register into two buckets against a configurable inclusive
 // criticality threshold (ClassifyFeedbackCriticality, classify.go): amend-now (>= threshold) is
@@ -202,8 +202,7 @@ func RenderFeedback(reg FeedbackRegister) string {
 
 // Standing feedback-review milestone identity. M999 is a sentinel id, deliberately far above any
 // project's sequential milestone numbering so the appended milestone never collides with a real
-// one. This is the source of truth the docs stub (M13.P2.T4) is kept consistent with; every
-// sub-threshold entry lands here as a task rather than being lost.
+// one. Every sub-threshold entry lands here as a task rather than being lost.
 const (
 	FeedbackReviewMilestoneID   = "M999"
 	FeedbackReviewMilestoneName = "Feedback review"

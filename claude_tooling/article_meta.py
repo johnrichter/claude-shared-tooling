@@ -34,7 +34,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 FETCH_TIMEOUT = 15  # seconds
-USER_AGENT = "jr-shared-article-meta/1.0"
+USER_AGENT = "claude-tooling-article-meta/1.0"
 
 # meta tags whose content is a candidate for each field, in priority order.
 _TITLE_META = ("og:title", "twitter:title")

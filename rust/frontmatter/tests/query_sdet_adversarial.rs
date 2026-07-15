@@ -1,6 +1,6 @@
-//! SDET verification for M2.P4.T2 (`FacetSource` adapter + Exists refinement).
-//! Targets the mandate's specific adversarial compositions, not just the
-//! implementer's own unit tests: double-negative `NOT facet:*`, AND/OR over
+//! Adversarial verification for the `FacetSource` adapter + Exists
+//! refinement, beyond the implementer's own unit tests: double-negative
+//! `NOT facet:*`, AND/OR over
 //! a mixed present/absent facet pair, multibyte + wildcard bareword text,
 //! glob-backtrack blowup resistance, and cross-call determinism.
 //! Public-API-only (`frontmatter::{parse, matches, Profile}` and friends) --
@@ -18,7 +18,7 @@ const SYNTHETIC_PACK_JSON: &str = r#"{
   "kind": "extension-pack",
   "profile": "synthetic-adversarial-test",
   "version": "synthetic-adversarial-test@1",
-  "extends": "core@2",
+  "extends": "core@2.0.0",
   "description": "Self-authored test fixture pack for query/validate adversarial coverage.",
   "required_fields": [
     { "field": "name", "authorship": "human_authored", "source": "test fixture" },
@@ -313,7 +313,7 @@ fn report_file_with_period_range_and_type_report_matches_end_to_end() {
 #[test]
 fn inverted_period_value_fails_schema_validation_and_never_matches_a_query() {
     let profile = profile();
-    let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-06-30/2026-04-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+    let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - source:slack\n  - period:2026-06-30/2026-04-01\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
     let parsed = frontmatter::parse(input).unwrap();
     let entry = frontmatter::validate(&parsed, "some/report.md", &profile);
     assert!(
@@ -340,7 +340,7 @@ fn inverted_period_value_fails_schema_validation_and_never_matches_a_query() {
 #[test]
 fn legacy_dotdot_period_value_is_rejected_by_the_pack_regex() {
     let profile = profile();
-    let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:2026-04-01..2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+    let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - source:slack\n  - period:2026-04-01..2026-06-30\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
     let parsed = frontmatter::parse(input).unwrap();
     let entry = frontmatter::validate(&parsed, "some/report.md", &profile);
     assert!(
@@ -357,7 +357,7 @@ fn legacy_dotdot_period_value_is_rejected_by_the_pack_regex() {
 fn one_side_malformed_period_value_is_rejected_by_the_pack_regex() {
     let profile = profile();
     for bad in ["2026-04-01/bad", "2026-04-01/2026-06-30/2026-07-01"] {
-        let input = format!("---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:t\n  - source:slack\n  - period:{bad}\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n");
+        let input = format!("---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:report\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - source:slack\n  - period:{bad}\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n");
         let parsed = frontmatter::parse(&input).unwrap();
         let entry = frontmatter::validate(&parsed, "some/report.md", &profile);
         assert!(

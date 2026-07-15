@@ -1,6 +1,6 @@
 package main
 
-// Adoption parity gate (SC-PARITY): proves this promoted, canonical build-helpers is behaviorally
+// Adoption parity gate: proves this promoted, canonical build-helpers is behaviorally
 // identical to the genericized source it was adopted from, before anything is based on it. The
 // verdict IS `go test`'s pass/fail — a failure halts the adoption for operator review rather than
 // letting undetected drift ride into everything built on top of this module.
@@ -8,7 +8,7 @@ package main
 // Three independent checks:
 //   1. Golden fixtures (bh/testdata/**) are byte-identical to the source's.
 //   2. Every committed ../.bin/build-helpers-<goos>-<goarch> hash equals a fresh `go build` from
-//      HEAD (SC-GOTOOL) — the committed binary is exactly what the current sources + toolchain
+//      HEAD — the committed binary is exactly what the current sources + toolchain
 //      produce, so the execed binary can never silently diverge from the reviewed source.
 //   3. The four-way model-ID enum set is identical across all four independent enumerators:
 //      plan-schema.json's model.enum, the Go Model consts, anthropic-specifications.json's
@@ -83,10 +83,10 @@ func TestParity_GoldenFixturesMatchSource(t *testing.T) {
 		case !inDst:
 			t.Errorf("golden fixture %q exists in the source but not in the promoted module — a golden was dropped on adoption", rel)
 		case !bytes.Equal(sb, db):
-			t.Errorf("golden fixture %q is not byte-identical to the source (%d vs %d bytes) — SC-PARITY broken", rel, len(sb), len(db))
+			t.Errorf("golden fixture %q is not byte-identical to the source (%d vs %d bytes)", rel, len(sb), len(db))
 		}
 	}
-	t.Logf("SC-PARITY goldens: compared %d fixture files under bh/testdata", len(rels))
+	t.Logf("parity goldens: compared %d fixture files under bh/testdata", len(rels))
 }
 
 func TestParity_CommittedBinariesMatchFreshBuild(t *testing.T) {
@@ -105,10 +105,10 @@ func TestParity_CommittedBinariesMatchFreshBuild(t *testing.T) {
 			continue
 		}
 		if committed != fresh {
-			t.Errorf("%s: committed hash %s != fresh build %s — SC-GOTOOL broken: the committed binary is stale versus HEAD sources (or the build toolchain drifted). Recompile and re-commit before adopting.", name, committed, fresh)
+			t.Errorf("%s: committed hash %s != fresh build %s — the committed binary is stale versus HEAD sources (or the build toolchain drifted). Recompile and re-commit before adopting.", name, committed, fresh)
 			continue
 		}
-		t.Logf("SC-GOTOOL %s: committed == fresh build (%s)", name, committed)
+		t.Logf("%s: committed == fresh build (%s)", name, committed)
 	}
 }
 

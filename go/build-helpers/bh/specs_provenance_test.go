@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// M13.P2.T4 verification: specs_as_of + build_helpers_sha are carried on Accounting, populated by
+// specs_as_of + build_helpers_sha are carried on Accounting, populated by
 // SetAccounting, and round-trip through execution.json's plain encoding/json marshal/unmarshal.
 
 func TestSpecsAsOf_ExtractsAsOfKey(t *testing.T) {

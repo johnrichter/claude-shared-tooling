@@ -202,9 +202,9 @@ func SelfCheck(model Model, effort Effort, effortDetected bool, band TierBand) S
 	return r
 }
 
-// ---- SCf: deterministic transcript resolution + session-id identity guard ----
+// ---- deterministic transcript resolution + session-id identity guard ----
 //
-// FB26: the old $TRANSCRIPT resolution picked the newest *.jsonl mtime in the cwd's shared
+// The old $TRANSCRIPT resolution picked the newest *.jsonl mtime in the cwd's shared
 // projects dir. Under two concurrent sessions in the same cwd, a longer-running session's
 // transcript can be newer than the CALLING session's own — mtime silently hands the wrong
 // session's transcript to accounting/self-check, poisoning cost data with no error anywhere.

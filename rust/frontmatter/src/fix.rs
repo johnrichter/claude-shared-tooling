@@ -9,13 +9,13 @@
 //! fix and the violation it clears are always schema-consistent with each
 //! other.
 //!
-//! # Purity (SC16)
+//! # Purity
 //! Nothing in this module touches a filesystem, a network, a model/LLM, or
 //! the wall clock. [`propose_fix`]/[`propose_skeleton`] take `now` as a
 //! caller-supplied `&str` (an ISO-8601 timestamp) rather than reading the
 //! system clock themselves -- the caller (a binary, a test) owns deciding
 //! what "now" means; this module only stamps the value it's given. See
-//! `sc16_purity` below for the guard that pins this.
+//! `purity_guard` below for the guard that pins this.
 //!
 //! # What Tier-1 can and cannot fix
 //! Tier-1 repairs STRUCTURE: dedupe, drop, trim, add a placeholder, stamp,
@@ -475,14 +475,14 @@ fn escape_double_quoted(text: &str) -> String {
         .replace('\t', "\\t")
 }
 
-/// SC16: the fixer path (this module) has no filesystem, wall-clock, or
+/// The fixer path (this module) has no filesystem, wall-clock, or
 /// model call. Guarded two ways: the type signatures above take `now` as a
 /// plain `&str` parameter (never reading a clock themselves), and this
 /// grep-style guard scans the module's own source (embedded at compile
 /// time, never read from disk at test run time) for the tokens a fs/clock
 /// dependency would have to spell.
 #[cfg(test)]
-mod sc16_purity {
+mod purity_guard {
     const SOURCE: &str = include_str!("fix.rs");
 
     #[test]
@@ -496,7 +496,7 @@ mod sc16_purity {
         for forbidden in ["std::fs", "std::time", "SystemTime", "Instant::now"] {
             assert!(
                 !production_code.contains(forbidden),
-                "fix.rs must stay pure (SC16): found forbidden token '{forbidden}'"
+                "fix.rs must stay pure: found forbidden token '{forbidden}'"
             );
         }
     }
@@ -822,10 +822,10 @@ mod tests {
 }
 
 // ---------------------------------------------------------------------------
-// SDET adversarial verification (M2.P4.T1 test-engineer pass) -- not part of
-// the fixer author's own suite; targets the mandate's explicitly flagged
-// edge cases so a future regression in any of them fails loudly here rather
-// than surfacing only downstream (navigator, a caller's re-validation).
+// Adversarial verification -- not part of the fixer author's own suite;
+// targets explicitly flagged edge cases so a future regression in any of
+// them fails loudly here rather than surfacing only downstream (navigator,
+// a caller's re-validation).
 // ---------------------------------------------------------------------------
 #[cfg(test)]
 mod sdet_adversarial {
@@ -1007,7 +1007,7 @@ mod sdet_adversarial {
     #[test]
     fn propose_skeleton_classifies_every_file_class_correctly() {
         let cases = [
-            ("the-work/deliverables/foo/report.md", "context"),
+            ("work/deliverables/foo/report.md", "context"),
             (".claude/skills/my-skill/SKILL.md", "skill"),
             ("nested/dir/SKILL.md", "skill"),
             (".claude/agents/reviewer.md", "agent"),
@@ -1032,7 +1032,7 @@ mod sdet_adversarial {
     /// twice (e.g. a retry) must never see field churn.
     #[test]
     fn double_fix_is_idempotent_given_the_same_now() {
-        let input = "---\nname: \"x\"\ntags:\n  - type:knowledge\n  - status:complete\n  - privacy:internal\n  - owner:datadog\n  - topic:tooling\n---\nbody\n";
+        let input = "---\nname: \"x\"\ntags:\n  - type:knowledge\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:tooling\n---\nbody\n";
         let parsed = parse::parse(input).unwrap();
         let first = propose_fix(&parsed, "some/doc.md", &profile(), NOW);
         let rendered_first = render(&first.fields);

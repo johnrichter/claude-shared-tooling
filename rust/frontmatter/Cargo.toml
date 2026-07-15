@@ -7,8 +7,7 @@ license = "MIT"
 publish = false
 
 [dependencies]
-# M2.P2.T1a (operator-approved: MIT OR Apache-2.0, pure-Rust, no CGO,
-# musl-fine): pure-Rust, strict YAML 1.2 DOM parser. Loaded via
+# MIT OR Apache-2.0, pure-Rust, musl-fine: strict YAML 1.2 DOM parser. Loaded via
 # `YamlLoader`/`Yaml`, which returns `Result` (never panics on malformed
 # input) and preserves mapping insertion order via `hashlink::LinkedHashMap`
 # -- both properties this crate's no-panic and determinism contracts need.
@@ -16,8 +15,7 @@ publish = false
 # `ParsedFrontmatter`/`FrontmatterValue` types own no yaml-rust2 type, so the
 # backend is swappable later without a breaking change to consumers.
 yaml-rust2 = "0.11.0"
-# M2.P2.T1b (operator-approved: MIT OR Apache-2.0, pure-Rust, no CGO,
-# musl-fine, ubiquitous/standard): deserializes the declarative frontmatter
+# MIT OR Apache-2.0, pure-Rust, musl-fine, ubiquitous/standard: deserializes the declarative frontmatter
 # schema (core profile + extension pack, both plain JSON) into `validate`'s
 # `Profile` type. `derive` generates the field-by-field `Deserialize` impls
 # so the schema's JSON shape and the Rust struct shape stay one definition
@@ -28,19 +26,19 @@ serde = { version = "1.0.228", features = ["derive"] }
 # named extension packs (default/reports) via `include_str!` +
 # `serde_json::from_str`, so the crate validates with zero filesystem reads.
 serde_json = "1.0.150"
-# M2.P2.T1b finalization (operator-approved, replacing a hand-rolled
-# restricted-subset matcher): compiles each rule-set's
+# Replaces a hand-rolled restricted-subset matcher:
+# compiles each rule-set's
 # `apply.value_formats[].regex` into a real `regex::Regex`, once, at
 # `Profile` construction (`profile::Profile::rule_set_value_patterns`) -- see
 # that module for why `[0-9]` (not `\d`) is used in the shipped pattern.
 regex = "1.13.0"
-# M2.P2.T1b finalization (operator-approved, replacing a hand-rolled
-# `fnmatch`-style matcher): compiles the pack's `file_class` rule globs and
+# Replaces a hand-rolled `fnmatch`-style matcher:
+# compiles the pack's `file_class` rule globs and
 # `exempt.path_globs` into `GlobSet`s, once, at `Profile` construction
 # (`profile::CompiledGlobs`) -- `literal_separator` left at its default
 # (`false`) so `*` crosses `/`, matching Python `fnmatch.fnmatch` parity.
 globset = "0.4.18"
-# Operator-approved (see facetquery's Cargo.toml for the full rationale):
+# See facetquery's Cargo.toml for the full rationale:
 # dual MIT/Apache-2.0, actively maintained, pure-Rust civil-calendar-date
 # type. `validate`'s `rule_set_value_format` phase uses it to calendar-check
 # a shape-valid `date_interval`-typed tag's two endpoints (real month/day,

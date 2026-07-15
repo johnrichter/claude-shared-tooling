@@ -431,7 +431,7 @@ func RetrieveExec(ex ExecState, in RetrieveInput) (any, error) {
 	}
 }
 
-// ---- archive.json (archival-design.md §3) ----
+// ---- archive.json ----
 //
 // archive.json stores, per archived task, the union of its plan-slice and exec-slice in one
 // ArchivedTask record (archive.go). So unlike execution.json's synthesized milestone/phase view,
@@ -573,7 +573,7 @@ func archiveField(a ArchiveDoc, id, field string) (FieldValue, error) {
 
 // RetrieveArchive projects ArchiveDoc a at the requested level — the archive.json counterpart to
 // RetrievePlan/RetrieveExec, same read-only/deterministic/non-eligibility-deciding contract. This
-// is the SC10 API's path to archived detail (archival-design.md §3): the caller names archive.json
+// is the retrieval API's path to archived detail: the caller names archive.json
 // explicitly; there is no transparent fall-through from a live-doc retrieve call.
 func RetrieveArchive(a ArchiveDoc, in RetrieveInput) (any, error) {
 	switch in.Level {

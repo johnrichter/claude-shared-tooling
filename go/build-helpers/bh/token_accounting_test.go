@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// Adversarial coverage for M13.P2.T3: per-task/per-run recording of all four token classes
+// Adversarial coverage for per-task/per-run recording of all four token classes
 // (input, cache_write, cache_read, output) — never output-only, and per-run totals always
 // recomputed from per-task rows, never hand-summed.
 

@@ -214,7 +214,7 @@ func TestFileSurfaceRoundTrip(t *testing.T) {
 	}
 }
 
-// Backward compat: a bare-string file_surface entry (the pre-M13.P3.T1 shape every existing
+// Backward compat: a bare-string file_surface entry (the legacy shape every existing
 // plan.json still uses) must decode to {Path:s, Required:false, Kind:""}, so the typed-surface
 // binary can still read old plans with no migration. A plan mixing string and object entries in
 // one array must also parse — encoding/json dispatches UnmarshalJSON per element.
@@ -259,21 +259,19 @@ func TestValidatePlanLegacyStringFileSurface(t *testing.T) {
 	}
 }
 
-// ---- M13.P3.T2 adversarial fixtures (SCa bidirectional re-assertion + post-merge site) ----
+// ---- bidirectional re-assertion adversarial fixtures ----
 //
-// Both fixtures below reference VerifyChangedSetSubsetOfSurface / VerifyMergedSurface, added by
-// this task (batch.go) — neither symbol exists on pre-change code, so each fixture fails to even
-// compile/run before this change and passes after, per this project's proof-of-fix convention
-// (sca-gate-semantics.md, "a fixture that passes both before and after proves nothing").
+// Both fixtures below reference VerifyChangedSetSubsetOfSurface / VerifyMergedSurface (batch.go),
+// exercising the reverse-direction and post-merge checks end to end.
 
 // Fixture 1 — off-surface write (reverse direction, sites 2/3). A task declares its surface as
-// "tests/*.go" only; the agent (per FB1) instead wrote its test into "src/foo_test.go" — present
+// "tests/*.go" only; the agent instead wrote its test into "src/foo_test.go" — present
 // on disk, so a forward-only check (VerifyFileSurface) never sees a problem. Only the reverse
 // direction (changed-set ⊆ surface) flags the off-surface path; a path the surface DOES cover is
 // never flagged alongside it.
 func TestAdv_OffSurfaceWriteFailsChangedSetCheck(t *testing.T) {
 	entries := []FileSurfaceEntry{{Path: "tests/*.go", Kind: FSGlob, Required: true}}
-	changed := []string{"tests/foo_test.go", "src/foo_test.go"} // FB1: test literally landed in src/, not tests/
+	changed := []string{"tests/foo_test.go", "src/foo_test.go"} // test literally landed in src/, not tests/
 	res := VerifyChangedSetSubsetOfSurface(changed, entries)
 	if res.OK {
 		t.Fatal("a changed path outside the declared surface must fail the reverse (changed-set ⊆ surface) check")
@@ -290,14 +288,14 @@ func TestAdv_OffSurfaceWriteFailsChangedSetCheck(t *testing.T) {
 // Fixture 2 — dropped-at-merge artifact (forward direction, site 3). Two tasks' branches are
 // octopus-merged; task B's required deliverable was present in ITS OWN pre-merge worktree (a
 // pre-commit-only check would have passed) but is absent from the merged tree (the octopus merge
-// silently dropped it, FB1's literal mechanism). Only the post-merge union re-assertion
+// silently dropped it. Only the post-merge union re-assertion
 // (VerifyMergedSurface, checked against the merged tree) catches it.
 func TestAdv_DroppedAtMergeArtifactFailsPostMergeReassertion(t *testing.T) {
 	taskA := []FileSurfaceEntry{{Path: "pkg/a.go", Required: true}}
 	taskB := []FileSurfaceEntry{{Path: "pkg/b.go", Required: true}}
 
 	// Each task's own pre-merge worktree has its own deliverable — the pre-commit site (site 2)
-	// passes for both, independently, exactly as FB1 describes.
+	// passes for both, independently.
 	preMergeA := fstest.MapFS{"pkg/a.go": {Data: []byte("package pkg\n")}}
 	preMergeB := fstest.MapFS{"pkg/b.go": {Data: []byte("package pkg\n")}}
 	if r := VerifyFileSurface(preMergeA, taskA); !r.OK {

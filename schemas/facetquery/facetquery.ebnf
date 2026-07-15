@@ -3,7 +3,7 @@
    language. Normative together with facetquery-language.spec.md (same
    directory) -- this file is the syntax, the spec is the prose companion
    (semantics, escaping table, type-gating, edge cases). Reference
-   implementation: ai-shared-lib-public/rust/facetquery (winnow parser); a
+   implementation: this repository's rust/facetquery (winnow parser); a
    conformance test in that crate asserts crate <-> this grammar agreement.
 
    Notation: ISO/IEC 14977 EBNF. "=" defines a production, ";" ends it,
