@@ -268,8 +268,13 @@ go/.bin/* filter=lfs diff=lfs merge=lfs -text
 *.mod filter=lfs diff=lfs merge=lfs -text
 # Go module manifest/checksum — plain text; the *.mod rule above targets the
 # binary tracker-music/3D-model overload, not Go's go.mod, so override it here.
-go.mod text -filter -diff -merge
-go.sum text -filter -diff -merge
+# Keep -filter to bypass that LFS rule, and re-enable diff/merge so git
+# produces line-level diffs and merges. The `*.mod` rule above sets
+# diff=lfs/merge=lfs; since gitattributes is last-match-wins per attribute,
+# `text -filter` alone would leave those lfs values in force for go.mod, so
+# diff/merge are set explicitly here to restore text behavior (FB6).
+go.mod text -filter diff merge
+go.sum text -filter diff merge
 
 #
 # Mobile & app packages — built application bundles/packages (binary).

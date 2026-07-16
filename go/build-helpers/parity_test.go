@@ -6,7 +6,12 @@ package main
 // letting undetected drift ride into everything built on top of this module.
 //
 // Three independent checks:
-//   1. Golden fixtures (bh/testdata/**) are byte-identical to the source's.
+//   1. Golden fixtures (bh/testdata/**) that are machine-consumed test input/output — e.g. the
+//      .jsonl accounting logs — are byte-identical to the source's. Prose/manifest fixtures named
+//      EXPECTED.md are human-readable rendered-output write-ups, not machine-consumed goldens; a
+//      public-scrub of this promoted module legitimately rewords them (contact info, links,
+//      internal references) without changing the underlying behavior, so they are excluded from
+//      the byte comparison and only checked for presence on both sides.
 //   2. Every committed ../.bin/build-helpers-<goos>-<goarch> hash equals a fresh `go build` from
 //      HEAD — the committed binary is exactly what the current sources + toolchain
 //      produce, so the execed binary can never silently diverge from the reviewed source.
@@ -74,6 +79,7 @@ func TestParity_GoldenFixturesMatchSource(t *testing.T) {
 	dst := collectFixtures(t, dstData)
 
 	rels := unionKeys(src, dst)
+	byteCompared := 0
 	for _, rel := range rels {
 		sb, inSrc := src[rel]
 		db, inDst := dst[rel]
@@ -82,11 +88,15 @@ func TestParity_GoldenFixturesMatchSource(t *testing.T) {
 			t.Errorf("golden fixture %q exists in the promoted module but not in the source — adopted goldens drifted", rel)
 		case !inDst:
 			t.Errorf("golden fixture %q exists in the source but not in the promoted module — a golden was dropped on adoption", rel)
+		case isProseFixture(rel):
+			// Presence-checked above; content is allowed to diverge (e.g. public-scrub reword).
 		case !bytes.Equal(sb, db):
 			t.Errorf("golden fixture %q is not byte-identical to the source (%d vs %d bytes)", rel, len(sb), len(db))
+		default:
+			byteCompared++
 		}
 	}
-	t.Logf("parity goldens: compared %d fixture files under bh/testdata", len(rels))
+	t.Logf("parity goldens: %d fixture files present, %d byte-compared under bh/testdata", len(rels), byteCompared)
 }
 
 func TestParity_CommittedBinariesMatchFreshBuild(t *testing.T) {
@@ -153,6 +163,15 @@ func TestParity_ModelIDFourWaySync(t *testing.T) {
 }
 
 // --- fixtures ---
+
+// isProseFixture reports whether a testdata-relative path is a human-readable prose/manifest
+// fixture rather than a machine-consumed golden. EXPECTED.md files are rendered-output write-ups
+// read by people reviewing a fixture directory, not parsed by the code under test, so they are
+// exempt from the byte-identical requirement (see the parity-gate doc comment above) while every
+// other fixture — the .jsonl inputs the tool actually reads — stays byte-compared.
+func isProseFixture(rel string) bool {
+	return filepath.Base(rel) == "EXPECTED.md"
+}
 
 // collectFixtures maps each regular file under root to its bytes, keyed by root-relative path.
 // .gitattributes is skipped: it is a repo-hosting artifact, not a golden, and is intentionally

@@ -13,7 +13,7 @@ github.com/bmatcuk/doublestar/v4 v4.10.0 h1:zU9WiOla1YA122oLM6i4EXvGW62DvKZVxIe6
 github.com/bmatcuk/doublestar/v4 v4.10.0/go.mod h1:xBQ8jztBU6kakFMg+8WGxn0c6z1fTSPVIjEY1Wr7jzc=
 ```
 
-**Application site:** `go/bh/surface.go` — the shared lib's file-surface verifier. It currently matches allow/deny path patterns with Go's `filepath.Match`/`fs.Glob`, neither of which supports `**` (globstar). Adopting doublestar here is what fixes the gap.
+**Application site:** `go/build-helpers/bh/surface.go` — the shared lib's file-surface verifier. It currently matches allow/deny path patterns with Go's `filepath.Match`/`fs.Glob`, neither of which supports `**` (globstar). Adopting doublestar here is what fixes the gap.
 
 ## Problem
 
@@ -68,5 +68,5 @@ Verified by compiling and running this against a `go.mod` requiring `github.com/
 
 ## Consuming this decision
 
-- The consuming change adopts `github.com/bmatcuk/doublestar/v4 v4.10.0` in `go/bh/surface.go`, adds the `require` line + `go.sum` entries above to `go/go.mod`/`go/go.sum`, and adds the `LICENSE-3rdparty.csv` row (plus the `THIRD-PARTY-LICENSES.md` entry if distributed).
+- The consuming change adopts `github.com/bmatcuk/doublestar/v4 v4.10.0` in `go/build-helpers/bh/surface.go`, adds the `require` line + `go.sum` entries above to `go/build-helpers/go.mod`/`go/build-helpers/go.sum`, and adds the `LICENSE-3rdparty.csv` row (plus the `THIRD-PARTY-LICENSES.md` entry if distributed).
 - No other capability spike (JSON-schema validation, diffing, semver, CLI parsing) is decided by this doc — each gets its own dependency-selection spike.
