@@ -51,6 +51,21 @@ jobs:
         run: python3 scripts/check_secrets.py --root .
       - name: No-raw-binary scan (tracked tree, authoritative)
         run: python3 scripts/check_no_raw_binary.py --tracked --root .
+      # SC-RESOLVE guardrail: a go.mod/go.sum that resolves to a binary/LFS
+      # git attribute (instead of text) breaks external `go get` and diff/merge
+      # for every consumer — this class only surfaced at the release barrier,
+      # so every go.mod in the tree is checked here on every push/PR.
+      - name: go.mod is a text git attribute (SC-RESOLVE)
+        run: |
+          fail=0
+          while IFS= read -r -d '' modfile; do
+            attr="$(git check-attr text -- "$modfile" | awk -F': ' '{print $3}')"
+            if [ "$attr" != "set" ]; then
+              echo "::error file=$modfile::resolves to text=$attr (want: set) - go get/diff/merge will treat it as binary"
+              fail=1
+            fi
+          done < <(git ls-files -z -- '*go.mod')
+          exit "$fail"
 
   unit-tests:
     name: unit-tests
