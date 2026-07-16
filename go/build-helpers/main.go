@@ -647,7 +647,7 @@ func splitTasks(csv string) []string {
 
 func closeAll(handles []*os.File) {
 	for _, h := range handles {
-		h.Close()
+		_ = h.Close()
 	}
 }
 
@@ -880,7 +880,7 @@ func applySessionIDGuard(res *bh.SelfCheckResult, transcriptPath, sessionIDFlag,
 		die(2, "self-check: cannot open transcript %q for session id verification: %v\n", transcriptPath, err)
 	}
 	scan := bh.LatestTranscriptSessionID(f)
-	f.Close()
+	_ = f.Close()
 	switch {
 	case scan.Lines == 0:
 		die(2, "self-check: transcript %q is empty\n", transcriptPath)
@@ -993,7 +993,7 @@ func runResolveTranscript(rest []string) {
 func resolveSessionModel(transcriptPath string) (bh.Model, bool) {
 	if transcriptPath != "" {
 		if f, err := os.Open(transcriptPath); err == nil {
-			defer f.Close()
+			defer func() { _ = f.Close() }()
 			if m, ok := bh.LatestTranscriptModel(f); ok {
 				return m, true
 			}
@@ -1145,16 +1145,16 @@ func writeTextFile(path, content string) {
 	}
 	tmpPath := tmp.Name()
 	if _, err := tmp.WriteString(content); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
 		die(2, "cannot write %s: %v\n", path, err)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		die(2, "cannot write %s: %v\n", path, err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		die(2, "cannot finalize %s: %v\n", path, err)
 	}
 }
@@ -1281,16 +1281,16 @@ func writeJSONFile(path string, v any) {
 	}
 	tmpPath := tmp.Name()
 	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
 		die(2, "cannot write %s: %v\n", path, err)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		die(2, "cannot write %s: %v\n", path, err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		die(2, "cannot finalize %s: %v\n", path, err)
 	}
 }

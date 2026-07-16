@@ -91,7 +91,7 @@ func legacySubagentGlobPaths(t *testing.T, mainPath string) []string {
 
 func closeHandles(handles []*os.File) {
 	for _, h := range handles {
-		h.Close()
+		_ = h.Close()
 	}
 }
 
@@ -122,7 +122,7 @@ func assertClose(t *testing.T, got, want float64, label string) {
 func TestAccounting_OrchestratorPerModel(t *testing.T) {
 	rates := loadTestRates(t)
 	s, h := openSource(t, "orch", filepath.Join(accountingDir, "orchestrator.jsonl"), 0)
-	defer h.Close()
+	defer func() { _ = h.Close() }()
 	acct, err := Account(nil, []TranscriptSource{s}, rates, "t")
 	if err != nil {
 		t.Fatalf("Account: %v", err)
@@ -275,7 +275,7 @@ func TestAccounting_WatermarkIdempotency(t *testing.T) {
 	// Pass 1: fresh parse of the first-pass bytes.
 	s1, h1 := openSource(t, fileID, pass1, 0)
 	acct, err := Account(nil, []TranscriptSource{s1}, rates, "t")
-	h1.Close()
+	_ = h1.Close()
 	if err != nil {
 		t.Fatalf("pass1 Account: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestAccounting_WatermarkIdempotency(t *testing.T) {
 	// Pass 2 incremental: resume from the recorded watermark, reading only the appended bytes.
 	s2, h2 := openSource(t, fileID, pass2, acct.Watermarks[fileID])
 	acct, err = Account(acct, []TranscriptSource{s2}, rates, "t")
-	h2.Close()
+	_ = h2.Close()
 	if err != nil {
 		t.Fatalf("pass2 incremental Account: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestAccounting_WatermarkIdempotency(t *testing.T) {
 	// Fresh full parse of pass2, no watermark.
 	fs, fh := openSource(t, fileID, pass2, 0)
 	fresh, err := Account(nil, []TranscriptSource{fs}, rates, "t")
-	fh.Close()
+	_ = fh.Close()
 	if err != nil {
 		t.Fatalf("fresh pass2 Account: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestAccounting_WatermarkIdempotency(t *testing.T) {
 	s3, h3 := openSource(t, fileID, pass2, acct.Watermarks[fileID])
 	before := acct.CostUSD
 	acct, err = Account(acct, []TranscriptSource{s3}, rates, "t")
-	h3.Close()
+	_ = h3.Close()
 	if err != nil {
 		t.Fatalf("re-parse Account: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestAccounting_RotationResetDoesNotDoubleCount(t *testing.T) {
 	// Prior state: file was fully consumed as pass2 (sonnet-5 + opus-4-8), watermark = 3924.
 	s1, h1 := openSource(t, fileID, pass2, 0)
 	prior, err := Account(nil, []TranscriptSource{s1}, rates, "t")
-	h1.Close()
+	_ = h1.Close()
 	if err != nil {
 		t.Fatalf("prior full-parse Account: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestAccounting_RotationResetDoesNotDoubleCount(t *testing.T) {
 	}
 	s2, h2 := openSource(t, fileID, pass1, 0)
 	got, err := Account(prior, []TranscriptSource{s2}, rates, "t")
-	h2.Close()
+	_ = h2.Close()
 	if err != nil {
 		t.Fatalf("post-rotation Account: %v", err)
 	}
@@ -489,7 +489,7 @@ func TestAccounting_LedgerRoundTripsAcrossProcessBoundary(t *testing.T) {
 	// Build state in one "process": fresh parse of pass1.
 	s1, h1 := openSource(t, fileID, pass1, 0)
 	acct, err := Account(nil, []TranscriptSource{s1}, rates, "t")
-	h1.Close()
+	_ = h1.Close()
 	if err != nil {
 		t.Fatalf("pass1 Account: %v", err)
 	}
@@ -515,7 +515,7 @@ func TestAccounting_LedgerRoundTripsAcrossProcessBoundary(t *testing.T) {
 	// Second "process": incremental resume on top of the round-tripped state.
 	s2, h2 := openSource(t, fileID, pass2, resumed.Watermarks[fileID])
 	got, err := Account(&resumed, []TranscriptSource{s2}, rates, "t")
-	h2.Close()
+	_ = h2.Close()
 	if err != nil {
 		t.Fatalf("post-resume incremental Account: %v", err)
 	}
@@ -524,7 +524,7 @@ func TestAccounting_LedgerRoundTripsAcrossProcessBoundary(t *testing.T) {
 	// doubled (ledger duplicated -> pass1 counted twice).
 	fs, fh := openSource(t, fileID, pass2, 0)
 	fresh, err := Account(nil, []TranscriptSource{fs}, rates, "t")
-	fh.Close()
+	_ = fh.Close()
 	if err != nil {
 		t.Fatalf("fresh pass2 Account: %v", err)
 	}
@@ -571,7 +571,7 @@ func TestAccounting_LegacyLedgerMigrationPreservesAggregate(t *testing.T) {
 	newFile := filepath.Join(accountingDir, "subagents", "agent-agenta2.jsonl") // opus-4-8, 1 turn
 	s, h := openSource(t, newFile, newFile, 0)
 	got, err := Account(&legacy, []TranscriptSource{s}, rates, "t")
-	h.Close()
+	_ = h.Close()
 	if err != nil {
 		t.Fatalf("post-migration Account: %v", err)
 	}

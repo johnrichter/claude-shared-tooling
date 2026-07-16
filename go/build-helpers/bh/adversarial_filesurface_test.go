@@ -26,7 +26,9 @@ func TestFileSurfaceFieldExists(t *testing.T) {
 		t.Fatal(err)
 	}
 	var m map[string]any
-	json.Unmarshal(b, &m)
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
 	v, ok := m["file_surface"]
 	if !ok {
 		t.Fatal("file_surface not present in JSON output — json tag incorrect or field absent")
