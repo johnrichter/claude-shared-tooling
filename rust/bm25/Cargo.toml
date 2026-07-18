@@ -1,0 +1,30 @@
+[package]
+name = "bm25"
+version = "0.1.0"
+edition = "2021"
+description = "General-purpose, call-time-customizable BM25 ranking library — deterministic, no ML."
+license = "MIT"
+publish = false
+
+[dependencies]
+# Pure-Rust deps only (no C dependency) so the crate stays musl-static-buildable.
+# `regex` (previously used only by the whole-identifier tokenizer) isn't
+# needed: making that tokenizer Unicode-aware and fold `_` in as content
+# alongside Unicode alphanumerics/combining marks needed the same
+# hand-rolled char scan the case-split tokenizer already used, so both
+# tokenizers now share one scan style and neither needs `regex`.
+#
+# This crate's only external dependency (MIT OR Apache-2.0, pure-Rust,
+# no C dependency, musl-fine, 0 advisories) --
+# `unicode-normalization` closes both Unicode limitations `tokenize.rs`
+# documents as accepted gaps: NFC-normalizing input at each tokenizer's
+# entry makes NFC/NFD forms of the same visual string converge, and its
+# `char::is_combining_mark` (full Unicode `General_Category=Mark`) replaces
+# a hand-rolled combining-mark table. Default features only (no `std`-
+# feature opt-out, no unstable features).
+unicode-normalization = "0.1.25"
+
+[dev-dependencies]
+
+[lints]
+workspace = true

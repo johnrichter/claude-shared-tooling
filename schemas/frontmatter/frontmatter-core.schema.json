@@ -1,0 +1,146 @@
+{
+  "kind": "core-profile",
+  "profile": "core",
+  "version": "core@2.0.0",
+  "description": "Workspace frontmatter validation CORE PROFILE (mechanisms only, workspace-agnostic). Declares HOW frontmatter is validated as data — the cardinality vocabulary, the ordered tag-rule cascade with its exact violation codes/fields/message templates, the general conditional `rule_sets` mechanism, and the required-field / description-cap / file-class / exempt mechanisms — WITHOUT any concrete namespace names, caps, or globs (those live in an extension pack that sets `extends: core@2.0.0`). There is no report-named branch anywhere: report-shaped rules are expressed as one instance of the general `rule_sets` `{match, apply}` mechanism. INPUTS: an extension pack (concrete vocab) + one file's parsed frontmatter (`{fields, tags[], path}`). OUTPUT: an ordered list of violations `{code, field, message}` plus a derived `file_class`, byte-identical for identical input. INVARIANTS: the `violation_cascade` array is order-significant and any interpreter MUST iterate it in array order so emitted code+field sequences are stable; every namespace/required-field/rule-set iteration follows the DECLARED array order; no LLM participates in validation.",
+  "spec": {
+    "instance_shape": {
+      "fields": "map of top-level frontmatter keys to values; a field required by the pack counts as present whether declared top-level or nested under the `workspace:` wrapper (Skills/Agents/Rules), per CLAUDE.md's frontmatter table",
+      "tags": "list of raw tag strings; each meaningful tag is `namespace:value`; non-string or colon-less entries are dropped before any namespace rule runs",
+      "path": "repo-root-relative POSIX path of the file (drives file_class classification and exempt matching)"
+    }
+  },
+  "cardinality_types": {
+    "singleton": {
+      "min": 1,
+      "max": 1,
+      "meaning": "namespace must appear exactly once",
+      "codes": { "absent": "MISSING_REQUIRED_TAG", "excess": "MULTIPLE_SINGLE_VALUE_TAGS" },
+      "source": "a singleton namespace must appear exactly once: absent emits MISSING_REQUIRED_TAG, more than one emits MULTIPLE_SINGLE_VALUE_TAGS"
+    },
+    "at_least_one": {
+      "min": 1,
+      "max": null,
+      "meaning": "namespace must appear one or more times",
+      "codes": { "absent": "MISSING_REQUIRED_TAG" },
+      "source": "an at_least_one namespace must appear one or more times: absent emits MISSING_REQUIRED_TAG"
+    },
+    "optional": {
+      "min": 0,
+      "max": null,
+      "meaning": "namespace may appear zero or more times; still subject to parent-dependency and conditional rule-set rules",
+      "codes": {},
+      "source": "CLAUDE.md Tagging Strategy — namespaces marked optional/❌"
+    }
+  },
+  "authorship": {
+    "values": ["machine_derivable", "human_authored"],
+    "meaning": "per-field fix-tier boundary read from the schema (not hardcoded) by the fixer. `machine_derivable` = a deterministic Tier-1 repair can produce/stamp it; `human_authored` = only the operator-gated Tier-2 model turn may author it. `file_class` is a derived attribute (machine_derivable), not an authored field.",
+    "source": "`updated` is `machine_derivable` (stampable at fix time); `name`/`description`/`id`/`tags`/`links` are `human_authored` (need semantic judgement no deterministic pass can make); `file_class`, being derived, is `machine_derivable`. This assignment drives the fix-tier split and never changes validation output."
+  },
+  "mechanisms": {
+    "required_fields": {
+      "meaning": "the pack supplies an ordered array of `{field, authorship, source}`; each listed field must be present (top-level or under `workspace:`). A missing field emits one violation.",
+      "code": "MISSING_REQUIRED_FIELD",
+      "message": "required field '{field}:' is missing",
+      "source": "code string and message template are fixed: `MISSING_REQUIRED_FIELD`, message `required field '{field}:' is missing`"
+    },
+    "description_caps": {
+      "meaning": "the pack supplies a map `file_class -> max description length` (character count). The `description` field is capped by the file's derived `file_class`; a class absent from the map is uncapped (NOTE: the pack MUST supply a cap for every file_class its `file_class` mechanism can derive — the live emitter indexes the cap map directly). Exceeding the cap (len strictly greater) emits one violation.",
+      "code": "DESCRIPTION_OVER_CAP",
+      "message": "description is {length} chars, over the {file_class} cap of {cap}",
+      "source": "CLAUDE.md frontmatter table description-cap classes (context ≤350, skill ≤500, agent ≤750); code string and message template are fixed: `DESCRIPTION_OVER_CAP`, message `description is {len} chars, over the {file_class} cap of {cap}`. A class absent from the cap map has no defined cap — a pack must supply one for every file_class its `file_class` mechanism can derive."
+    },
+    "namespaces": {
+      "meaning": "the pack supplies an ORDER-SIGNIFICANT array of `{name, cardinality, parents?, type?}`. Array order IS the iteration order for every cascade phase that scans namespaces. `parents` = ordered list of namespaces that must co-occur when this namespace is used.",
+      "source": "CLAUDE.md Tagging Strategy namespaces (cardinality/parents); per-namespace `type` drives downstream range-eligibility"
+    },
+    "rule_sets": {
+      "meaning": "the pack supplies an ORDER-SIGNIFICANT array of general conditional rule-sets `{match:{namespace,value}, apply:{require_namespaces[], forbidden_unless_matched[], value_formats[{namespace,regex,message}]}}`. A file MATCHES a rule-set when its tags carry `match.namespace:match.value`. On a matching file, each `require_namespaces` entry must be present and each `value_formats` entry's tags must satisfy its `regex` (a `date_interval`-typed namespace is additionally calendar-checked). On a NON-matching file, each `forbidden_unless_matched` namespace must be ABSENT. The report axis is one instance (match `type:report`); this mechanism has no report-named branch.",
+      "codes": { "forbidden_present": "REPORT_ONLY_TAG_MISUSED", "required_absent": "MISSING_REQUIRED_TAG", "bad_value_format": "INVALID_PERIOD_FORMAT" },
+      "source": "CLAUDE.md — report-shaped rules (trigger/required-fields/period, plus a namespace restricted to matching files) are one general `{match, apply}` mechanism rather than a report-specific construct"
+    },
+    "file_class": {
+      "meaning": "the pack supplies `{rules:[{class, match:{glob}}], default}`. Rules are evaluated in array order against the repo-root-relative POSIX path (glob per fnmatch semantics, `*` spans `/`); the FIRST matching rule wins; if none match, `default` is used. The derived class selects the `description_caps` entry. No violation code — classification is an input to other checks.",
+      "source": "derived from CLAUDE.md description-cap classes (context/skill/agent); rules evaluate in array order, first match wins, and a rule glob may be broader than a narrower predicate a consumer implements — the pack author is responsible for keeping the glob no broader than the paths it's meant to classify"
+    },
+    "exempt": {
+      "meaning": "the pack supplies `{filenames[], dir_components[], path_globs[]}`. A repo-root-relative path is exempt from the frontmatter-completeness scan if: its basename is in `filenames`; OR any of its path components is in `dir_components`; OR its POSIX path matches any `path_globs` entry (fnmatch, `*` spans `/`, anchored as written). Exempt files are skipped entirely (no required-field or tag checks).",
+      "source": "a path is exempt when its basename matches `filenames`, any of its path components matches `dir_components`, or its full path matches a `path_globs` entry"
+    }
+  },
+  "violation_cascade": [
+    {
+      "step": "singleton_cardinality",
+      "iterate": "namespaces where cardinality == 'singleton', in pack-declared array order",
+      "emit": [
+        { "when": "count == 0", "code": "MISSING_REQUIRED_TAG", "field": "{namespace}", "message": "missing required '{namespace}:' tag" },
+        { "when": "count > 1", "code": "MULTIPLE_SINGLE_VALUE_TAGS", "field": "{namespace}", "message": "'{namespace}:' must appear exactly once, found {count}: {tags}" }
+      ],
+      "source": "the singleton_cardinality mechanism above"
+    },
+    {
+      "step": "at_least_one_cardinality",
+      "iterate": "namespaces where cardinality == 'at_least_one', in pack-declared array order",
+      "emit": [
+        { "when": "count == 0", "code": "MISSING_REQUIRED_TAG", "field": "{namespace}", "message": "missing required '{namespace}:' tag (at least one)" }
+      ],
+      "source": "the at_least_one_cardinality mechanism above"
+    },
+    {
+      "step": "parent_dependency",
+      "iterate": "namespaces that declare a non-empty `parents`, in pack-declared array order; for each, iterate its `parents` in listed order",
+      "emit": [
+        { "when": "child present AND parent absent", "code": "ORPHAN_NAMESPACE_TAG", "field": "{child}", "message": "'{child}:' tag requires a '{parent}:' tag, which is missing" }
+      ],
+      "source": "the parent_dependency phase: a child namespace present without its declared parent"
+    },
+    {
+      "step": "rule_set_match",
+      "action": "for each rule-set, matched = (the `rule_sets[].match.namespace` group contains a tag whose value equals `rule_sets[].match.value`)",
+      "emit": [],
+      "source": "General {match, apply} rule-set match detection"
+    },
+    {
+      "step": "rule_set_forbidden",
+      "iterate": "each rule-set (pack-declared order); on a NON-matching file, each `apply.forbidden_unless_matched` namespace in listed order",
+      "emit": [
+        { "when": "present AND NOT matched", "code": "REPORT_ONLY_TAG_MISUSED", "field": "{namespace}", "message": "'{namespace}:' tag is only valid on {match} files" }
+      ],
+      "source": "General {match, apply} rule-set mechanism; `{match}` renders as the rule-set's `namespace:value`"
+    },
+    {
+      "step": "rule_set_required",
+      "iterate": "each rule-set (pack-declared order); on a MATCHING file, each `apply.require_namespaces` entry in listed order",
+      "emit": [
+        { "when": "count == 0", "code": "MISSING_REQUIRED_TAG", "field": "{namespace}", "message": "{match} requires a '{namespace}:' tag, which is missing" }
+      ],
+      "source": "General {match, apply} rule-set mechanism; `{match}` renders as the rule-set's `namespace:value`"
+    },
+    {
+      "step": "rule_set_value_format",
+      "iterate": "each rule-set (pack-declared order); on a MATCHING file, each `apply.value_formats` entry, each raw tag in its `namespace` group in file order",
+      "emit": [
+        { "when": "tag value does NOT match the value_format `regex` (or, for a `date_interval` namespace, is not a real calendar interval)", "code": "INVALID_PERIOD_FORMAT", "field": "{namespace}", "message": "rendered from the matching rule-set's `apply.value_formats[].message` (pack-supplied, format-specific); this `message` field is documentation only and is not rendered" }
+      ],
+      "source": "General {match, apply} rule-set mechanism; the format wording lives with the pack's value_format rule, the code lives here"
+    }
+  ],
+  "independent_checks": {
+    "note": "Run outside the tag cascade — field/description completeness is independent of the tag-rule cascade. Relative ordering vs the tag cascade is consumer-defined; each check's OWN iteration order is the pack-declared field order. Message templates for the two emitting checks live on their `mechanisms.*` entries (`required_fields.message`, `description_caps.message`) — an interpreter renders those, so its output is byte-identical to the other interpreter's.",
+    "order": ["exempt_gate", "required_fields", "description_cap", "file_class_classification"],
+    "exempt_gate": "if `exempt` matches the path, skip required_fields + description_cap + all tag-cascade checks for this file",
+    "required_fields": "emit MISSING_REQUIRED_FIELD (field={field}, message=`mechanisms.required_fields.message`) per absent pack `required_fields` entry, in declared order",
+    "description_cap": "emit DESCRIPTION_OVER_CAP (field=`description`, message=`mechanisms.description_caps.message`) if len(description) > description_caps[file_class]",
+    "file_class_classification": "derive file_class from path (input to description_cap; never emits)"
+  },
+  "codes": [
+    { "code": "MISSING_REQUIRED_TAG", "meaning": "a required tag namespace (singleton, at_least_one, or a rule-set's require_namespaces) is absent", "source": "cardinality + rule_set_required phases" },
+    { "code": "MULTIPLE_SINGLE_VALUE_TAGS", "meaning": "a singleton namespace appears more than once", "source": "singleton_cardinality phase" },
+    { "code": "ORPHAN_NAMESPACE_TAG", "meaning": "a child namespace is used without a required parent namespace", "source": "parent_dependency phase" },
+    { "code": "REPORT_ONLY_TAG_MISUSED", "meaning": "a namespace a rule-set forbids outside its match (forbidden_unless_matched) appears on a non-matching file", "source": "rule_set_forbidden phase" },
+    { "code": "INVALID_PERIOD_FORMAT", "meaning": "a rule-set value_format check failed for a tag on a matching file", "source": "rule_set_value_format phase" },
+    { "code": "MISSING_REQUIRED_FIELD", "meaning": "a required top-level frontmatter field is absent (checked outside the tag cascade)", "source": "required_fields mechanism" },
+    { "code": "DESCRIPTION_OVER_CAP", "meaning": "the `description` field exceeds the character cap for the file's file_class", "source": "description_caps mechanism" }
+  ]
+}

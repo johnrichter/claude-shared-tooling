@@ -1,0 +1,238 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/johnrichter/claude-shared-tooling/schemas/frontmatter/frontmatter-profile.meta.schema.json",
+  "title": "Frontmatter validation profile — meta-schema",
+  "version": "1.0.0",
+  "description": "Meta-schema for the frontmatter validation profile family. A conforming document is EITHER a core-profile (mechanisms, e.g. frontmatter-core.schema.json, `core@2.0.0`) OR an extension-pack (concrete vocab, e.g. frontmatter-default.pack.json), discriminated by `kind`. Validate each profile/pack file against this meta-schema to prove structural well-formedness. Behavior-modifying conditional rules are a GENERAL `{match, apply}` rule-set construct (`rule_sets`): a criterion selects files, extra `apply` rules bind only to the matching (or, for `forbidden_unless_matched`, the non-matching) files. The report axis is one instance of this construct (a rule-set matching `type:report`) — there is no report-named special case in this meta-schema or in any interpreter of it. JSON Schema 2020-12; validate with any 2020-12 validator, e.g. `python -m jsonschema -i <file> frontmatter-profile.meta.schema.json`. This meta-schema's own `version` (above) is a plain semver string, distinct from the `name@MAJOR.MINOR.PATCH` profile/pack identities it validates.",
+  "type": "object",
+  "required": ["kind", "profile", "version", "description"],
+  "properties": {
+    "kind": { "type": "string", "enum": ["core-profile", "extension-pack"] },
+    "profile": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "pattern": "^[a-z0-9-]+@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" },
+    "description": { "type": "string", "minLength": 1 }
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/coreProfile" },
+    { "$ref": "#/$defs/extensionPack" }
+  ],
+  "$defs": {
+    "coreProfile": {
+      "type": "object",
+      "required": ["kind", "cardinality_types", "authorship", "mechanisms", "violation_cascade", "codes"],
+      "properties": {
+        "kind": { "const": "core-profile" },
+        "cardinality_types": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "required": ["min", "meaning", "codes"],
+            "properties": {
+              "min": { "type": "integer", "minimum": 0 },
+              "max": { "type": ["integer", "null"] },
+              "meaning": { "type": "string" },
+              "codes": { "type": "object" },
+              "source": { "type": "string" }
+            }
+          }
+        },
+        "authorship": {
+          "type": "object",
+          "required": ["values"],
+          "properties": {
+            "values": {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 1,
+              "uniqueItems": true
+            }
+          }
+        },
+        "mechanisms": {
+          "type": "object",
+          "required": ["required_fields", "description_caps", "namespaces", "rule_sets", "file_class", "exempt"],
+          "additionalProperties": {
+            "type": "object",
+            "required": ["meaning"],
+            "properties": {
+              "meaning": { "type": "string" },
+              "code": { "type": "string" },
+              "codes": { "type": "object" },
+              "source": { "type": "string" }
+            }
+          }
+        },
+        "violation_cascade": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["step"],
+            "properties": {
+              "step": { "type": "string" },
+              "iterate": { "type": "string" },
+              "action": { "type": "string" },
+              "guard": { "type": "string" },
+              "emit": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["when", "code", "field", "message"],
+                  "properties": {
+                    "when": { "type": "string" },
+                    "code": { "type": "string" },
+                    "field": { "type": "string" },
+                    "message": { "type": "string" }
+                  }
+                }
+              },
+              "source": { "type": "string" }
+            }
+          }
+        },
+        "codes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["code", "meaning"],
+            "properties": {
+              "code": { "type": "string" },
+              "meaning": { "type": "string" },
+              "source": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "extensionPack": {
+      "type": "object",
+      "required": ["kind", "extends", "required_fields", "description_caps", "file_class", "namespaces", "exempt"],
+      "properties": {
+        "kind": { "const": "extension-pack" },
+        "extends": { "type": "string", "pattern": "^[a-z0-9-]+@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" },
+        "removes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(namespace|required_field|description_cap|file_class_rule|rule_set|exempt_filename|exempt_dir|exempt_glob):.+$"
+          },
+          "uniqueItems": true,
+          "description": "Typed references to mechanisms/vocabulary a merged pack removes from its base, e.g. `namespace:team` or `rule_set:type:report` (a rule-set's key is its `match` as `namespace:value`). The merge drops the named key from its dimension, warning even for a target nothing defined."
+        },
+        "required_fields": {
+          "type": "array",
+          "minItems": 0,
+          "description": "A base pack typically requires at least one field; a purely additive pack layered on top of a base (adding namespaces/caps/exempt rules without its own required fields) may leave this empty.",
+          "items": {
+            "type": "object",
+            "required": ["field", "authorship"],
+            "properties": {
+              "field": { "type": "string" },
+              "authorship": { "type": "string", "enum": ["machine_derivable", "human_authored"] },
+              "source": { "type": "string" }
+            }
+          }
+        },
+        "description_caps": {
+          "type": "object",
+          "minProperties": 0,
+          "description": "A base pack typically caps at least one file class; a purely additive pack layered on top of a base may leave this empty.",
+          "properties": {
+            "source": { "type": "string" }
+          },
+          "additionalProperties": { "type": "integer", "minimum": 1 }
+        },
+        "file_class": {
+          "type": "object",
+          "required": ["default", "rules"],
+          "properties": {
+            "default": { "type": "string" },
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["class", "match"],
+                "properties": {
+                  "class": { "type": "string" },
+                  "match": {
+                    "type": "object",
+                    "required": ["glob"],
+                    "properties": { "glob": { "type": "string" } }
+                  },
+                  "source": { "type": "string" }
+                }
+              }
+            },
+            "note": { "type": "string" }
+          }
+        },
+        "namespaces": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "cardinality"],
+            "properties": {
+              "name": { "type": "string" },
+              "cardinality": { "type": "string", "enum": ["singleton", "at_least_one", "optional"] },
+              "parents": { "type": "array", "items": { "type": "string" } },
+              "type": { "type": "string", "enum": ["string", "date", "numeric", "date_interval"] },
+              "source": { "type": "string" }
+            }
+          }
+        },
+        "rule_sets": {
+          "type": "array",
+          "description": "General conditional rule-sets. Each selects files via `match` (a `namespace:value` criterion) and binds extra `apply` rules: `require_namespaces` (present on a matching file), `forbidden_unless_matched` (absent on a NON-matching file — the misuse inverse), and `value_formats` (a matching file's tags in the named namespace must match the regex; a `date_interval`-typed namespace is additionally calendar-checked). The report axis is one instance (match `type:report`); nothing here is report-named. Optional per pack — a pack with no conditional rules omits it.",
+          "items": {
+            "type": "object",
+            "required": ["match", "apply"],
+            "properties": {
+              "match": {
+                "type": "object",
+                "required": ["namespace", "value"],
+                "properties": {
+                  "namespace": { "type": "string" },
+                  "value": { "type": "string" }
+                }
+              },
+              "apply": {
+                "type": "object",
+                "properties": {
+                  "require_namespaces": { "type": "array", "items": { "type": "string" } },
+                  "forbidden_unless_matched": { "type": "array", "items": { "type": "string" } },
+                  "value_formats": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["namespace", "regex", "message"],
+                      "properties": {
+                        "namespace": { "type": "string" },
+                        "regex": { "type": "string" },
+                        "message": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              },
+              "notes": { "type": "string" },
+              "source": { "type": "string" }
+            }
+          }
+        },
+        "exempt": {
+          "type": "object",
+          "required": ["filenames", "dir_components", "path_globs"],
+          "properties": {
+            "filenames": { "type": "array", "items": { "type": "string" } },
+            "dir_components": { "type": "array", "items": { "type": "string" } },
+            "path_globs": { "type": "array", "items": { "type": "string" } },
+            "source": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

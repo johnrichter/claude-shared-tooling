@@ -1,0 +1,59 @@
+[package]
+name = "frontmatter"
+version = "0.1.0"
+edition = "2021"
+description = "Frontmatter parsing for navigator — one YAML-frontmatter-plus-Markdown-body parser producing a parser-agnostic, order-preserving result."
+license = "MIT"
+publish = false
+
+[dependencies]
+# MIT OR Apache-2.0, pure-Rust, musl-fine: strict YAML 1.2 DOM parser. Loaded via
+# `YamlLoader`/`Yaml`, which returns `Result` (never panics on malformed
+# input) and preserves mapping insertion order via `hashlink::LinkedHashMap`
+# -- both properties this crate's no-panic and determinism contracts need.
+# `Yaml` itself never leaks past `crate::parse`: the public
+# `ParsedFrontmatter`/`FrontmatterValue` types own no yaml-rust2 type, so the
+# backend is swappable later without a breaking change to consumers.
+yaml-rust2 = "0.11.0"
+# MIT OR Apache-2.0, pure-Rust, musl-fine, ubiquitous/standard: deserializes the declarative frontmatter
+# schema (core profile + extension pack, both plain JSON) into `validate`'s
+# `Profile` type. `derive` generates the field-by-field `Deserialize` impls
+# so the schema's JSON shape and the Rust struct shape stay one definition
+# each, not hand-kept in sync.
+serde = { version = "1.0.228", features = ["derive"] }
+# Paired with `serde` above: the schema files are JSON, so this is the
+# natural decoder. Also used to embed the bundled core profile and the
+# named extension packs (default/reports) via `include_str!` +
+# `serde_json::from_str`, so the crate validates with zero filesystem reads.
+serde_json = "1.0.150"
+# Replaces a hand-rolled restricted-subset matcher:
+# compiles each rule-set's
+# `apply.value_formats[].regex` into a real `regex::Regex`, once, at
+# `Profile` construction (`profile::Profile::rule_set_value_patterns`) -- see
+# that module for why `[0-9]` (not `\d`) is used in the shipped pattern.
+regex = "1.13.0"
+# Replaces a hand-rolled `fnmatch`-style matcher:
+# compiles the pack's `file_class` rule globs and
+# `exempt.path_globs` into `GlobSet`s, once, at `Profile` construction
+# (`profile::CompiledGlobs`) -- `literal_separator` left at its default
+# (`false`) so `*` crosses `/`, matching Python `fnmatch.fnmatch` parity.
+globset = "0.4.18"
+# See facetquery's Cargo.toml for the full rationale:
+# dual MIT/Apache-2.0, actively maintained, pure-Rust civil-calendar-date
+# type. `validate`'s `rule_set_value_format` phase uses it to calendar-check
+# a shape-valid `date_interval`-typed tag's two endpoints (real month/day,
+# real leap year, start <= end) -- a real-calendar gate the shape regex
+# alone can't express. `parsing` + `macros` only, `default-features = false`: no
+# clock/`now`, matching this crate's pure, deterministic validation
+# contract.
+time = { version = "0.3.53", default-features = false, features = ["parsing", "macros"] }
+# Workspace path dependency (facetquery <- frontmatter, per the crate
+# boundary doc): the `query` module bridges `ParsedFrontmatter` + `Profile`
+# to facetquery's generic `FacetSource` trait, so a caller parses a
+# `facetquery@1` query once and matches it against many frontmatter files.
+facetquery = { path = "../facetquery" }
+
+[dev-dependencies]
+
+[lints]
+workspace = true

@@ -1,0 +1,24 @@
+[package]
+name = "facetquery"
+version = "0.1.0"
+edition = "2021"
+description = "Frontmatter-agnostic boolean facet-query language — parses a query string to an AST, evaluates it against a generic facet source."
+license = "MIT"
+publish = false
+
+[dependencies]
+# Dual MIT/Apache-2.0, actively maintained, pure-Rust civil-calendar-date
+# type. `parsing` + `macros` (for a compile-time `format_description!`) is
+# the minimal feature set giving `time::Date` parsing/`Ord`;
+# `default-features = false` excludes `std`/`local-offset`, so this pure
+# evaluator gains no clock/`now`.
+time = { version = "0.3.53", default-features = false, features = ["parsing", "macros"] }
+# MIT license, actively maintained (1.x, 2026), pure-Rust combinator parser
+# with in-core positioned error reporting — this crate's query-string
+# parser (a later task) builds on it directly.
+winnow = "1.0.3"
+
+[dev-dependencies]
+
+[lints]
+workspace = true

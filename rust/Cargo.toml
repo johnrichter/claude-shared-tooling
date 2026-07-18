@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = [
+    "bm25",
+    "frontmatter",
+    "facetquery",
+    # M2.*: navigator symbol crate (tree-sitter-based) joins here as a fourth member.
+]
+
+# Shared lints enforced across every workspace member — each member's
+# Cargo.toml opts in via `[lints] workspace = true`. Kept here, not repeated
+# per-crate, so a lint change never drifts member-to-member.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
