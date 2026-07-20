@@ -7,4 +7,4 @@ dependency, so no network install is needed to import or run. Consumed by path d
 in dev and by git-tag dependency when shipped.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.2"

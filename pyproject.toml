@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-tooling"
-version = "0.2.1"
+version = "0.2.2"
 description = "Public shared tools and schemas for AI-agent workspaces (git commit re-signing, sitemap parsing, article-metadata extraction). Stdlib covers what it does well; prefer a trusted, actively-maintained library over hand-rolling any non-trivial common capability, vetted/licensed/pinned before adoption."
 readme = "README.md"
 requires-python = ">=3.10"
