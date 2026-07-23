@@ -1,37 +1,23 @@
 #
-# Self-contained git attributes for this repo — mirrors the machine-global set
-# so nothing here depends on any given machine's global gitattributes. Text is
-# normalized to LF; every binary class routes through Git LFS (never a raw blob),
-# and scripts/check_no_raw_binary.py is the content-based backstop for binaries
-# an extension glob misses (extensionless or unlisted).
+# Git LFS routing — PER-REPO template (NOT a global attributes file).
+#
+# Copy this into the root of a repository (or into a subdirectory you own inside
+# a shared monorepo) as `.gitattributes`, then commit it:  git lfs-init
+#
+# Why per-repo and not global: a global filter=lfs rule applies inside every
+# submodule and every coworker's directory, rewriting binaries you don't own
+# into LFS pointers. Committing the routing to the specific tree you own keeps
+# LFS scoped to that tree, versioned, and reproducible on fresh clones.
+#
+# Every binary class routes through Git LFS (filter=lfs diff=lfs merge=lfs -text)
+# so it is stored as a pointer, never a raw blob; LFS passes already-committed
+# non-pointer blobs through unchanged on checkout, so adopting this is safe for
+# existing repos and only affects future adds.
 #
 # NOTE: git does NOT support inline/trailing comments in .gitattributes — a `#`
-# mid-line corrupts the rule. Every comment is on its own line, above its rule.
+# mid-line is parsed as a bogus attribute and corrupts the rule. Every comment
+# here is therefore on its own line, above the rule it describes.
 #
-
-#
-# Repo-local — extensionless prebuilt binaries under go/.bin/, matched by name
-# glob since they carry no extension for the class rules below to catch.
-#
-# build-helpers prebuilt binaries (one per OS/arch)
-go/.bin/* filter=lfs diff=lfs merge=lfs -text
-
-#
-# Line endings — auto-detect text vs binary, normalize text to LF; a few
-# Windows script types are pinned to CRLF, and patch/diff bytes are preserved.
-#
-# Default: content-detect text, store + check out text as LF
-* text=auto eol=lf
-# Windows batch script — must stay CRLF
-*.bat text eol=crlf
-# Windows command script — must stay CRLF
-*.cmd text eol=crlf
-# PowerShell script — must stay CRLF
-*.ps1 text eol=crlf
-# Patch file — keep exact bytes; never eol-normalize (would corrupt the patch)
-*.patch -text
-# Diff file — keep exact bytes; never eol-normalize
-*.diff -text
 
 #
 # Images — raster photos/graphics, plus vector and editor project files.
@@ -204,7 +190,7 @@ go/.bin/* filter=lfs diff=lfs merge=lfs -text
 #
 # Language & compiler build artifacts — compiled/packaged toolchain outputs.
 # Source and manifest files stay text; only binary artifacts are listed here.
-# Rust/Zig native binaries carry no extension and are caught by content via
+# Go/Rust/Zig native binaries carry no extension and are caught by content via
 # scripts/check_no_raw_binary.py, not by an extension rule.
 #
 # Python compiled bytecode
@@ -266,15 +252,9 @@ go/.bin/* filter=lfs diff=lfs merge=lfs -text
 # Binary .mod file — overloaded extension: an Amiga/ProTracker music module
 # or a 3D-model format (the binary meanings this rule targets).
 *.mod filter=lfs diff=lfs merge=lfs -text
-# Go module manifest/checksum — plain text; the *.mod rule above targets the
-# binary tracker-music/3D-model overload, not Go's go.mod, so override it here.
-# Keep -filter to bypass that LFS rule, and re-enable diff/merge so git
-# produces line-level diffs and merges. The `*.mod` rule above sets
-# diff=lfs/merge=lfs; since gitattributes is last-match-wins per attribute,
-# `text -filter` alone would leave those lfs values in force for go.mod, so
-# diff/merge are set explicitly here to restore text behavior (FB6).
-go.mod text -filter diff merge
-go.sum text -filter diff merge
+# Go's go.mod is a text manifest — override the *.mod rule above so it is never
+# LFS-routed (normal text diff/merge, at any directory depth).
+go.mod text=auto eol=lf diff merge -filter
 
 #
 # Mobile & app packages — built application bundles/packages (binary).
@@ -327,3 +307,26 @@ go.sum text -filter diff merge
 *.jar filter=lfs diff=lfs merge=lfs -text
 # Adobe AIR package
 *.air filter=lfs diff=lfs merge=lfs -text
+
+#
+# Repo-local custom rules — preserved from this repo's prior .gitattributes.
+# Kept after the template so they win under last-match-wins per attribute.
+#
+
+#
+# Repo-local — extensionless prebuilt binaries under go/.bin/, matched by name
+# glob since they carry no extension for the class rules below to catch.
+#
+# build-helpers prebuilt binaries (one per OS/arch)
+go/.bin/* filter=lfs diff=lfs merge=lfs -text
+
+#
+# Go module manifest/checksum — plain text; the *.mod rule above targets the
+# binary tracker-music/3D-model overload, not Go's go.mod, so override it here.
+# Keep -filter to bypass that LFS rule, and re-enable diff/merge so git
+# produces line-level diffs and merges. The `*.mod` rule above sets
+# diff=lfs/merge=lfs; since gitattributes is last-match-wins per attribute,
+# `text -filter` alone would leave those lfs values in force for go.mod, so
+# diff/merge are set explicitly here to restore text behavior (FB6).
+go.mod text -filter diff merge
+go.sum text -filter diff merge
