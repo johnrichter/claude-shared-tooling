@@ -1,0 +1,354 @@
+{
+  "_as_of": "2026-07-24",
+  "_cross_family_order": {
+    "as_of": "2026-07-24",
+    "inherited_pairs": [
+      [
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5"
+      ]
+    ],
+    "note": "claude-fable-5's top placement is vendor-stated on the source page as of as_of: Fable 5 is named Anthropic's most capable widely released model for workloads needing the highest available capability. Opus above Sonnet (claude-opus-4-6/4-7/4-8 above claude-sonnet-4-6 and claude-sonnet-5) is an operator ruling of the same date; within-family order needs no citation because it is derived from generation. claude-sonnet-4-6 above claude-haiku-4-5 is inherited from the previously shipped rank table and carries no citation. claude-opus-5 declares no rank: no published spec establishes its cross-family standing versus claude-fable-5, so that pair — and every other cross-family pair involving claude-opus-5 — is roster-stale until a rank is established. claude-opus-4-5 and claude-sonnet-4-5 likewise declare no rank at all, so every cross-family pair involving them is roster-stale until one is established.",
+    "source": "https://platform.claude.com/docs/en/about-claude/models/overview"
+  },
+  "_schema_version": 1,
+  "_source": "Vendor facts come from platform.claude.com/docs — pricing, models/overview, prompt-caching, batch-processing, effort. Fetched 2026-07-03 for the seven models then current: knowledge_cutoff from the models/overview \"Reliable knowledge cutoff\" row, and every min_cacheable_prefix from that same day's prompt-caching \"minimum cacheable prompt length\" list so the whole column shares one provenance; no projection reads min_cacheable_prefix today, so re-verify the column at the next refresh. Refreshed 2026-07-24: claude-opus-5 added from pricing, models/overview, effort and prompt-caching — list rates match claude-opus-4-8 at $5 in / $25 out, min_cacheable_prefix 512 (the lowest of any current model), knowledge cutoff 2026-05, all five effort levels — and claude-opus-4-8 moved to the vendor's legacy table on the same date. effort_available follows the effort doc: every model defaults to high, xhigh is Opus 4.7 and later plus Sonnet 5 and Fable 5, max is Opus 4.6 and later plus Sonnet 4.6 and later and Fable 5; a row with no effort-doc entry lists low/medium/high, the levels carrying no documented restriction. The 0.5 batch_discount is the API-wide Batches rate from batch-processing, not a per-model figure. claude-opus-4-5 and claude-sonnet-4-5 are carried for allowlist parity only: no vendor spec block was sourced for them in this refresh, so their vendor-fact fields and price are null. release_date is recorded only where a vendor snapshot date is published.",
+  "_unit": "USD per 1,000,000 tokens",
+  "effort_exempt_sentinels": [
+    "inherit"
+  ],
+  "models": {
+    "claude-fable-5": {
+      "batch_discount": 0.5,
+      "context_window": 1000000,
+      "cross_family_rank": 7,
+      "deprecation_date": null,
+      "effort_available": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "effort_exempt": true,
+      "family": "fable",
+      "generation": [
+        5
+      ],
+      "knowledge_cutoff": "2026-01",
+      "lifecycle": "active",
+      "max_output_tokens": 128000,
+      "min_cacheable_prefix": 512,
+      "price": {
+        "contract": null,
+        "list": {
+          "cache_read": 1.0,
+          "cache_write_1h": 20.0,
+          "cache_write_5m": 12.5,
+          "input": 10.0,
+          "output": 50.0
+        }
+      },
+      "release_date": null,
+      "selectable": "new-work"
+    },
+    "claude-haiku-4-5": {
+      "batch_discount": 0.5,
+      "context_window": 200000,
+      "cross_family_rank": 0,
+      "deprecation_date": null,
+      "effort_available": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "effort_exempt": false,
+      "family": "haiku",
+      "generation": [
+        4,
+        5
+      ],
+      "knowledge_cutoff": "2025-02",
+      "lifecycle": "active",
+      "max_output_tokens": 64000,
+      "min_cacheable_prefix": 4096,
+      "notes": "Vendor dated full ID claude-haiku-4-5-20251001, the source of release_date. Does not take the effort parameter — it uses extended thinking at a fixed low tier — so effort_available lists what a plan may pin for it, not distinct behaviors.",
+      "price": {
+        "contract": null,
+        "list": {
+          "cache_read": 0.1,
+          "cache_write_1h": 2.0,
+          "cache_write_5m": 1.25,
+          "input": 1.0,
+          "output": 5.0
+        }
+      },
+      "release_date": "2025-10-01",
+      "selectable": "new-work"
+    },
+    "claude-opus-4-5": {
+      "batch_discount": 0.5,
+      "context_window": null,
+      "cross_family_rank": null,
+      "deprecation_date": null,
+      "effort_available": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "effort_exempt": false,
+      "family": "opus",
+      "generation": [
+        4,
+        5
+      ],
+      "knowledge_cutoff": null,
+      "lifecycle": "active",
+      "max_output_tokens": null,
+      "min_cacheable_prefix": null,
+      "notes": "Carried for allowlist parity: an existing pin resolves, but no vendor spec block was sourced in this refresh, so every vendor fact is null and no cross-family rank is declared.",
+      "price": {
+        "contract": null,
+        "list": null
+      },
+      "release_date": null,
+      "selectable": "legacy-pin-only"
+    },
+    "claude-opus-4-6": {
+      "batch_discount": 0.5,
+      "context_window": 1000000,
+      "cross_family_rank": 3,
+      "deprecation_date": null,
+      "effort_available": [
+        "low",
+        "medium",
+        "high",
+        "max"
+      ],
+      "effort_exempt": false,
+      "family": "opus",
+      "generation": [
+        4,
+        6
+      ],
+      "knowledge_cutoff": "2025-05",
+      "lifecycle": "active",
+      "max_output_tokens": 128000,
+      "min_cacheable_prefix": 4096,
+      "price": {
+        "contract": null,
+        "list": {
+          "cache_read": 0.5,
+          "cache_write_1h": 10.0,
+          "cache_write_5m": 6.25,
+          "input": 5.0,
+          "output": 25.0
+        }
+      },
+      "release_date": null,
+      "selectable": "new-work"
+    },
+    "claude-opus-4-7": {
+      "batch_discount": 0.5,
+      "context_window": 1000000,
+      "cross_family_rank": 4,
+      "deprecation_date": null,
+      "effort_available": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "effort_exempt": false,
+      "family": "opus",
+      "generation": [
+        4,
+        7
+      ],
+      "knowledge_cutoff": "2026-01",
+      "lifecycle": "active",
+      "max_output_tokens": 128000,
+      "min_cacheable_prefix": 2048,
+      "price": {
+        "contract": null,
+        "list": {
+          "cache_read": 0.5,
+          "cache_write_1h": 10.0,
+          "cache_write_5m": 6.25,
+          "input": 5.0,
+          "output": 25.0
+        }
+      },
+      "release_date": null,
+      "selectable": "new-work"
+    },
+    "claude-opus-4-8": {
+      "batch_discount": 0.5,
+      "context_window": 1000000,
+      "cross_family_rank": 5,
+      "deprecation_date": null,
+      "effort_available": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "effort_exempt": false,
+      "family": "opus",
+      "generation": [
+        4,
+        8
+      ],
+      "knowledge_cutoff": "2026-01",
+      "lifecycle": "active",
+      "max_output_tokens": 128000,
+      "min_cacheable_prefix": 1024,
+      "notes": "Vendor-listed as legacy since 2026-07-24, at the same rates and window as claude-opus-5.",
+      "price": {
+        "contract": null,
+        "list": {
+          "cache_read": 0.5,
+          "cache_write_1h": 10.0,
+          "cache_write_5m": 6.25,
+          "input": 5.0,
+          "output": 25.0
+        }
+      },
+      "release_date": null,
+      "selectable": "new-work"
+    },
+    "claude-opus-5": {
+      "batch_discount": 0.5,
+      "context_window": 1000000,
+      "cross_family_rank": null,
+      "deprecation_date": null,
+      "effort_available": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "effort_exempt": false,
+      "family": "opus",
+      "generation": [
+        5
+      ],
+      "knowledge_cutoff": "2026-05",
+      "lifecycle": "active",
+      "max_output_tokens": 128000,
+      "min_cacheable_prefix": 512,
+      "price": {
+        "contract": null,
+        "list": {
+          "cache_read": 0.5,
+          "cache_write_1h": 10.0,
+          "cache_write_5m": 6.25,
+          "input": 5.0,
+          "output": 25.0
+        }
+      },
+      "release_date": "2026-07-24",
+      "selectable": "new-work"
+    },
+    "claude-sonnet-4-5": {
+      "batch_discount": 0.5,
+      "context_window": null,
+      "cross_family_rank": null,
+      "deprecation_date": null,
+      "effort_available": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "effort_exempt": false,
+      "family": "sonnet",
+      "generation": [
+        4,
+        5
+      ],
+      "knowledge_cutoff": null,
+      "lifecycle": "active",
+      "max_output_tokens": null,
+      "min_cacheable_prefix": null,
+      "notes": "Carried for allowlist parity: an existing pin resolves, but no vendor spec block was sourced in this refresh, so every vendor fact is null and no cross-family rank is declared.",
+      "price": {
+        "contract": null,
+        "list": null
+      },
+      "release_date": null,
+      "selectable": "legacy-pin-only"
+    },
+    "claude-sonnet-4-6": {
+      "batch_discount": 0.5,
+      "context_window": 1000000,
+      "cross_family_rank": 1,
+      "deprecation_date": null,
+      "effort_available": [
+        "low",
+        "medium",
+        "high",
+        "max"
+      ],
+      "effort_exempt": false,
+      "family": "sonnet",
+      "generation": [
+        4,
+        6
+      ],
+      "knowledge_cutoff": "2025-08",
+      "lifecycle": "active",
+      "max_output_tokens": 128000,
+      "min_cacheable_prefix": 1024,
+      "price": {
+        "contract": null,
+        "list": {
+          "cache_read": 0.3,
+          "cache_write_1h": 6.0,
+          "cache_write_5m": 3.75,
+          "input": 3.0,
+          "output": 15.0
+        }
+      },
+      "release_date": null,
+      "selectable": "new-work"
+    },
+    "claude-sonnet-5": {
+      "batch_discount": 0.5,
+      "context_window": 1000000,
+      "cross_family_rank": 2,
+      "deprecation_date": null,
+      "effort_available": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "effort_exempt": false,
+      "family": "sonnet",
+      "generation": [
+        5
+      ],
+      "knowledge_cutoff": "2026-01",
+      "lifecycle": "active",
+      "max_output_tokens": 128000,
+      "min_cacheable_prefix": 1024,
+      "notes": "A $2 in / $10 out introductory rate applies through 2026-08-31 and reverts on 2026-09-01 to the standard $3 / $15 recorded here.",
+      "price": {
+        "contract": null,
+        "list": {
+          "cache_read": 0.3,
+          "cache_write_1h": 6.0,
+          "cache_write_5m": 3.75,
+          "input": 3.0,
+          "output": 15.0
+        }
+      },
+      "release_date": null,
+      "selectable": "new-work"
+    }
+  }
+}

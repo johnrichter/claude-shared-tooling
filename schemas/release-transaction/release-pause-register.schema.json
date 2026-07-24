@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/johnrichter/claude-tooling/schemas/release-transaction/release-pause-register.schema.json",
+  "title": "Release-pause register",
+  "description": "The hand-off between compliance measurement and the release gate. Compliance measurement (M10.P2.T3 - rung-4 compliance-floor measurement wiring) writes an entry here when an invariant's measured per-model rate falls below its declared floor; the release-transaction gate reads it and refuses the owning plugin's or CLI's NEXT release while the entry is open. The pause is never retroactive: the milestone that shipped the invariant does not fail after the fact. An entry left at declared-unmeasured pauses nothing - opening its defect belongs to the measurement wiring. Fields beyond those listed here are ignored by the gate, so measurement may record more than the gate reads.",
+  "type": "object",
+  "required": ["schema", "entries"],
+  "properties": {
+    "schema": {
+      "description": "This register schema's version.",
+      "const": "release-pause-register@1.0.0"
+    },
+    "entries": {
+      "description": "One entry per compliance defect. Order is not significant; the gate reports every open entry it matches.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "required": ["defect_id", "owner", "owner_kind", "invariant_id", "status"],
+      "properties": {
+        "defect_id": {
+          "description": "Feedback-register defect this entry corresponds to.",
+          "type": "string",
+          "minLength": 1
+        },
+        "owner": {
+          "description": "Name of the plugin or CLI that owns the invariant - matched against the released module's name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "owner_kind": {
+          "description": "Whether the owner ships as a plugin or as a CLI.",
+          "enum": ["plugin", "cli"]
+        },
+        "invariant_id": {
+          "description": "Invariant-registry id whose compliance floor was missed.",
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "description": "open pauses the owner's next release; resolved and declared-unmeasured do not.",
+          "enum": ["open", "resolved", "declared-unmeasured"]
+        },
+        "model": {
+          "description": "Model the rate was measured on - a floor is per-model.",
+          "type": "string"
+        },
+        "declared_floor": {
+          "description": "Compliance floor declared for this invariant on this model.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "measured_rate": {
+          "description": "Rate the behavioral tier measured; below the floor is what opens the defect.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "opened": {
+          "description": "When the defect was opened, RFC 3339.",
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}
