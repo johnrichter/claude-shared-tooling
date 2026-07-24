@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/johnrichter/claude-tooling/schemas/release-transaction/release-transaction-record.schema.json",
+  "title": "Release-transaction record",
+  "description": "One release declaring itself: the module being released, the version, and one binding per transaction enumerator. A binding either names the evidence that proves the enumerator (parameters per the contract's evidence-kind vocabulary) or DECLARES the enumerator not-applicable with a reason the contract allows for it plus a human statement. This schema deliberately does NOT restate the enumerator ids: release-transaction.contract.json holds the only normative enumeration, and coverage of it is checked by the interpreter so an unaccounted-for enumerator fails by name. Every path is repo-relative and resolves against the interpreter's root argument.",
+  "type": "object",
+  "required": ["schema", "contract", "subject", "version", "enumerators"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "description": "This record schema's version.",
+      "const": "release-transaction-record@1.0.0"
+    },
+    "contract": {
+      "description": "The release-transaction contract version this record is written against.",
+      "type": "string",
+      "pattern": "^release-transaction@[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "subject": {
+      "description": "The module being released.",
+      "type": "object",
+      "required": ["name", "kind", "module_path"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "The module's own name, as its manifest and any catalog entry spell it.",
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "description": "What is being released. Reported, never used to waive an enumerator - a waiver is always an explicit not-applicable declaration.",
+          "enum": ["plugin", "cli", "library", "schema-module"]
+        },
+        "repo": {
+          "description": "Repository root holding the module, for tag resolution (default: the interpreter's root).",
+          "type": "string",
+          "default": "."
+        },
+        "module_path": {
+          "description": "The module's path from its repository root - the same path a tag prefix must equal.",
+          "type": "string",
+          "minLength": 1
+        },
+        "marketplace": {
+          "description": "Catalog identifier a plugin's enable-state key is qualified with.",
+          "type": "string"
+        }
+      }
+    },
+    "version": {
+      "description": "The version being released.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"
+    },
+    "pause_register": {
+      "description": "Release-pause register to consult for this release (default: none; overridden by the interpreter's register argument).",
+      "type": "string"
+    },
+    "enumerators": {
+      "description": "One binding per enumerator in the contract, keyed by enumerator id. Every contract enumerator must appear; an absent key is a missing enumerator, not an optional field.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/binding"
+      }
+    }
+  },
+  "$defs": {
+    "binding": {
+      "description": "Either the evidence for an enumerator, or a declared waiver of it.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/waiver"
+        },
+        {
+          "$ref": "#/$defs/evidence"
+        }
+      ]
+    },
+    "waiver": {
+      "description": "A declared not-applicable enumerator. The reason must be one the contract allows for that enumerator; the detail is the human statement that makes the waiver reviewable.",
+      "type": "object",
+      "required": ["not_applicable"],
+      "additionalProperties": false,
+      "properties": {
+        "not_applicable": {
+          "type": "object",
+          "required": ["reason", "detail"],
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            },
+            "detail": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "evidence": {
+      "description": "Parameters for the enumerator's evidence kind. Required and optional parameter names are declared per kind in the contract; an unknown parameter is a record error.",
+      "type": "object",
+      "minProperties": 1,
+      "not": {
+        "required": ["not_applicable"]
+      }
+    }
+  }
+}
