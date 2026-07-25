@@ -2,7 +2,8 @@
 // It owns all filesystem IO and process exit codes; the logic lives in package bh (pure,
 // testable). Invoked by the orchestrator skill via the `run` wrapper (build-once, then exec).
 //
-// Exit codes: 0 ok; 1 validation failed (validate / check-tiers report ok:false); 2 usage/IO error.
+// Exit codes: 0 ok; 1 validation failed (validate / check-tiers report ok:false); 2 usage/IO error;
+// 3 roster-stale (self-check only — see its own line below).
 package main
 
 import (
@@ -804,13 +805,17 @@ func runRetrieve(rest []string) {
 }
 
 // runSelfCheck is the session-tier self-check: resolves the LIVE session model and
-// effort and enforces the caller-supplied floor/ceiling band (never hardcoded here — each skill
-// passes its own). Model: transcript latest message.model, fallback $ANTHROPIC_MODEL. Effort:
-// $CLAUDE_EFFORT, fallback settings.json effortLevel. An undetectable model is a hard usage error
-// (nothing to check against); an undetectable effort is not — bh.SelfCheck degrades to
-// enforcing the model band alone and warns. Exit 1 on abort (below floor OR — see below — a
-// session-id mismatch), matching check-tiers/validate's ok-gate convention; a ceiling warning
-// still exits 0.
+// effort and enforces a floor/ceiling band, supplied EITHER literally (--floor-*/--ceiling-*,
+// never hardcoded here — each skill passes its own) OR by name (--band, resolved via
+// bh.ResolveBand against a roster-derived band); the two forms are mutually exclusive. Model:
+// transcript latest message.model, fallback $ANTHROPIC_MODEL. Effort: $CLAUDE_EFFORT, fallback
+// settings.json effortLevel. An undetectable model is a hard usage error (nothing to check
+// against); an undetectable effort is not — bh.SelfCheck degrades to enforcing the model band
+// alone and warns.
+//
+// Ordering is enforced solely through roster.Compare (bh.SelfCheck / ai-shared-lib/go/roster):
+// a model absent from the roster — the observed session model, or either band endpoint — is a
+// roster-stale verdict (exit 3), never a below-floor guess.
 //
 // Identity guard (opt-in): pass --session-id or --scratchpad-path to ALSO verify that
 // --transcript's trailing lines carry THIS session's own sessionId before trusting it for
@@ -820,28 +825,43 @@ func runRetrieve(rest []string) {
 //
 // Exit-code contract: 0 in band and id verified (or id check not requested); 1 abort (below the
 // floor, and/or — when the identity guard is requested — a session-id mismatch); 2 usage/IO error
-// (missing required band flags, undeterminable model, or — when the identity guard is requested —
-// an unparseable/missing session id, unreadable/empty/all-malformed transcript, or a transcript
-// that names no sessionId on any line).
+// (neither --band nor all four literal band flags given, or both given; an unrecognized --band
+// name; undeterminable model, or — when the identity guard is requested — an unparseable/missing
+// session id, unreadable/empty/all-malformed transcript, or a transcript that names no sessionId
+// on any line); 3 roster-stale (the observed model or a band endpoint is absent from the roster).
 func runSelfCheck(rest []string) {
 	fs := flag.NewFlagSet("self-check", flag.ContinueOnError)
 	transcript := fs.String("transcript", "", "main session transcript JSONL path (model source; latest message.model wins over $ANTHROPIC_MODEL; also the identity-guard source when --session-id/--scratchpad-path is given)")
 	settings := fs.String("settings", ".claude/settings.json", "settings.json path (effortLevel fallback when $CLAUDE_EFFORT is unset)")
-	floorModel := fs.String("floor-model", "", "band floor model (required)")
-	floorEffort := fs.String("floor-effort", "", "band floor effort (required)")
-	ceilingModel := fs.String("ceiling-model", "", "band ceiling model (required)")
-	ceilingEffort := fs.String("ceiling-effort", "", "band ceiling effort (required)")
+	floorModel := fs.String("floor-model", "", "band floor model (required unless --band is set)")
+	floorEffort := fs.String("floor-effort", "", "band floor effort (required unless --band is set)")
+	ceilingModel := fs.String("ceiling-model", "", "band ceiling model (required unless --band is set)")
+	ceilingEffort := fs.String("ceiling-effort", "", "band ceiling effort (required unless --band is set)")
+	bandName := fs.String("band", "", "named roster-resolved band (e.g. plan, build), in place of the four literal --floor-*/--ceiling-* flags; mutually exclusive with them")
 	sessionID := fs.String("session-id", "", "SCf identity guard: this session's own id (UUID) -- verifies --transcript's trailing lines name THIS session, hard-abort on mismatch; mutually exclusive with --scratchpad-path; omit both to skip the guard entirely")
 	scratchpadPath := fs.String("scratchpad-path", "", "SCf identity guard: a path under this session's own scratchpad dir (session id parsed from it); mutually exclusive with --session-id; omit both to skip the guard entirely")
 	parse(fs, rest)
-	if *floorModel == "" || *floorEffort == "" || *ceilingModel == "" || *ceilingEffort == "" {
-		die(2, "self-check: --floor-model, --floor-effort, --ceiling-model, --ceiling-effort are all required\n")
-	}
-	band := bh.TierBand{
-		FloorModel:    bh.Model(*floorModel),
-		FloorEffort:   bh.Effort(*floorEffort),
-		CeilingModel:  bh.Model(*ceilingModel),
-		CeilingEffort: bh.Effort(*ceilingEffort),
+
+	literalSet := *floorModel != "" || *floorEffort != "" || *ceilingModel != "" || *ceilingEffort != ""
+	var band bh.TierBand
+	switch {
+	case *bandName != "" && literalSet:
+		die(2, "self-check: --band and --floor-*/--ceiling-* are mutually exclusive\n")
+	case *bandName != "":
+		b, ok := bh.ResolveBand(*bandName)
+		if !ok {
+			die(2, "self-check: unrecognized --band %q\n", *bandName)
+		}
+		band = b
+	case literalSet && *floorModel != "" && *floorEffort != "" && *ceilingModel != "" && *ceilingEffort != "":
+		band = bh.TierBand{
+			FloorModel:    bh.Model(*floorModel),
+			FloorEffort:   bh.Effort(*floorEffort),
+			CeilingModel:  bh.Model(*ceilingModel),
+			CeilingEffort: bh.Effort(*ceilingEffort),
+		}
+	default:
+		die(2, "self-check: --floor-model, --floor-effort, --ceiling-model, --ceiling-effort are all required (or supply --band instead)\n")
 	}
 
 	model, modelOK := resolveSessionModel(*transcript)
@@ -857,7 +877,18 @@ func runSelfCheck(rest []string) {
 	}
 
 	printJSON(res)
-	exitOK(!res.Abort)
+	// Abort outranks RosterStale here by design: the one case both can be true together is a
+	// roster-stale model AND (via the identity guard below) a session-id mismatch, and a mismatch
+	// is the more severe, more actionable condition -- exit 1, not 3. roster_stale:true still
+	// prints on stdout either way, so a caller loses no information, only exit-code precedence.
+	switch {
+	case res.Abort:
+		os.Exit(1)
+	case res.RosterStale:
+		os.Exit(3)
+	default:
+		os.Exit(0)
+	}
 }
 
 // applySessionIDGuard runs the SCf identity guard in place on res: it derives the caller's own
@@ -1340,7 +1371,7 @@ Usage:
   build-helpers record-usage   <execution.json> --transcript P [--specs P --final --baseline-capture] -> execution.json (folds per-model true-cost accounting + per-file watermarks + orchestrator-only O into run config; --final mandatory at finish; an unresolved transcript sets cost_status:unresolved — non-fatal, unless --baseline-capture)
   build-helpers attribute      <execution.json> --transcript P [--tasks id,id,… --specs P] -> {tasks:{id:{cost_usd,cost_attribution:"measured",…}},even_split,unmappable} MEASURED per-task cost from subagent transcripts
   build-helpers retrieve       <plan.json|execution.json|archive.json> --level {outline|milestone|phase|task|field} [--id ID --field NAME] -> read-only detail-level projection (never decides eligibility); archive.json serves archived detail at the same four levels
-  build-helpers self-check     --floor-model M --floor-effort E --ceiling-model M --ceiling-effort E [--transcript P --settings P --session-id ID | --scratchpad-path P] -> {model,effort,effort_detected,abort,warnings,reason,session_id_checked,session_id_match} session-tier self-check against a caller-supplied band; --session-id/--scratchpad-path additionally hard-aborts if --transcript's trailing lines don't name that session id. Exit 0 ok; 1 abort (below floor and/or session-id mismatch); 2 usage/IO error (missing band flags, undeterminable model, or — with the identity guard — unparseable session id / unreadable / empty / all-malformed / no-sessionId transcript)
+  build-helpers self-check     {--floor-model M --floor-effort E --ceiling-model M --ceiling-effort E | --band NAME} [--transcript P --settings P --session-id ID | --scratchpad-path P] -> {model,effort,effort_detected,abort,roster_stale,warnings,reason,session_id_checked,session_id_match} session-tier self-check against a band, given literally (four flags) or by name (--band, mutually exclusive with the literal form); --session-id/--scratchpad-path additionally hard-aborts if --transcript's trailing lines don't name that session id. Exit 0 ok; 1 abort (below floor and/or session-id mismatch); 2 usage/IO error (neither/both band forms given, unrecognized --band name, undeterminable model, or — with the identity guard — unparseable session id / unreadable / empty / all-malformed / no-sessionId transcript); 3 roster-stale (observed model or a band endpoint absent from the roster)
   build-helpers resolve-transcript --session-id ID | --scratchpad-path P [--cwd DIR --projects-dir DIR] -> prints the ONE deterministic transcript path for that session (id-based path join, never a directory mtime scan). Exit 0 ok (path on stdout); 2 usage/IO error (bad/missing id, unresolvable cwd/$HOME, or the path doesn't exist)
   build-helpers feedback add   <feedback.json> --title … --feedback … --impact N --urgency N [--source-task … --proposed-solution … --why-it-matters … --at …] -> feedback.json (writes feedback.json AND regenerates the sibling feedback.md mirror in one call)
   build-helpers feedback list  <feedback.json> [--by-task ID --min-impact N --min-urgency N] -> stdout, one "<id> — <title>" line per matching entry, ranked by criticality descending (read-only; filters compose with AND)
