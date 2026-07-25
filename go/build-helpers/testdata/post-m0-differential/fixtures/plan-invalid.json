@@ -1,0 +1,28 @@
+{
+  "goal": "",
+  "success_criteria": [],
+  "milestones": [
+    {
+      "id": "M1",
+      "name": "m1",
+      "phases": [
+        {
+          "id": "M1.P1",
+          "name": "p1",
+          "tasks": [
+            {
+              "id": "M1.P1.T1",
+              "name": "t1",
+              "summary": "",
+              "deliverable": "",
+              "model": "claude-sonnet-5",
+              "effort": "medium",
+              "test_strategy": "",
+              "acceptance": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
