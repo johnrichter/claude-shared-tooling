@@ -155,6 +155,109 @@ func TestCheckTiers(t *testing.T) {
 	}
 }
 
+// TestCheckTiers_InheritSentinelIsEffortExempt proves 'inherit' stays enum-valid and accepts
+// every effort level via the roster's dispatch-sentinel list, with no hand-maintained exemption
+// table behind it.
+func TestCheckTiers_InheritSentinelIsEffortExempt(t *testing.T) {
+	p := validPlan()
+	p.Milestones[0].Phases[0].Tasks[0].Model = ModelInherit
+	for _, e := range []Effort{EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax} {
+		p.Milestones[0].Phases[0].Tasks[0].Effort = e
+		if r := CheckTiers(p); !r.OK {
+			t.Fatalf("inherit at effort %q must be valid, got issues: %+v", e, r.Issues)
+		}
+	}
+}
+
+// TestCheckTiers_LegacyPinOnlyModelRejected proves plan validation's model set is the roster's
+// selectable=='new-work' projection, not the wider authoring-gate allowlist: a legacy-pin-only
+// model is a valid roster entry but is not plan-pinnable.
+func TestCheckTiers_LegacyPinOnlyModelRejected(t *testing.T) {
+	p := validPlan()
+	p.Milestones[0].Phases[0].Tasks[0].Model = Model("claude-opus-4-5") // legacy-pin-only in the roster
+	r := CheckTiers(p)
+	if r.OK {
+		t.Fatal("a legacy-pin-only model must fail plan validation")
+	}
+	found := false
+	for _, iss := range r.Issues {
+		if strings.Contains(iss.Issue, "not in the selectable set") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a 'not in the selectable set' issue, got %+v", r.Issues)
+	}
+}
+
+// TestCheckTiers_MatchesRetiredTablesForEveryKnownModel is the no-narrowing differential guard:
+// for every model and effort combination the old xhighOK/maxOK/tierExempt tables answered, the
+// roster-derived CheckTiers must reach the identical accept/reject verdict.
+func TestCheckTiers_MatchesRetiredTablesForEveryKnownModel(t *testing.T) {
+	retiredXHighOK := map[Model]bool{ModelOpus48: true, ModelOpus47: true, ModelSonnet5: true}
+	retiredMaxOK := map[Model]bool{ModelOpus48: true, ModelOpus47: true, ModelOpus46: true, ModelSonnet5: true, ModelSonnet46: true}
+	retiredTierExempt := map[Model]bool{ModelInherit: true, ModelFable5: true}
+	models := []Model{ModelOpus48, ModelOpus47, ModelOpus46, ModelSonnet5, ModelSonnet46, ModelHaiku45, ModelFable5, ModelInherit}
+
+	for _, m := range models {
+		for _, e := range []Effort{EffortXHigh, EffortMax} {
+			p := validPlan()
+			p.Milestones[0].Phases[0].Tasks[0].Model = m
+			p.Milestones[0].Phases[0].Tasks[0].Effort = e
+			got := CheckTiers(p).OK
+
+			exempt := retiredTierExempt[m]
+			table := retiredXHighOK
+			if e == EffortMax {
+				table = retiredMaxOK
+			}
+			want := exempt || table[m]
+			if got != want {
+				t.Errorf("model=%s effort=%s: CheckTiers.OK=%v, retired table said %v", m, e, got, want)
+			}
+		}
+	}
+}
+
+// TestCheckTiers_UnknownModelYieldsSingleIssueNoSpuriousEffortComplaint proves an unrecognized
+// (roster-stale) model produces exactly ONE issue — the model-not-selectable one — never a second,
+// spurious effort-availability complaint layered on top, since EffortAvailable's error on that same
+// unresolvable id is deliberately swallowed (see CheckTiers).
+func TestCheckTiers_UnknownModelYieldsSingleIssueNoSpuriousEffortComplaint(t *testing.T) {
+	p := validPlan()
+	p.Milestones[0].Phases[0].Tasks[0].Model = Model("totally-bogus-model")
+	p.Milestones[0].Phases[0].Tasks[0].Effort = EffortHigh
+	r := CheckTiers(p)
+	var forTask []TierIssue
+	for _, iss := range r.Issues {
+		if iss.ID == "M1.P1.T1" {
+			forTask = append(forTask, iss)
+		}
+	}
+	if len(forTask) != 1 {
+		t.Fatalf("expected exactly 1 issue for an unresolvable model, got %+v", forTask)
+	}
+	if !strings.Contains(forTask[0].Issue, "not in the selectable set") {
+		t.Fatalf("expected the model-selectable issue, got %+v", forTask[0])
+	}
+}
+
+// TestCheckTiers_RetiredTableCoverageIsExhaustive is a meta-guard on the differential test itself:
+// it asserts the retired-table literals reproduced in
+// TestCheckTiers_MatchesRetiredTablesForEveryKnownModel are exactly the ones the actual deleted
+// tables held (xhighOK={Opus48,Opus47,Sonnet5}, maxOK={Opus48,Opus47,Opus46,Sonnet5,Sonnet46},
+// tierExempt={Inherit,Fable5}) — every entry present, nothing added, so the no-narrowing guard
+// cannot silently drift from what was actually retired.
+func TestCheckTiers_RetiredTableCoverageIsExhaustive(t *testing.T) {
+	retiredXHighOK := map[Model]bool{ModelOpus48: true, ModelOpus47: true, ModelSonnet5: true}
+	retiredMaxOK := map[Model]bool{ModelOpus48: true, ModelOpus47: true, ModelOpus46: true, ModelSonnet5: true, ModelSonnet46: true}
+	retiredTierExempt := map[Model]bool{ModelInherit: true, ModelFable5: true}
+	if len(retiredXHighOK) != 3 || len(retiredMaxOK) != 5 || len(retiredTierExempt) != 2 {
+		t.Fatalf("retired-table literal sizes changed: xhighOK=%d maxOK=%d tierExempt=%d, want 3/5/2",
+			len(retiredXHighOK), len(retiredMaxOK), len(retiredTierExempt))
+	}
+}
+
 func TestRenderPlanEscapesCells(t *testing.T) {
 	p := validPlan()
 	p.Milestones[0].Phases[0].Tasks[0].Summary = "has | pipe\nand newline"
