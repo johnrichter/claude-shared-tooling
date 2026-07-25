@@ -40,7 +40,7 @@ func mkExec(t *testing.T, p Plan, mode string, done ...string) ExecState {
 		t.Fatal(err)
 	}
 	for _, id := range done {
-		if err := RecordTask(&ex, id, RecordFields{Status: ptr(StatusDone)}, at0); err != nil {
+		if err := RecordTask(&ex, id, RecordFields{Status: ptr(StatusDone), Commit: ptrS("aaa1111")}, at0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -325,7 +325,7 @@ func TestBatchArchivedDepResolvesAsDone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone)}, at0); err != nil {
+	if err := RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone), Commit: ptrS("aaa1111")}, at0); err != nil {
 		t.Fatal(err)
 	}
 	out, err := Archive(p, ex, ArchiveDoc{}, ArchiveOptions{MilestoneIDs: []string{"M1"}}, at0)
