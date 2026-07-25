@@ -14,6 +14,22 @@ import (
 	"time"
 )
 
+// hermeticCLIEnv strips the self-check subcommand's live-session env fallbacks (ANTHROPIC_MODEL,
+// CLAUDE_EFFORT) from the CLI subprocess's environment. Without this, a case built around a fixed
+// transcript+band and asserting on something else entirely (e.g. session-id matching) would
+// silently ride whatever model/effort the test RUNNER's own ambient session happens to have —
+// making the case's pass/fail depend on who/what invokes `go test`, not on the code under test.
+func hermeticCLIEnv() []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "ANTHROPIC_MODEL=") || strings.HasPrefix(kv, "CLAUDE_EFFORT=") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	return env
+}
+
 const (
 	cliOurs  = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 	cliOther = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
@@ -23,6 +39,7 @@ const (
 func runCLIExpect(t *testing.T, bin string, wantExit int, args ...string) string {
 	t.Helper()
 	cmd := exec.Command(bin, args...)
+	cmd.Env = hermeticCLIEnv()
 	out, err := cmd.CombinedOutput()
 	gotExit := 0
 	if err != nil {
