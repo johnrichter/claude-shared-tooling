@@ -29,7 +29,7 @@ func TestRecordTask_RecordsAllFourTokenClassesPerTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	u := usageOf(500, 200, 9000, 300, 4) // cache_read (9000) dwarfs output (300) — the O-is-cache-read-dominated case
-	if err := RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone), Cost: ptrF(0.10), TokensOut: ptrI(300), Usage: u}, at0); err != nil {
+	if err := RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone), Commit: ptrS("aaa1111"), Cost: ptrF(0.10), TokensOut: ptrI(300), Usage: u}, at0); err != nil {
 		t.Fatal(err)
 	}
 	row := ex.Tasks[0]
@@ -56,10 +56,10 @@ func TestRecordTask_RunUsageIsRecomputedSumOfTaskUsage_NeverHandSummed(t *testin
 	}
 	u1 := usageOf(100, 10, 1000, 50, 2)
 	u2 := usageOf(200, 20, 2000, 60, 3)
-	if err := RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone), TokensOut: ptrI(50), Usage: u1}, at0); err != nil {
+	if err := RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone), Commit: ptrS("aaa1111"), TokensOut: ptrI(50), Usage: u1}, at0); err != nil {
 		t.Fatal(err)
 	}
-	if err := RecordTask(&ex, "M1.P1.T2", RecordFields{Status: ptr(StatusDone), TokensOut: ptrI(60), Usage: u2}, at0); err != nil {
+	if err := RecordTask(&ex, "M1.P1.T2", RecordFields{Status: ptr(StatusDone), Commit: ptrS("bbb2222"), TokensOut: ptrI(60), Usage: u2}, at0); err != nil {
 		t.Fatal(err)
 	}
 	got := ex.RunConfig.Usage
@@ -92,7 +92,7 @@ func TestRecordTask_NoUsageFlag_LeavesUsageNilAndCostFieldsIntact(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone), Cost: ptrF(0.25), TokensOut: ptrI(1000)}, at0); err != nil {
+	if err := RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone), Commit: ptrS("aaa1111"), Cost: ptrF(0.25), TokensOut: ptrI(1000)}, at0); err != nil {
 		t.Fatal(err)
 	}
 	if ex.Tasks[0].Usage != nil {
@@ -119,10 +119,10 @@ func TestRecordTask_MixedUsageAndNoUsageTasks_RunTotalIsSumOfOnlyRecorded(t *tes
 		t.Fatal(err)
 	}
 	u := usageOf(10, 1, 100, 5, 1)
-	if err := RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone), TokensOut: ptrI(5), Usage: u}, at0); err != nil {
+	if err := RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone), Commit: ptrS("aaa1111"), TokensOut: ptrI(5), Usage: u}, at0); err != nil {
 		t.Fatal(err)
 	}
-	if err := RecordTask(&ex, "M1.P1.T2", RecordFields{Status: ptr(StatusDone), Cost: ptrF(0.05)}, at0); err != nil {
+	if err := RecordTask(&ex, "M1.P1.T2", RecordFields{Status: ptr(StatusDone), Commit: ptrS("bbb2222"), Cost: ptrF(0.05)}, at0); err != nil {
 		t.Fatal(err)
 	}
 	got := ex.RunConfig.Usage
@@ -223,7 +223,7 @@ func TestReconcileExec_CarriesPerTaskUsageForward(t *testing.T) {
 		t.Fatal(err)
 	}
 	u := usageOf(10, 1, 100, 5, 1)
-	if err := RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone), Usage: u}, at0); err != nil {
+	if err := RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone), Commit: ptrS("aaa1111"), Usage: u}, at0); err != nil {
 		t.Fatal(err)
 	}
 	// Reconcile against the identical plan (no changes) — a carried row must keep its Usage.

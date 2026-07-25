@@ -56,7 +56,7 @@ func mkExecMode(t *testing.T, p Plan, mode string, done ...string) ExecState {
 	}
 	for _, id := range done {
 		s := StatusDone
-		if err := RecordTask(&ex, id, RecordFields{Status: &s}, at0); err != nil {
+		if err := RecordTask(&ex, id, RecordFields{Status: &s, Commit: ptrS("aaa1111")}, at0); err != nil {
 			t.Fatal(err)
 		}
 	}

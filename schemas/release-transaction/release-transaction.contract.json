@@ -1,0 +1,339 @@
+{
+  "kind": "release-transaction-contract",
+  "version": "release-transaction@1.0.0",
+  "description": "A release is ONE atomic transaction over its enumerators. Declares WHAT a complete release consists of, as data: the single normative enumerator list (each with the evidence that proves it and the closed set of reasons it may be declared not-applicable), the evidence-kind vocabulary an interpreter implements, the artifact-verification rules (a single-pass deterministic manifest; a detached signature is REQUIRED and a missing or invalid signature discards the manifest outright; checksum-only verification is forbidden; a host that cannot verify a signature yields UNVERIFIABLE and its caller fails open to the raw OS tool), the ordered provisioning ladder (version-keyed cache re-verified in place, then the current release, then a commit-frozen copy, then unavailable), the changed-module rule (any change to a released module carries a version bump AND a published release), and the release-pause hook an open below-floor compliance defect fires. INPUTS: this contract + one release record (release-transaction-record.schema.json) + the repository state the record's bindings point at + an optional release-pause register (release-pause-register.schema.json). OUTPUT: one result per enumerator, in this file's `enumerators` array order, each satisfied / not-applicable / missing / unsatisfied, plus one transaction verdict. INVARIANTS: the `enumerators` array is the ONLY normative enumeration - no interpreter, schema, or document restates it; every enumerator resolves to exactly one status, and an incomplete transaction fails with the offending enumerator named; a not-applicable enumerator is DECLARED in the record with a reason this contract allows for that enumerator, never inferred; iteration follows declared array order, so output is byte-identical for identical input. TEMPLATE SYNTAX: every template string here uses `$name` placeholders (`string.Template` form), so a regex-valued default carries no brace ambiguity.",
+  "enumerators": [
+    {
+      "id": "version",
+      "title": "Version",
+      "participates": "the released module's own manifest states the version being released",
+      "evidence_kind": "json_field_equals_version",
+      "not_applicable_reasons": [],
+      "missing_message": "no manifest binding states the released version - a release with no version is not a release"
+    },
+    {
+      "id": "catalog_entry",
+      "title": "Catalog entry",
+      "participates": "the catalog that publishes the module carries an entry for it whose version equals the released version",
+      "evidence_kind": "catalog_entry_version",
+      "not_applicable_reasons": [
+        {
+          "id": "no-catalog",
+          "meaning": "the module is not published through a plugin catalog (a library, a CLI repo, or a language-agnostic contract module)"
+        }
+      ],
+      "missing_message": "no catalog binding - a catalog whose entry lags the plugin is the defect this enumerator exists to catch"
+    },
+    {
+      "id": "enable_state",
+      "title": "Enable state",
+      "participates": "the consumer settings that turn the plugin on mirror the released plugin at its expected enable state",
+      "evidence_kind": "enable_state_mirror",
+      "not_applicable_reasons": [
+        {
+          "id": "no-enable-surface",
+          "meaning": "the module has no consumer enable-state mirror: it is not a plugin"
+        }
+      ],
+      "missing_message": "no enable-state binding - a published plugin nobody enables is a release only on paper"
+    },
+    {
+      "id": "tag",
+      "title": "Tag",
+      "participates": "a tag matching the module's tag convention exists AND points at a commit where the module is at the released version",
+      "evidence_kind": "git_tag",
+      "not_applicable_reasons": [],
+      "missing_message": "no tag binding - an untagged release cannot be pinned, fetched, or rolled back"
+    },
+    {
+      "id": "artifacts",
+      "title": "Artifacts",
+      "participates": "the published artifacts verify: a canonical manifest, a valid detached signature over it, and every listed artifact matching its recorded digest and size",
+      "evidence_kind": "signed_manifest",
+      "not_applicable_reasons": [
+        {
+          "id": "no-release-archive",
+          "meaning": "the module publishes no archive: consumers pin its git tag and build or vendor from source"
+        }
+      ],
+      "missing_message": "no artifact binding - a release that publishes binaries must prove they verify"
+    },
+    {
+      "id": "download_script_pin",
+      "title": "Download-script pin",
+      "participates": "the provisioning script that fetches the module at runtime pins exactly the released version, and no other",
+      "evidence_kind": "pin_equals_version",
+      "not_applicable_reasons": [
+        {
+          "id": "no-provisioned-binary",
+          "meaning": "nothing downloads this module at runtime, so no pin exists to advance"
+        }
+      ],
+      "missing_message": "no pin binding - a pin left on the previous version serves the previous release to every consumer"
+    },
+    {
+      "id": "changelog",
+      "title": "Changelog",
+      "participates": "the module's changelog carries an entry naming the released version",
+      "evidence_kind": "changelog_entry",
+      "not_applicable_reasons": [],
+      "missing_message": "no changelog binding - an unrecorded release leaves consumers no way to know what changed"
+    }
+  ],
+  "evidence_kinds": {
+    "json_field_equals_version": {
+      "meaning": "read a JSON file, resolve an RFC 6901 JSON Pointer, require the value to equal the released version",
+      "params": {
+        "required": ["path", "pointer"],
+        "optional": {}
+      },
+      "failures": {
+        "file-absent": "the file the binding names does not exist",
+        "file-unparsable": "the file is not valid JSON",
+        "pointer-absent": "the pointer resolves to nothing",
+        "value-mismatch": "the resolved value is not the released version"
+      }
+    },
+    "catalog_entry_version": {
+      "meaning": "read a catalog JSON, select the entry whose name field equals the entry name, require its version field to equal the released version",
+      "params": {
+        "required": ["path"],
+        "optional": {
+          "entries_pointer": { "default": "/plugins" },
+          "name_field": { "default": "name" },
+          "version_field": { "default": "version" },
+          "entry_name": { "default": "$subject_name" }
+        }
+      },
+      "failures": {
+        "file-absent": "the catalog does not exist",
+        "file-unparsable": "the catalog is not valid JSON",
+        "entries-absent": "the entries pointer resolves to nothing, or not to an array",
+        "entry-absent": "the catalog carries no entry for the module",
+        "version-field-absent": "the entry carries no version field - the catalog cannot agree with a module about a field it does not have",
+        "value-mismatch": "the entry's version is not the released version"
+      }
+    },
+    "enable_state_mirror": {
+      "meaning": "read a settings JSON, resolve the enable-state map, require the module's key to be present at the expected state",
+      "params": {
+        "required": ["path"],
+        "optional": {
+          "pointer": { "default": "/enabledPlugins" },
+          "key": { "default": "$subject_name@$marketplace" },
+          "expected": { "default": true }
+        }
+      },
+      "failures": {
+        "file-absent": "the settings file does not exist",
+        "file-unparsable": "the settings file is not valid JSON",
+        "binding-invalid": "the default enable-state key cannot be rendered because the record declares no marketplace",
+        "pointer-absent": "the enable-state map is absent",
+        "key-absent": "the enable-state map carries no key for the module",
+        "value-mismatch": "the key is not at the expected enable state"
+      }
+    },
+    "git_tag": {
+      "meaning": "require the named tag to exist, to match a tag template rendered for this module and version, and to point at a commit where the module's manifest already carries the released version",
+      "params": {
+        "required": ["tag"],
+        "optional": {
+          "manifest_path": { "note": "defaults to the path bound to the version enumerator" },
+          "manifest_pointer": { "note": "defaults to the pointer bound to the version enumerator" }
+        }
+      },
+      "failures": {
+        "tag-absent": "no such tag exists in the repository",
+        "tag-off-convention": "the tag name matches no tag template rendered for this module and version",
+        "tag-tree-mismatch": "the tag points at a commit where the module is not at the released version - the tag and the version are not one transaction",
+        "manifest-binding-absent": "no manifest binding says what the module's version should be at the tag",
+        "git-unavailable": "the repository could not be read"
+      }
+    },
+    "signed_manifest": {
+      "meaning": "require the release manifest to be in canonical form, its detached signature to verify against the committed public key, its version to be the released version, and every listed artifact to match its recorded digest and size",
+      "params": {
+        "required": ["manifest", "public_key"],
+        "optional": {
+          "signature": { "default": "$manifest.sig" },
+          "artifact_dir": { "note": "defaults to the manifest's own directory" },
+          "require_arches": { "default": [] }
+        }
+      },
+      "failures": {
+        "manifest-absent": "the manifest does not exist",
+        "manifest-unparsable": "the manifest is not valid JSON, or not manifest-shaped",
+        "manifest-non-canonical": "the manifest bytes are not the canonical rendering of their own content - it was not produced by a single deterministic pass",
+        "signature-missing": "no detached signature accompanies the manifest - the manifest is discarded, never checksum-verified",
+        "signature-invalid": "the detached signature does not verify against the public key - the manifest is discarded",
+        "public-key-absent": "the public key the signature is verified against is not there - a release or consumer-configuration defect, distinct from a host with no verifier",
+        "signature-unverifiable": "no signature verifier is available - at the gate this FAILS, because an artifact nobody can authenticate is not releasable",
+        "version-mismatch": "the manifest states a different version",
+        "arch-absent": "a required arch has no entry in the manifest",
+        "artifact-absent": "a listed artifact is not present",
+        "artifact-mismatch": "a listed artifact's bytes do not match its recorded digest or size"
+      }
+    },
+    "pin_equals_version": {
+      "meaning": "read every pin from a file (an RFC 6901 JSON Pointer, or a regex whose first capture group is the pinned version) and require each to be the released version",
+      "params": {
+        "required": ["path"],
+        "optional": {
+          "pointer": { "note": "a JSON Pointer into a JSON pin file; mutually exclusive with pattern" },
+          "pattern": { "note": "a regex over the file's text whose first capture group is the pinned version; mutually exclusive with pointer" }
+        }
+      },
+      "failures": {
+        "file-absent": "the pin file does not exist",
+        "file-unparsable": "the pin file is not valid JSON",
+        "binding-invalid": "the binding names neither a pointer nor a pattern, or names both",
+        "pin-absent": "no pin was found in the file",
+        "pin-disagreement": "the file carries pins at more than one version",
+        "value-mismatch": "the pin is not the released version"
+      }
+    },
+    "changelog_entry": {
+      "meaning": "require the changelog to carry a heading or list entry naming exactly the released version",
+      "params": {
+        "required": ["path"],
+        "optional": {
+          "pattern": { "default": "(?m)^[ \\t]*(?:#{1,6}[ \\t]+|[-*][ \\t]+).*(?<![0-9.])$version_regex(?![0-9.])" }
+        }
+      },
+      "failures": {
+        "file-absent": "the changelog does not exist",
+        "entry-absent": "the changelog carries no entry for the released version"
+      }
+    }
+  },
+  "verification": {
+    "manifest": {
+      "shape": "{version: string, artifacts: [{arch, filename, sha256, size}]}",
+      "rendering": "one pass: the assembled record is serialized exactly once and never post-edited, so two runs over identical inputs produce identical bytes",
+      "canonical_form": {
+        "encoding": "UTF-8, no byte-order mark",
+        "json": "keys sorted, two-space indent, no non-ASCII escaping, no HTML escaping",
+        "artifact_order": "artifacts sorted by arch",
+        "trailer": "exactly one trailing newline"
+      },
+      "canonical_form_is_a_check": "a manifest whose bytes differ from the canonical rendering of their own content was assembled in more than one pass and is rejected"
+    },
+    "signature": {
+      "scheme": "Ed25519 detached signature over the manifest bytes, verified against a public key committed alongside the consumer",
+      "required": true,
+      "on_missing_or_invalid": "discard the manifest outright - no content, no digests, and no artifact is accepted from it",
+      "on_no_verifier": "UNVERIFIABLE - at provisioning time the caller fails open to the raw OS tool; at the release gate this fails, because an artifact nobody can authenticate is not releasable",
+      "on_missing_public_key": "UNVERIFIABLE, reported as public-key-absent rather than as an absent verifier: a release or consumer-configuration defect, not a property of the host. Same consequences - the gate fails, and provisioning keeps walking to the commit-frozen rung, whose trust root is the repository commit",
+      "checksum_only": "forbidden - a digest list is only as trustworthy as the signature over it, so a manifest that cannot be authenticated is never used to validate bytes"
+    }
+  },
+  "provisioning_ladder": [
+    {
+      "rung": 1,
+      "id": "version-keyed-cache",
+      "resolves": "a cached artifact stored under the requested version, re-verified in place against its digest sidecar before use, with no network access",
+      "on_failure": "evict the cache entry and its sidecar, then continue down the ladder"
+    },
+    {
+      "rung": 2,
+      "id": "current-release",
+      "resolves": "the release host's artifact for the requested version, accepted only against a signature-verified manifest, then cached with its sidecar",
+      "preference": "attempted before any commit-frozen copy, so a host that can reach the release always gets the current release rather than whatever the last commit froze",
+      "on_unreachable": "continue down the ladder",
+      "on_unverifiable": "continue down the ladder - this host cannot authenticate a release manifest, and the frozen rung's trust root is the repository commit rather than the manifest",
+      "on_discarded": "stop - a manifest that failed authentication is a security event, not a reason to fall back"
+    },
+    {
+      "rung": 3,
+      "id": "commit-frozen-copy",
+      "resolves": "an artifact committed into the repository, verified against its committed digest sidecar",
+      "trust_root": "the repository commit, never a network manifest",
+      "applies": "only where a documented exception permits a committed artifact; an unmaterialized large-file pointer counts as absent"
+    },
+    {
+      "rung": 4,
+      "id": "unavailable",
+      "resolves": "nothing - the caller fails open to the raw OS tool rather than run an unverified artifact"
+    }
+  ],
+  "changed_module_rule": {
+    "meaning": "any change to a released module carries a version bump AND a published release; a change with neither fails the gate",
+    "module_kinds": [
+      {
+        "id": "claude-plugin",
+        "root_marker": ".claude-plugin/plugin.json",
+        "version_source": "json-pointer",
+        "pointer": "/version"
+      },
+      {
+        "id": "cargo-crate",
+        "root_marker": "Cargo.toml",
+        "version_source": "regex",
+        "pattern": "(?m)^[ \\t]*version[ \\t]*=[ \\t]*[\"']([^\"']+)[\"']"
+      },
+      {
+        "id": "python-project",
+        "root_marker": "pyproject.toml",
+        "version_source": "regex",
+        "pattern": "(?m)^[ \\t]*version[ \\t]*=[ \\t]*[\"']([^\"']+)[\"']"
+      },
+      {
+        "id": "go-module",
+        "root_marker": "go.mod",
+        "version_source": "tag"
+      },
+      {
+        "id": "schema-module",
+        "root_glob": "schemas/*",
+        "version_source": "tag"
+      }
+    ],
+    "tag_templates": [
+      "$module_path/v$version",
+      "$module_name-v$version",
+      "v$version"
+    ],
+    "version_pattern": "^([0-9]+)\\.([0-9]+)\\.([0-9]+)(?:[-+].*)?$",
+    "version_ordering": "the numeric triple must be strictly greater than the base ref's; a change to a prerelease or build suffix alone is not a bump",
+    "unowned_paths": "a changed path under no module root belongs to no release and is skipped",
+    "exempt_paths": [
+      ".github/**",
+      ".githooks/**",
+      ".claude/**",
+      ".dat/**",
+      ".anoikis/**",
+      ".gitattributes",
+      ".gitignore"
+    ],
+    "exempt_paths_meaning": "repository infrastructure that ships in no release; extending this list is a reviewed change to this contract, never a local override"
+  },
+  "hooks": {
+    "release_pause": {
+      "meaning": "an open below-floor compliance defect against a module pauses that module's NEXT release: the transaction is refused even when every enumerator is satisfied",
+      "register": "a release-pause register conforming to release-pause-register.schema.json, supplied to the checker; an absent register is the ordinary case and pauses nothing",
+      "fires_on": "an entry whose owner is the released module and whose status is open",
+      "owner_kinds": ["plugin", "cli"],
+      "written_by": "M10.P2.T3 - rung-4 compliance-floor measurement wiring, which measures each rung-4 invariant's per-model compliance rate and opens the defect when a rate falls below its declared floor",
+      "not_retroactive": "the pause lands on the owner's next release; the milestone that shipped the invariant does not fail after the fact",
+      "unmeasured": "an entry left declared-unmeasured pauses nothing here - opening its defect belongs to the measurement wiring, and this gate acts only on an open defect",
+      "unreadable_register": "a register that exists but cannot be parsed is an error, never an absence of defects"
+    }
+  },
+  "messages": {
+    "prefix": "release-transaction: $subject v$version: ",
+    "satisfied": "enumerator '$id' satisfied - $detail",
+    "not_applicable": "enumerator '$id' not-applicable - $reason: $detail",
+    "missing": "enumerator '$id' MISSING - $detail",
+    "unsatisfied": "enumerator '$id' UNSATISFIED - $code: $detail",
+    "paused": "paused by open compliance defect $defect_id against $owner ($invariant_id) - resolve it before this release",
+    "pass": "complete transaction - every enumerator accounted for",
+    "fail": "partial release - $count enumerator(s) unaccounted for"
+  },
+  "exit_codes": {
+    "0": "the transaction is complete, or the provisioning request resolved",
+    "1": "the transaction is partial: an enumerator is missing or its evidence failed",
+    "2": "usage or contract error: the record, the contract, or the invocation is malformed",
+    "3": "provisioning resolved nothing - the caller fails open to the raw OS tool",
+    "4": "the transaction is paused by an open compliance defect against the released module"
+  }
+}

@@ -1,0 +1,34 @@
+build-helpers — deterministic mechanics for the build-with-team orchestrator
+
+Usage:
+  build-helpers render         <plan.json>                          -> plan.md
+  build-helpers diff           <old-plan.json> <new-plan.json>      -> {carried,changed,added,removed}
+  build-helpers check-tiers    <plan.json>                          -> {ok,issues}; exit 1 if not ok
+  build-helpers hash           <plan.json>                          -> {taskId: contentHash}
+  build-helpers validate       <plan.json>                          -> {ok,errors,warnings}; exit 1 if not ok
+  build-helpers classify       <project-dir>                        -> {design,plan,execution,route}
+  build-helpers escalate       --condition NAME [--touches-success-criteria --touches-scope] -> {route: magistrate|plan-with-team|no-escalation,...} closed named trigger set, no catch-all
+  build-helpers classify-scope [--touches-success-criteria --touches-scope] -> {route: plan-with-team|in-scope,...} design-level delta hands back to plan-with-team
+  build-helpers init-exec      <plan.json> --slug S [flags]         -> execution.json
+  build-helpers render-exec    <execution.json> <plan.json>         -> execution.md
+  build-helpers next           <execution.json> <plan.json>         -> {task}|{done}|{blocked}
+  build-helpers batch          <execution.json> <plan.json> [--max N] -> {tasks}|{done}|{blocked}
+  build-helpers verify-surface <plan.json> <taskId>[,<taskId>…] [--root DIR] -> {ok,violations}; exit 1 if not ok. FORWARD direction: checks the UNION of the listed tasks' declared file_surface against disk (glob >=1 match, dir non-empty, required entries non-trivial/non-empty) rooted at --root (default cwd). One id = pre-commit re-assertion (a task's own worktree); comma-joined ids = post-merge re-assertion (the merged build-worktree tip, unioned across the merged batch).
+  build-helpers check-changed-surface <plan.json> <taskId> --changed FILE|- -> {ok,off_surface}; exit 1 if not ok. REVERSE direction: every path in a git-derived changed-set (one bare path per line, e.g. 'git status --porcelain | cut -c4-', "-" reads stdin) must be covered by taskId's declared file_surface (required or optional); an uncovered path is an off-surface write.
+  build-helpers record         <execution.json> <taskId> [flags]    -> execution.json
+  build-helpers log-note       <execution.json> --note "…" [--at …] -> execution.json
+  build-helpers reconcile-exec <execution.json> <old> <new> [flags] -> execution.json
+  build-helpers archive        <plan.json> <execution.json> <archive.json> --milestone ID[,ID…] [--at …] -> {archived,skipped}; rewrites all three files. Operator-invoked ONLY — never call from the build loop. Refuses (no partial write) unless every task under each named milestone is done|superseded.
+  build-helpers migrate-project <plan.json> <execution.json> [--dry-run] -> {already_v2,dry_run,changes,warnings}; upgrades an in-flight v1 project to the v2 shapes (entity names, execution schema_version stamp, retired-enum remap). Lossless (done/SHA/cost/verdicts preserved), idempotent (already-v2 rewrites nothing), --dry-run previews without writing.
+  build-helpers usage          <transcript.jsonl>                   -> {input,output,cache,total,turns} true tokens (whole session incl. subagents)
+  build-helpers record-usage   <execution.json> --transcript P [--specs P --final --baseline-capture] -> execution.json (folds per-model true-cost accounting + per-file watermarks + orchestrator-only O into run config; --final mandatory at finish; an unresolved transcript sets cost_status:unresolved — non-fatal, unless --baseline-capture)
+  build-helpers attribute      <execution.json> --transcript P [--tasks id,id,… --specs P] -> {tasks:{id:{cost_usd,cost_attribution:"measured",…}},even_split,unmappable} MEASURED per-task cost from subagent transcripts
+  build-helpers retrieve       <plan.json|execution.json|archive.json> --level {outline|milestone|phase|task|field} [--id ID --field NAME] -> read-only detail-level projection (never decides eligibility); archive.json serves archived detail at the same four levels
+  build-helpers self-check     --floor-model M --floor-effort E --ceiling-model M --ceiling-effort E [--transcript P --settings P --session-id ID | --scratchpad-path P] -> {model,effort,effort_detected,abort,warnings,reason,session_id_checked,session_id_match} session-tier self-check against a caller-supplied band; --session-id/--scratchpad-path additionally hard-aborts if --transcript's trailing lines don't name that session id. Exit 0 ok; 1 abort (below floor and/or session-id mismatch); 2 usage/IO error (missing band flags, undeterminable model, or — with the identity guard — unparseable session id / unreadable / empty / all-malformed / no-sessionId transcript)
+  build-helpers resolve-transcript --session-id ID | --scratchpad-path P [--cwd DIR --projects-dir DIR] -> prints the ONE deterministic transcript path for that session (id-based path join, never a directory mtime scan). Exit 0 ok (path on stdout); 2 usage/IO error (bad/missing id, unresolvable cwd/$HOME, or the path doesn't exist)
+  build-helpers feedback add   <feedback.json> --title … --feedback … --impact N --urgency N [--source-task … --proposed-solution … --why-it-matters … --at …] -> feedback.json (writes feedback.json AND regenerates the sibling feedback.md mirror in one call)
+  build-helpers feedback list  <feedback.json> [--by-task ID --min-impact N --min-urgency N] -> stdout, one "<id> — <title>" line per matching entry, ranked by criticality descending (read-only; filters compose with AND)
+  build-helpers feedback gate  <feedback.json> --plan <plan.json> --threshold N -> {threshold,amend_now,deferred,plan} partition the ranked register at the inclusive criticality floor: amend_now is ranked reconcile-exec amendment input; deferred entries are applied to plan as the standing feedback-review milestone (read-only; the returned plan is the new-plan.json for reconcile-exec)
+
+Exit codes: 0 ok; 1 validation failed; 2 usage/IO error.
+Positionals precede flags: <positionals…> --key value (Go flag stops at the first positional).

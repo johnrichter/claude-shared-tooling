@@ -108,7 +108,7 @@ func TestSelfCheck_BelowFloorModelAborts(t *testing.T) {
 
 func TestSelfCheck_BelowFloorEffortSameModelAborts(t *testing.T) {
 	// Same model as floor, but effort below the floor's effort -- must still abort since
-	// tierRank is a composite of both dimensions.
+	// effort breaks the tie once roster.Compare finds the models equally ranked.
 	b := band(ModelSonnet5, EffortHigh, ModelSonnet5, EffortMax)
 	r := SelfCheck(ModelSonnet5, EffortLow, true, b)
 	if !r.Abort {
@@ -161,11 +161,61 @@ func TestSelfCheck_CrossModelBandSpansCorrectly(t *testing.T) {
 	}
 }
 
-func TestSelfCheck_UnrecognizedModelBelowAnyFloor(t *testing.T) {
+func TestSelfCheck_UnrecognizedModelIsRosterStale(t *testing.T) {
+	// A model absent from the roster is a DISTINCT roster-stale verdict, never a below-floor
+	// guess (the modelRank defect this rewrite fixes: an unranked model used to score below
+	// every real floor and abort as if it were simply too weak).
 	b := band(ModelHaiku45, EffortLow, ModelOpus48, EffortMax)
 	r := SelfCheck(Model("claude-mystery-9"), EffortHigh, true, b)
-	if !r.Abort {
-		t.Fatalf("unrecognized model must rank below any real floor (fail closed), got %+v", r)
+	if r.Abort {
+		t.Fatalf("unrecognized model must NOT abort as below-floor, got %+v", r)
+	}
+	if !r.RosterStale {
+		t.Fatalf("expected RosterStale=true for an unrecognized model, got %+v", r)
+	}
+	if !strings.Contains(r.Reason, "claude-mystery-9") {
+		t.Fatalf("expected Reason to name the unrecognized model, got %q", r.Reason)
+	}
+}
+
+func TestSelfCheck_UnrecognizedFloorModelIsRosterStale(t *testing.T) {
+	// The same distinct verdict applies when a BAND ENDPOINT (not the observed model) is
+	// unrecognized -- a config/roster-staleness issue either way.
+	b := band(Model("claude-mystery-9"), EffortLow, ModelOpus48, EffortMax)
+	r := SelfCheck(ModelSonnet5, EffortHigh, true, b)
+	if r.Abort {
+		t.Fatalf("unrecognized band endpoint must NOT abort as below-floor, got %+v", r)
+	}
+	if !r.RosterStale {
+		t.Fatalf("expected RosterStale=true for an unrecognized band floor, got %+v", r)
+	}
+}
+
+func TestSelfCheck_PostRosterModelAboveHardcodedFloorNoLongerAborts(t *testing.T) {
+	// The FB8 regression this rewrite fixes: a newer same-family model (here, a generation
+	// beyond every literal this package once hardcoded) must rank ABOVE an older floor via
+	// roster.Compare's generation comparison, not fall below it for being unranked.
+	b := band(ModelOpus48, EffortHigh, ModelOpus48, EffortMax)
+	r := SelfCheck(Model("claude-opus-5"), EffortHigh, true, b)
+	if r.RosterStale {
+		t.Fatalf("claude-opus-5 must be a known roster model, got %+v", r)
+	}
+	if r.Abort {
+		t.Fatalf("a newer same-family model must rank above the claude-opus-4-8 floor, got %+v", r)
+	}
+}
+
+func TestResolveBand_KnownNamesResolve(t *testing.T) {
+	for _, name := range []string{"plan", "build"} {
+		if _, ok := ResolveBand(name); !ok {
+			t.Fatalf("expected named band %q to resolve", name)
+		}
+	}
+}
+
+func TestResolveBand_UnknownNameFails(t *testing.T) {
+	if _, ok := ResolveBand("not-a-real-band"); ok {
+		t.Fatalf("expected an unrecognized band name to fail resolution")
 	}
 }
 

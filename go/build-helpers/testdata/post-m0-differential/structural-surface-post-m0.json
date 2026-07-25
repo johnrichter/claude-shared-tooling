@@ -1,0 +1,2233 @@
+{
+  "commands": {
+    "archive": {
+      "documented": true,
+      "flags": {
+        "at": {
+          "default": "",
+          "type": "string"
+        },
+        "milestone": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "probes": {
+        "archive/no-milestone": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "archive/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "archived": "array",
+              "archived[]": "string"
+            }
+          }
+        },
+        "archive/refuses-unfinished": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [
+          "at"
+        ],
+        "positionals": [
+          "required",
+          "required",
+          "required"
+        ],
+        "required_flags": [
+          "milestone"
+        ]
+      }
+    },
+    "attribute": {
+      "documented": true,
+      "flags": {
+        "at": {
+          "default": "",
+          "type": "string"
+        },
+        "specs": {
+          "default": "",
+          "type": "string"
+        },
+        "tasks": {
+          "default": "",
+          "type": "string"
+        },
+        "transcript": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "probes": {
+        "attribute/no-transcript": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "attribute/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "at": "string",
+              "known_tasks": "array",
+              "known_tasks[]": "string",
+              "tasks": "object"
+            }
+          }
+        },
+        "attribute/scoped": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "at": "string",
+              "known_tasks": "array",
+              "known_tasks[]": "string",
+              "tasks": "object"
+            }
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [
+          "specs",
+          "tasks"
+        ],
+        "positionals": [
+          "required"
+        ],
+        "required_flags": [
+          "transcript"
+        ]
+      }
+    },
+    "batch": {
+      "documented": true,
+      "flags": {
+        "max": {
+          "default": "4; hard cap 8) (default 4",
+          "type": "int"
+        }
+      },
+      "probes": {
+        "batch/capped": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "tasks": "array",
+              "tasks[]": "object",
+              "tasks[].effort": "string",
+              "tasks[].id": "string",
+              "tasks[].model": "string",
+              "tasks[].name": "string",
+              "tasks[].summary": "string"
+            }
+          }
+        },
+        "batch/done": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "done": "boolean"
+            }
+          }
+        },
+        "batch/missing-positional": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "batch/ready": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "tasks": "array",
+              "tasks[]": "object",
+              "tasks[].effort": "string",
+              "tasks[].id": "string",
+              "tasks[].model": "string",
+              "tasks[].name": "string",
+              "tasks[].summary": "string"
+            }
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [
+          "max"
+        ],
+        "positionals": [
+          "required",
+          "required"
+        ],
+        "required_flags": []
+      }
+    },
+    "check-changed-surface": {
+      "documented": true,
+      "flags": {
+        "changed": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "probes": {
+        "check-changed-surface/no-changed": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "check-changed-surface/off-surface": {
+          "exit": 1,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "off_surface": "array",
+              "off_surface[]": "string",
+              "ok": "boolean"
+            }
+          }
+        },
+        "check-changed-surface/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "ok": "boolean"
+            }
+          }
+        },
+        "check-changed-surface/stdin": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "ok": "boolean"
+            }
+          }
+        },
+        "check-changed-surface/stdin-off-surface": {
+          "exit": 1,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "off_surface": "array",
+              "off_surface[]": "string",
+              "ok": "boolean"
+            }
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [],
+        "positionals": [
+          "required",
+          "required"
+        ],
+        "required_flags": [
+          "changed"
+        ]
+      }
+    },
+    "check-tiers": {
+      "documented": true,
+      "flags": {},
+      "probes": {
+        "check-tiers/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "issues": "array",
+              "ok": "boolean"
+            }
+          }
+        },
+        "check-tiers/unavailable-tier": {
+          "exit": 1,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "issues": "array",
+              "issues[]": "object",
+              "issues[].id": "string",
+              "issues[].issue": "string",
+              "ok": "boolean"
+            }
+          }
+        },
+        "check-tiers/unreadable": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [],
+        "positionals": [
+          "required"
+        ],
+        "required_flags": []
+      }
+    },
+    "classify": {
+      "documented": true,
+      "flags": {},
+      "probes": {
+        "classify/empty-dir": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "design": "object",
+              "design.present": "boolean",
+              "execution": "object",
+              "execution.mirror_present": "boolean",
+              "execution.present": "boolean",
+              "plan": "object",
+              "plan.present": "boolean",
+              "route": "string"
+            }
+          }
+        },
+        "classify/no-positional": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "classify/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "design": "object",
+              "design.present": "boolean",
+              "design.updated": "string",
+              "execution": "object",
+              "execution.mirror_present": "boolean",
+              "execution.present": "boolean",
+              "plan": "object",
+              "plan.present": "boolean",
+              "route": "string"
+            }
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [],
+        "positionals": [
+          "required"
+        ],
+        "required_flags": []
+      }
+    },
+    "classify-scope": {
+      "documented": true,
+      "flags": {
+        "touches-scope": {
+          "default": "",
+          "type": "bool"
+        },
+        "touches-success-criteria": {
+          "default": "",
+          "type": "bool"
+        }
+      },
+      "probes": {
+        "classify-scope/design-level": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "design_level": "boolean",
+              "reason": "string",
+              "route": "string",
+              "touches_scope": "boolean",
+              "touches_success_criteria": "boolean"
+            }
+          }
+        },
+        "classify-scope/in-scope": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "design_level": "boolean",
+              "reason": "string",
+              "route": "string",
+              "touches_scope": "boolean",
+              "touches_success_criteria": "boolean"
+            }
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [
+          "touches-scope",
+          "touches-success-criteria"
+        ],
+        "positionals": [],
+        "required_flags": []
+      }
+    },
+    "diff": {
+      "documented": true,
+      "flags": {},
+      "probes": {
+        "diff/missing-positional": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "diff/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "added": "array",
+              "added[]": "object",
+              "added[].hash": "string",
+              "added[].id": "string",
+              "carried": "array",
+              "changed": "array",
+              "changed[]": "object",
+              "changed[].id": "string",
+              "changed[].new_hash": "string",
+              "changed[].old_hash": "string",
+              "removed": "array",
+              "removed[]": "object",
+              "removed[].hash": "string",
+              "removed[].id": "string"
+            }
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [],
+        "positionals": [
+          "required",
+          "required"
+        ],
+        "required_flags": []
+      }
+    },
+    "escalate": {
+      "documented": true,
+      "flags": {
+        "condition": {
+          "default": "",
+          "type": "string"
+        },
+        "touches-scope": {
+          "default": "",
+          "type": "bool"
+        },
+        "touches-success-criteria": {
+          "default": "",
+          "type": "bool"
+        }
+      },
+      "probes": {
+        "escalate/design-level": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "condition": "string",
+              "design_level": "boolean",
+              "reason": "string",
+              "route": "string"
+            }
+          }
+        },
+        "escalate/named-trigger": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "condition": "string",
+              "design_level": "boolean",
+              "reason": "string",
+              "route": "string",
+              "tier": "string",
+              "trigger": "string"
+            }
+          }
+        },
+        "escalate/no-condition": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "escalate/out-of-set": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "condition": "string",
+              "design_level": "boolean",
+              "reason": "string",
+              "route": "string"
+            }
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [
+          "touches-scope",
+          "touches-success-criteria"
+        ],
+        "positionals": [],
+        "required_flags": [
+          "condition"
+        ]
+      }
+    },
+    "feedback add": {
+      "documented": true,
+      "flags": {
+        "at": {
+          "default": "",
+          "type": "string"
+        },
+        "feedback": {
+          "default": "",
+          "type": "string"
+        },
+        "impact": {
+          "default": "",
+          "type": "int"
+        },
+        "proposed-solution": {
+          "default": "",
+          "type": "string"
+        },
+        "source-task": {
+          "default": "",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "type": "string"
+        },
+        "urgency": {
+          "default": "",
+          "type": "int"
+        },
+        "why-it-matters": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "probes": {
+        "feedback add/no-title": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "feedback add/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "entries": "array",
+              "entries[]": "object",
+              "entries[].added": "string",
+              "entries[].criticality": "number",
+              "entries[].feedback": "string",
+              "entries[].id": "string",
+              "entries[].impact": "number",
+              "entries[].proposed_solution": "string",
+              "entries[].source_task_id": "string",
+              "entries[].title": "string",
+              "entries[].urgency": "number",
+              "entries[].why_it_matters": "string",
+              "project": "string",
+              "schema": "string"
+            }
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [
+          "at",
+          "proposed-solution",
+          "source-task",
+          "why-it-matters"
+        ],
+        "positionals": [
+          "required"
+        ],
+        "required_flags": [
+          "feedback",
+          "impact",
+          "title",
+          "urgency"
+        ]
+      }
+    },
+    "feedback gate": {
+      "documented": true,
+      "flags": {
+        "plan": {
+          "default": "",
+          "type": "string"
+        },
+        "threshold": {
+          "default": "",
+          "type": "int"
+        }
+      },
+      "probes": {
+        "feedback gate/all-deferred": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "amend_now": "array",
+              "deferred": "array",
+              "deferred[]": "object",
+              "deferred[].added": "string",
+              "deferred[].criticality": "number",
+              "deferred[].feedback": "string",
+              "deferred[].id": "string",
+              "deferred[].impact": "number",
+              "deferred[].proposed_solution": "string",
+              "deferred[].source_task_id": "string",
+              "deferred[].title": "string",
+              "deferred[].urgency": "number",
+              "deferred[].why_it_matters": "string",
+              "plan": "object",
+              "plan.goal": "string",
+              "plan.milestones": "array",
+              "plan.milestones[]": "object",
+              "plan.milestones[].id": "string",
+              "plan.milestones[].name": "string",
+              "plan.milestones[].phases": "array",
+              "plan.milestones[].phases[]": "object",
+              "plan.milestones[].phases[].id": "string",
+              "plan.milestones[].phases[].name": "string",
+              "plan.milestones[].phases[].tasks": "array",
+              "plan.milestones[].phases[].tasks[]": "object",
+              "plan.milestones[].phases[].tasks[].acceptance": "array",
+              "plan.milestones[].phases[].tasks[].acceptance[]": "string",
+              "plan.milestones[].phases[].tasks[].deliverable": "string",
+              "plan.milestones[].phases[].tasks[].deliverable_kind": "string",
+              "plan.milestones[].phases[].tasks[].deps": "array",
+              "plan.milestones[].phases[].tasks[].deps[]": "string",
+              "plan.milestones[].phases[].tasks[].effort": "string",
+              "plan.milestones[].phases[].tasks[].file_surface": "array",
+              "plan.milestones[].phases[].tasks[].file_surface[]": "object",
+              "plan.milestones[].phases[].tasks[].file_surface[].kind": "string",
+              "plan.milestones[].phases[].tasks[].file_surface[].path": "string",
+              "plan.milestones[].phases[].tasks[].file_surface[].required": "boolean",
+              "plan.milestones[].phases[].tasks[].id": "string",
+              "plan.milestones[].phases[].tasks[].model": "string",
+              "plan.milestones[].phases[].tasks[].name": "string",
+              "plan.milestones[].phases[].tasks[].summary": "string",
+              "plan.milestones[].phases[].tasks[].test_strategy": "string",
+              "plan.success_criteria": "array",
+              "plan.success_criteria[]": "string",
+              "threshold": "number"
+            }
+          }
+        },
+        "feedback gate/no-plan": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "feedback gate/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "amend_now": "array",
+              "amend_now[]": "object",
+              "amend_now[].added": "string",
+              "amend_now[].criticality": "number",
+              "amend_now[].feedback": "string",
+              "amend_now[].id": "string",
+              "amend_now[].impact": "number",
+              "amend_now[].proposed_solution": "string",
+              "amend_now[].source_task_id": "string",
+              "amend_now[].title": "string",
+              "amend_now[].urgency": "number",
+              "amend_now[].why_it_matters": "string",
+              "deferred": "array",
+              "deferred[]": "object",
+              "deferred[].added": "string",
+              "deferred[].criticality": "number",
+              "deferred[].feedback": "string",
+              "deferred[].id": "string",
+              "deferred[].impact": "number",
+              "deferred[].title": "string",
+              "deferred[].urgency": "number",
+              "plan": "object",
+              "plan.goal": "string",
+              "plan.milestones": "array",
+              "plan.milestones[]": "object",
+              "plan.milestones[].id": "string",
+              "plan.milestones[].name": "string",
+              "plan.milestones[].phases": "array",
+              "plan.milestones[].phases[]": "object",
+              "plan.milestones[].phases[].id": "string",
+              "plan.milestones[].phases[].name": "string",
+              "plan.milestones[].phases[].tasks": "array",
+              "plan.milestones[].phases[].tasks[]": "object",
+              "plan.milestones[].phases[].tasks[].acceptance": "array",
+              "plan.milestones[].phases[].tasks[].acceptance[]": "string",
+              "plan.milestones[].phases[].tasks[].deliverable": "string",
+              "plan.milestones[].phases[].tasks[].deliverable_kind": "string",
+              "plan.milestones[].phases[].tasks[].deps": "array",
+              "plan.milestones[].phases[].tasks[].deps[]": "string",
+              "plan.milestones[].phases[].tasks[].effort": "string",
+              "plan.milestones[].phases[].tasks[].file_surface": "array",
+              "plan.milestones[].phases[].tasks[].file_surface[]": "object",
+              "plan.milestones[].phases[].tasks[].file_surface[].kind": "string",
+              "plan.milestones[].phases[].tasks[].file_surface[].path": "string",
+              "plan.milestones[].phases[].tasks[].file_surface[].required": "boolean",
+              "plan.milestones[].phases[].tasks[].id": "string",
+              "plan.milestones[].phases[].tasks[].model": "string",
+              "plan.milestones[].phases[].tasks[].name": "string",
+              "plan.milestones[].phases[].tasks[].summary": "string",
+              "plan.milestones[].phases[].tasks[].test_strategy": "string",
+              "plan.success_criteria": "array",
+              "plan.success_criteria[]": "string",
+              "threshold": "number"
+            }
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [],
+        "positionals": [
+          "required",
+          "required"
+        ],
+        "required_flags": [
+          "plan",
+          "threshold"
+        ]
+      }
+    },
+    "feedback list": {
+      "documented": true,
+      "flags": {
+        "by-task": {
+          "default": "",
+          "type": "string"
+        },
+        "min-impact": {
+          "default": "",
+          "type": "int"
+        },
+        "min-urgency": {
+          "default": "",
+          "type": "int"
+        }
+      },
+      "probes": {
+        "feedback list/filtered": {
+          "exit": 0,
+          "stdout": {
+            "format": "text"
+          }
+        },
+        "feedback list/no-positional": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "feedback list/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "text"
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [
+          "by-task",
+          "min-impact",
+          "min-urgency"
+        ],
+        "positionals": [
+          "required"
+        ],
+        "required_flags": []
+      }
+    },
+    "hash": {
+      "documented": true,
+      "flags": {},
+      "probes": {
+        "hash/no-positional": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "hash/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "M1.P1.T1": "string",
+              "M1.P1.T2": "string"
+            }
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [],
+        "positionals": [
+          "required"
+        ],
+        "required_flags": []
+      }
+    },
+    "help": {
+      "documented": false,
+      "flags": {},
+      "probes": {
+        "help/bare": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "help/long": {
+          "exit": 0,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "help/short": {
+          "exit": 0,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "help/unknown-command": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "help/word": {
+          "exit": 0,
+          "stdout": {
+            "format": "empty"
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [],
+        "positionals": [],
+        "required_flags": []
+      }
+    },
+    "init-exec": {
+      "documented": true,
+      "flags": {
+        "at": {
+          "default": "",
+          "type": "string"
+        },
+        "budget": {
+          "default": "",
+          "type": "string"
+        },
+        "design-updated": {
+          "default": "",
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "override": {
+          "default": "",
+          "type": "string"
+        },
+        "pause": {
+          "default": "",
+          "type": "string"
+        },
+        "plan-updated": {
+          "default": "",
+          "type": "string"
+        },
+        "rates": {
+          "default": "",
+          "type": "string"
+        },
+        "slug": {
+          "default": "",
+          "type": "string"
+        },
+        "topic": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "probes": {
+        "init-exec/full-flags": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "goal": "string",
+              "log": "array",
+              "name": "string",
+              "project": "string",
+              "provenance": "object",
+              "provenance.derived_at": "string",
+              "provenance.design_updated": "string",
+              "provenance.plan_updated": "string",
+              "run_config": "object",
+              "run_config.budget": "string",
+              "run_config.budget_ceiling_usd": "null",
+              "run_config.pause_mode": "string",
+              "run_config.rates": "string",
+              "run_config.spent_usd": "number",
+              "run_config.tokens_out": "number",
+              "schema": "string",
+              "schema_version": "number",
+              "started": "string",
+              "tasks": "array",
+              "tasks[]": "object",
+              "tasks[].cost_usd": "number",
+              "tasks[].deliverable_kind": "string",
+              "tasks[].effort": "string",
+              "tasks[].id": "string",
+              "tasks[].model": "string",
+              "tasks[].status": "string",
+              "tasks[].summary": "string",
+              "tasks[].tokens_out": "number",
+              "tasks[].updated": "string",
+              "topic": "string",
+              "updated": "string"
+            }
+          }
+        },
+        "init-exec/no-slug": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "init-exec/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "goal": "string",
+              "log": "array",
+              "name": "string",
+              "project": "string",
+              "provenance": "object",
+              "provenance.derived_at": "string",
+              "provenance.design_updated": "string",
+              "provenance.plan_updated": "string",
+              "run_config": "object",
+              "run_config.budget": "string",
+              "run_config.budget_ceiling_usd": "null",
+              "run_config.pause_mode": "string",
+              "run_config.rates": "string",
+              "run_config.spent_usd": "number",
+              "run_config.tokens_out": "number",
+              "schema": "string",
+              "schema_version": "number",
+              "started": "string",
+              "tasks": "array",
+              "tasks[]": "object",
+              "tasks[].cost_usd": "number",
+              "tasks[].deliverable_kind": "string",
+              "tasks[].effort": "string",
+              "tasks[].id": "string",
+              "tasks[].model": "string",
+              "tasks[].status": "string",
+              "tasks[].summary": "string",
+              "tasks[].tokens_out": "number",
+              "tasks[].updated": "string",
+              "topic": "string",
+              "updated": "string"
+            }
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [],
+        "positionals": [
+          "required"
+        ],
+        "required_flags": [
+          "slug"
+        ]
+      }
+    },
+    "log-note": {
+      "documented": true,
+      "flags": {
+        "at": {
+          "default": "",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "probes": {
+        "log-note/no-note": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "log-note/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "goal": "string",
+              "log": "array",
+              "log[]": "string",
+              "name": "string",
+              "project": "string",
+              "provenance": "object",
+              "provenance.derived_at": "string",
+              "provenance.design_updated": "string",
+              "provenance.plan_updated": "string",
+              "run_config": "object",
+              "run_config.budget": "string",
+              "run_config.budget_ceiling_usd": "null",
+              "run_config.pause_mode": "string",
+              "run_config.rates": "string",
+              "run_config.spent_usd": "number",
+              "run_config.tokens_out": "number",
+              "schema": "string",
+              "schema_version": "number",
+              "started": "string",
+              "tasks": "array",
+              "tasks[]": "object",
+              "tasks[].cost_usd": "number",
+              "tasks[].deliverable_kind": "string",
+              "tasks[].effort": "string",
+              "tasks[].id": "string",
+              "tasks[].model": "string",
+              "tasks[].status": "string",
+              "tasks[].summary": "string",
+              "tasks[].tokens_out": "number",
+              "tasks[].updated": "string",
+              "topic": "string",
+              "updated": "string"
+            }
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [
+          "at"
+        ],
+        "positionals": [
+          "required"
+        ],
+        "required_flags": [
+          "note"
+        ]
+      }
+    },
+    "migrate-project": {
+      "documented": true,
+      "flags": {
+        "dry-run": {
+          "default": "",
+          "type": "bool"
+        }
+      },
+      "probes": {
+        "migrate-project/dry-run": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "already_v2": "boolean",
+              "changes": "array",
+              "dry_run": "boolean",
+              "warnings": "array"
+            }
+          }
+        },
+        "migrate-project/missing-positional": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "migrate-project/write": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "already_v2": "boolean",
+              "changes": "array",
+              "dry_run": "boolean",
+              "warnings": "array"
+            }
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [
+          "dry-run"
+        ],
+        "positionals": [
+          "required",
+          "required"
+        ],
+        "required_flags": []
+      }
+    },
+    "next": {
+      "documented": true,
+      "flags": {},
+      "probes": {
+        "next/done": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "done": "boolean"
+            }
+          }
+        },
+        "next/missing-positional": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "next/ready": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "deps_met": "boolean",
+              "task": "object",
+              "task.effort": "string",
+              "task.id": "string",
+              "task.model": "string",
+              "task.name": "string",
+              "task.summary": "string"
+            }
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [],
+        "positionals": [
+          "required",
+          "required"
+        ],
+        "required_flags": []
+      }
+    },
+    "reconcile-exec": {
+      "documented": true,
+      "flags": {
+        "at": {
+          "default": "",
+          "type": "string"
+        },
+        "design-updated": {
+          "default": "",
+          "type": "string"
+        },
+        "plan-updated": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "probes": {
+        "reconcile-exec/missing-positional": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "reconcile-exec/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "goal": "string",
+              "log": "array",
+              "log[]": "string",
+              "name": "string",
+              "project": "string",
+              "provenance": "object",
+              "provenance.derived_at": "string",
+              "provenance.design_updated": "string",
+              "provenance.plan_updated": "string",
+              "run_config": "object",
+              "run_config.budget": "string",
+              "run_config.budget_ceiling_usd": "null",
+              "run_config.pause_mode": "string",
+              "run_config.rates": "string",
+              "run_config.spent_usd": "number",
+              "run_config.tokens_out": "number",
+              "schema": "string",
+              "schema_version": "number",
+              "started": "string",
+              "tasks": "array",
+              "tasks[]": "object",
+              "tasks[].cost_usd": "number",
+              "tasks[].deliverable_kind": "string",
+              "tasks[].effort": "string",
+              "tasks[].id": "string",
+              "tasks[].model": "string",
+              "tasks[].notes": "string",
+              "tasks[].status": "string",
+              "tasks[].summary": "string",
+              "tasks[].tokens_out": "number",
+              "tasks[].updated": "string",
+              "topic": "string",
+              "updated": "string"
+            }
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [],
+        "positionals": [
+          "required",
+          "required",
+          "required"
+        ],
+        "required_flags": []
+      }
+    },
+    "record": {
+      "documented": true,
+      "flags": {
+        "at": {
+          "default": "",
+          "type": "string"
+        },
+        "cache-read-tokens": {
+          "default": "",
+          "type": "int"
+        },
+        "cache-write-tokens": {
+          "default": "",
+          "type": "int"
+        },
+        "commit": {
+          "default": "",
+          "type": "string"
+        },
+        "cost": {
+          "default": "",
+          "type": "float"
+        },
+        "input-tokens": {
+          "default": "",
+          "type": "int"
+        },
+        "note": {
+          "default": "",
+          "type": "string"
+        },
+        "override": {
+          "default": "",
+          "type": "string"
+        },
+        "review": {
+          "default": "",
+          "type": "string"
+        },
+        "run-id": {
+          "default": "",
+          "type": "string"
+        },
+        "status": {
+          "default": "",
+          "type": "string"
+        },
+        "test": {
+          "default": "",
+          "type": "string"
+        },
+        "tokens-out": {
+          "default": "",
+          "type": "int"
+        },
+        "usage-turns": {
+          "default": "",
+          "type": "int"
+        }
+      },
+      "probes": {
+        "record/done-with-commit": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "goal": "string",
+              "log": "array",
+              "log[]": "string",
+              "name": "string",
+              "project": "string",
+              "provenance": "object",
+              "provenance.derived_at": "string",
+              "provenance.design_updated": "string",
+              "provenance.plan_updated": "string",
+              "run_config": "object",
+              "run_config.budget": "string",
+              "run_config.budget_ceiling_usd": "null",
+              "run_config.last_run_id": "string",
+              "run_config.pause_mode": "string",
+              "run_config.rates": "string",
+              "run_config.spent_usd": "number",
+              "run_config.tokens_out": "number",
+              "run_config.usage": "object",
+              "run_config.usage.cache_creation_input_tokens": "number",
+              "run_config.usage.cache_read_input_tokens": "number",
+              "run_config.usage.input_tokens": "number",
+              "run_config.usage.output_tokens": "number",
+              "run_config.usage.total_tokens": "number",
+              "run_config.usage.turns": "number",
+              "schema": "string",
+              "schema_version": "number",
+              "started": "string",
+              "tasks": "array",
+              "tasks[]": "object",
+              "tasks[].commit": "string",
+              "tasks[].cost_usd": "number",
+              "tasks[].deliverable_kind": "string",
+              "tasks[].effort": "string",
+              "tasks[].id": "string",
+              "tasks[].model": "string",
+              "tasks[].notes": "string",
+              "tasks[].status": "string",
+              "tasks[].summary": "string",
+              "tasks[].tokens_out": "number",
+              "tasks[].updated": "string",
+              "tasks[].usage": "object",
+              "tasks[].usage.at": "string",
+              "tasks[].usage.cache_creation_input_tokens": "number",
+              "tasks[].usage.cache_read_input_tokens": "number",
+              "tasks[].usage.input_tokens": "number",
+              "tasks[].usage.output_tokens": "number",
+              "tasks[].usage.total_tokens": "number",
+              "tasks[].usage.turns": "number",
+              "topic": "string",
+              "updated": "string"
+            }
+          }
+        },
+        "record/done-without-commit": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "record/in-progress": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "goal": "string",
+              "log": "array",
+              "log[]": "string",
+              "name": "string",
+              "project": "string",
+              "provenance": "object",
+              "provenance.derived_at": "string",
+              "provenance.design_updated": "string",
+              "provenance.plan_updated": "string",
+              "run_config": "object",
+              "run_config.budget": "string",
+              "run_config.budget_ceiling_usd": "null",
+              "run_config.pause_mode": "string",
+              "run_config.rates": "string",
+              "run_config.spent_usd": "number",
+              "run_config.tokens_out": "number",
+              "schema": "string",
+              "schema_version": "number",
+              "started": "string",
+              "tasks": "array",
+              "tasks[]": "object",
+              "tasks[].cost_usd": "number",
+              "tasks[].deliverable_kind": "string",
+              "tasks[].effort": "string",
+              "tasks[].id": "string",
+              "tasks[].model": "string",
+              "tasks[].status": "string",
+              "tasks[].summary": "string",
+              "tasks[].tokens_out": "number",
+              "tasks[].updated": "string",
+              "topic": "string",
+              "updated": "string"
+            }
+          }
+        },
+        "record/out-of-set-status": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "record/unknown-task": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [],
+        "positionals": [
+          "required",
+          "required"
+        ],
+        "required_flags": []
+      }
+    },
+    "record-usage": {
+      "documented": true,
+      "flags": {
+        "at": {
+          "default": "",
+          "type": "string"
+        },
+        "baseline-capture": {
+          "default": "",
+          "type": "bool"
+        },
+        "final": {
+          "default": "",
+          "type": "bool"
+        },
+        "specs": {
+          "default": "",
+          "type": "string"
+        },
+        "transcript": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "probes": {
+        "record-usage/final": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "goal": "string",
+              "log": "array",
+              "log[]": "string",
+              "name": "string",
+              "project": "string",
+              "provenance": "object",
+              "provenance.derived_at": "string",
+              "provenance.design_updated": "string",
+              "provenance.plan_updated": "string",
+              "run_config": "object",
+              "run_config.accounting": "object",
+              "run_config.accounting.at": "string",
+              "run_config.accounting.build_helpers_sha": "string",
+              "run_config.accounting.cost_usd": "number",
+              "run_config.accounting.identity": "object",
+              "run_config.accounting.identity.cost_status": "string",
+              "run_config.accounting.identity.fixed_subagents_usd": "number",
+              "run_config.accounting.identity.o_usd": "number",
+              "run_config.accounting.identity.residual_usd": "number",
+              "run_config.accounting.identity.session_total_usd": "number",
+              "run_config.accounting.identity.tolerance_usd": "number",
+              "run_config.accounting.identity.variable_agents_usd": "number",
+              "run_config.accounting.ledger": "object",
+              "run_config.accounting.ledger./tmp/m0-differential-probe/transcript.jsonl": "object",
+              "run_config.accounting.ledger./tmp/m0-differential-probe/transcript.jsonl.claude-sonnet-5": "object",
+              "run_config.accounting.ledger./tmp/m0-differential-probe/transcript.jsonl.claude-sonnet-5.cache_read_tokens": "number",
+              "run_config.accounting.ledger./tmp/m0-differential-probe/transcript.jsonl.claude-sonnet-5.cache_write_1h_tokens": "number",
+              "run_config.accounting.ledger./tmp/m0-differential-probe/transcript.jsonl.claude-sonnet-5.cache_write_5m_tokens": "number",
+              "run_config.accounting.ledger./tmp/m0-differential-probe/transcript.jsonl.claude-sonnet-5.input_tokens": "number",
+              "run_config.accounting.ledger./tmp/m0-differential-probe/transcript.jsonl.claude-sonnet-5.output_tokens": "number",
+              "run_config.accounting.ledger./tmp/m0-differential-probe/transcript.jsonl.claude-sonnet-5.turns": "number",
+              "run_config.accounting.models": "object",
+              "run_config.accounting.models.claude-sonnet-5": "object",
+              "run_config.accounting.models.claude-sonnet-5.cache_read_tokens": "number",
+              "run_config.accounting.models.claude-sonnet-5.cache_write_1h_tokens": "number",
+              "run_config.accounting.models.claude-sonnet-5.cache_write_5m_tokens": "number",
+              "run_config.accounting.models.claude-sonnet-5.input_tokens": "number",
+              "run_config.accounting.models.claude-sonnet-5.output_tokens": "number",
+              "run_config.accounting.models.claude-sonnet-5.turns": "number",
+              "run_config.accounting.orchestrator": "object",
+              "run_config.accounting.orchestrator.cache_creation_input_tokens": "number",
+              "run_config.accounting.orchestrator.cache_read_input_tokens": "number",
+              "run_config.accounting.orchestrator.cost_usd": "number",
+              "run_config.accounting.orchestrator.input_tokens": "number",
+              "run_config.accounting.orchestrator.output_tokens": "number",
+              "run_config.accounting.orchestrator.total_tokens": "number",
+              "run_config.accounting.orchestrator.turns": "number",
+              "run_config.accounting.turns": "number",
+              "run_config.accounting.watermarks": "object",
+              "run_config.accounting.watermarks./tmp/m0-differential-probe/transcript.jsonl": "number",
+              "run_config.budget": "string",
+              "run_config.budget_ceiling_usd": "null",
+              "run_config.pause_mode": "string",
+              "run_config.rates": "string",
+              "run_config.spent_usd": "number",
+              "run_config.tokens_out": "number",
+              "run_config.true_usage": "object",
+              "run_config.true_usage.at": "string",
+              "run_config.true_usage.cache_creation_input_tokens": "number",
+              "run_config.true_usage.cache_read_input_tokens": "number",
+              "run_config.true_usage.input_tokens": "number",
+              "run_config.true_usage.output_tokens": "number",
+              "run_config.true_usage.total_tokens": "number",
+              "run_config.true_usage.turns": "number",
+              "schema": "string",
+              "schema_version": "number",
+              "started": "string",
+              "tasks": "array",
+              "tasks[]": "object",
+              "tasks[].cost_usd": "number",
+              "tasks[].deliverable_kind": "string",
+              "tasks[].effort": "string",
+              "tasks[].id": "string",
+              "tasks[].model": "string",
+              "tasks[].status": "string",
+              "tasks[].summary": "string",
+              "tasks[].tokens_out": "number",
+              "tasks[].updated": "string",
+              "topic": "string",
+              "updated": "string"
+            }
+          }
+        },
+        "record-usage/no-transcript": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "record-usage/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "goal": "string",
+              "log": "array",
+              "log[]": "string",
+              "name": "string",
+              "project": "string",
+              "provenance": "object",
+              "provenance.derived_at": "string",
+              "provenance.design_updated": "string",
+              "provenance.plan_updated": "string",
+              "run_config": "object",
+              "run_config.accounting": "object",
+              "run_config.accounting.at": "string",
+              "run_config.accounting.build_helpers_sha": "string",
+              "run_config.accounting.cost_usd": "number",
+              "run_config.accounting.identity": "object",
+              "run_config.accounting.identity.cost_status": "string",
+              "run_config.accounting.identity.fixed_subagents_usd": "number",
+              "run_config.accounting.identity.o_usd": "number",
+              "run_config.accounting.identity.residual_usd": "number",
+              "run_config.accounting.identity.session_total_usd": "number",
+              "run_config.accounting.identity.tolerance_usd": "number",
+              "run_config.accounting.identity.variable_agents_usd": "number",
+              "run_config.accounting.ledger": "object",
+              "run_config.accounting.ledger./tmp/m0-differential-probe/transcript.jsonl": "object",
+              "run_config.accounting.ledger./tmp/m0-differential-probe/transcript.jsonl.claude-sonnet-5": "object",
+              "run_config.accounting.ledger./tmp/m0-differential-probe/transcript.jsonl.claude-sonnet-5.cache_read_tokens": "number",
+              "run_config.accounting.ledger./tmp/m0-differential-probe/transcript.jsonl.claude-sonnet-5.cache_write_1h_tokens": "number",
+              "run_config.accounting.ledger./tmp/m0-differential-probe/transcript.jsonl.claude-sonnet-5.cache_write_5m_tokens": "number",
+              "run_config.accounting.ledger./tmp/m0-differential-probe/transcript.jsonl.claude-sonnet-5.input_tokens": "number",
+              "run_config.accounting.ledger./tmp/m0-differential-probe/transcript.jsonl.claude-sonnet-5.output_tokens": "number",
+              "run_config.accounting.ledger./tmp/m0-differential-probe/transcript.jsonl.claude-sonnet-5.turns": "number",
+              "run_config.accounting.models": "object",
+              "run_config.accounting.models.claude-sonnet-5": "object",
+              "run_config.accounting.models.claude-sonnet-5.cache_read_tokens": "number",
+              "run_config.accounting.models.claude-sonnet-5.cache_write_1h_tokens": "number",
+              "run_config.accounting.models.claude-sonnet-5.cache_write_5m_tokens": "number",
+              "run_config.accounting.models.claude-sonnet-5.input_tokens": "number",
+              "run_config.accounting.models.claude-sonnet-5.output_tokens": "number",
+              "run_config.accounting.models.claude-sonnet-5.turns": "number",
+              "run_config.accounting.orchestrator": "object",
+              "run_config.accounting.orchestrator.cache_creation_input_tokens": "number",
+              "run_config.accounting.orchestrator.cache_read_input_tokens": "number",
+              "run_config.accounting.orchestrator.cost_usd": "number",
+              "run_config.accounting.orchestrator.input_tokens": "number",
+              "run_config.accounting.orchestrator.output_tokens": "number",
+              "run_config.accounting.orchestrator.total_tokens": "number",
+              "run_config.accounting.orchestrator.turns": "number",
+              "run_config.accounting.turns": "number",
+              "run_config.accounting.watermarks": "object",
+              "run_config.accounting.watermarks./tmp/m0-differential-probe/transcript.jsonl": "number",
+              "run_config.budget": "string",
+              "run_config.budget_ceiling_usd": "null",
+              "run_config.pause_mode": "string",
+              "run_config.rates": "string",
+              "run_config.spent_usd": "number",
+              "run_config.tokens_out": "number",
+              "run_config.true_usage": "object",
+              "run_config.true_usage.at": "string",
+              "run_config.true_usage.cache_creation_input_tokens": "number",
+              "run_config.true_usage.cache_read_input_tokens": "number",
+              "run_config.true_usage.input_tokens": "number",
+              "run_config.true_usage.output_tokens": "number",
+              "run_config.true_usage.total_tokens": "number",
+              "run_config.true_usage.turns": "number",
+              "schema": "string",
+              "schema_version": "number",
+              "started": "string",
+              "tasks": "array",
+              "tasks[]": "object",
+              "tasks[].cost_usd": "number",
+              "tasks[].deliverable_kind": "string",
+              "tasks[].effort": "string",
+              "tasks[].id": "string",
+              "tasks[].model": "string",
+              "tasks[].status": "string",
+              "tasks[].summary": "string",
+              "tasks[].tokens_out": "number",
+              "tasks[].updated": "string",
+              "topic": "string",
+              "updated": "string"
+            }
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [
+          "baseline-capture",
+          "final",
+          "specs"
+        ],
+        "positionals": [
+          "required"
+        ],
+        "required_flags": [
+          "transcript"
+        ]
+      }
+    },
+    "render": {
+      "documented": true,
+      "flags": {
+        "slug": {
+          "default": "",
+          "type": "string"
+        },
+        "topic": {
+          "default": "",
+          "type": "string"
+        },
+        "updated": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "probes": {
+        "render/flags": {
+          "exit": 0,
+          "stdout": {
+            "format": "text"
+          }
+        },
+        "render/no-positional": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "render/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "text"
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [],
+        "positionals": [
+          "required"
+        ],
+        "required_flags": []
+      }
+    },
+    "render-exec": {
+      "documented": true,
+      "flags": {},
+      "probes": {
+        "render-exec/missing-positional": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "render-exec/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "text"
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [],
+        "positionals": [
+          "required",
+          "required"
+        ],
+        "required_flags": []
+      }
+    },
+    "resolve-transcript": {
+      "documented": true,
+      "flags": {
+        "cwd": {
+          "default": "",
+          "type": "string"
+        },
+        "projects-dir": {
+          "default": "",
+          "type": "string"
+        },
+        "scratchpad-path": {
+          "default": "",
+          "type": "string"
+        },
+        "session-id": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "probes": {
+        "resolve-transcript/absent": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "resolve-transcript/no-id": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "resolve-transcript/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "text"
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [
+          "cwd",
+          "projects-dir"
+        ],
+        "positionals": [],
+        "required_flags": [
+          "scratchpad-path",
+          "session-id"
+        ]
+      }
+    },
+    "retrieve": {
+      "documented": true,
+      "flags": {
+        "field": {
+          "default": "",
+          "type": "string"
+        },
+        "id": {
+          "default": "",
+          "type": "string"
+        },
+        "level": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "probes": {
+        "retrieve/bad-level": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "retrieve/field": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "field": "string",
+              "id": "string",
+              "value": "string"
+            }
+          }
+        },
+        "retrieve/milestone": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "id": "string",
+              "name": "string",
+              "tasks": "array",
+              "tasks[]": "object",
+              "tasks[].deps": "array",
+              "tasks[].deps[]": "string",
+              "tasks[].id": "string",
+              "tasks[].name": "string"
+            }
+          }
+        },
+        "retrieve/outline": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "array",
+              "[]": "object",
+              "[].deps": "array",
+              "[].deps[]": "string",
+              "[].id": "string",
+              "[].name": "string"
+            }
+          }
+        },
+        "retrieve/task": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "acceptance": "array",
+              "acceptance[]": "string",
+              "deliverable": "string",
+              "deliverable_kind": "string",
+              "effort": "string",
+              "file_surface": "array",
+              "file_surface[]": "object",
+              "file_surface[].kind": "string",
+              "file_surface[].path": "string",
+              "file_surface[].required": "boolean",
+              "id": "string",
+              "model": "string",
+              "name": "string",
+              "summary": "string",
+              "test_strategy": "string"
+            }
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [
+          "field",
+          "id"
+        ],
+        "positionals": [
+          "required"
+        ],
+        "required_flags": [
+          "level"
+        ]
+      }
+    },
+    "self-check": {
+      "documented": true,
+      "flags": {
+        "band": {
+          "default": "",
+          "type": "string"
+        },
+        "ceiling-effort": {
+          "default": "",
+          "type": "string"
+        },
+        "ceiling-model": {
+          "default": "",
+          "type": "string"
+        },
+        "floor-effort": {
+          "default": "",
+          "type": "string"
+        },
+        "floor-model": {
+          "default": "",
+          "type": "string"
+        },
+        "scratchpad-path": {
+          "default": "",
+          "type": "string"
+        },
+        "session-id": {
+          "default": "",
+          "type": "string"
+        },
+        "settings": {
+          "default": "\".claude/settings.json\"",
+          "type": "string"
+        },
+        "transcript": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "probes": {
+        "self-check/below-floor": {
+          "exit": 1,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "abort": "boolean",
+              "effort": "string",
+              "effort_detected": "boolean",
+              "model": "string",
+              "reason": "string"
+            }
+          }
+        },
+        "self-check/cross-family-band": {
+          "exit": 3,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "abort": "boolean",
+              "effort": "string",
+              "effort_detected": "boolean",
+              "model": "string",
+              "reason": "string",
+              "roster_stale": "boolean"
+            }
+          }
+        },
+        "self-check/identity-guard": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "abort": "boolean",
+              "effort": "string",
+              "effort_detected": "boolean",
+              "model": "string",
+              "reason": "string",
+              "session_id_checked": "boolean",
+              "session_id_match": "boolean"
+            }
+          }
+        },
+        "self-check/identity-mismatch": {
+          "exit": 1,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "abort": "boolean",
+              "effort": "string",
+              "effort_detected": "boolean",
+              "model": "string",
+              "reason": "string",
+              "session_id_checked": "boolean"
+            }
+          }
+        },
+        "self-check/in-band": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "abort": "boolean",
+              "effort": "string",
+              "effort_detected": "boolean",
+              "model": "string",
+              "reason": "string"
+            }
+          }
+        },
+        "self-check/no-band": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [
+          [
+            [
+              "ceiling-effort",
+              "ceiling-model",
+              "floor-effort",
+              "floor-model"
+            ],
+            [
+              "band"
+            ]
+          ]
+        ],
+        "optional_flags": [
+          "scratchpad-path",
+          "session-id",
+          "settings",
+          "transcript"
+        ],
+        "positionals": [],
+        "required_flags": [
+          "band",
+          "ceiling-effort",
+          "ceiling-model",
+          "floor-effort",
+          "floor-model"
+        ]
+      }
+    },
+    "usage": {
+      "documented": true,
+      "flags": {},
+      "probes": {
+        "usage/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "cache_creation_input_tokens": "number",
+              "cache_read_input_tokens": "number",
+              "input_tokens": "number",
+              "output_tokens": "number",
+              "total_tokens": "number",
+              "turns": "number"
+            }
+          }
+        },
+        "usage/unreadable": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [],
+        "positionals": [
+          "required"
+        ],
+        "required_flags": []
+      }
+    },
+    "validate": {
+      "documented": true,
+      "flags": {},
+      "probes": {
+        "validate/invalid": {
+          "exit": 1,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "errors": "array",
+              "errors[]": "string",
+              "ok": "boolean",
+              "warnings": "array",
+              "warnings[]": "string"
+            }
+          }
+        },
+        "validate/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "errors": "array",
+              "ok": "boolean",
+              "warnings": "array"
+            }
+          }
+        },
+        "validate/unreadable": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [],
+        "positionals": [
+          "required"
+        ],
+        "required_flags": []
+      }
+    },
+    "verify-surface": {
+      "documented": true,
+      "flags": {
+        "root": {
+          "default": "\".\"",
+          "type": "string"
+        }
+      },
+      "probes": {
+        "verify-surface/no-taskid": {
+          "exit": 2,
+          "stdout": {
+            "format": "empty"
+          }
+        },
+        "verify-surface/ok": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "ok": "boolean"
+            }
+          }
+        },
+        "verify-surface/union": {
+          "exit": 0,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "ok": "boolean"
+            }
+          }
+        },
+        "verify-surface/violation": {
+          "exit": 1,
+          "stdout": {
+            "format": "json",
+            "shape": {
+              "": "object",
+              "ok": "boolean",
+              "violations": "array",
+              "violations[]": "object",
+              "violations[].path": "string",
+              "violations[].reason": "string"
+            }
+          }
+        }
+      },
+      "synopsis": {
+        "alternations": [],
+        "optional_flags": [
+          "root"
+        ],
+        "positionals": [
+          "required",
+          "required",
+          "optional"
+        ],
+        "required_flags": []
+      }
+    }
+  },
+  "schema": "build-helpers-cli-surface/structural-v1"
+}

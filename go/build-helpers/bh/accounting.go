@@ -10,13 +10,16 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/johnrichter/claude-shared-tooling/go/roster"
 )
 
 // This file implements whole-session, per-model TRUE-COST accounting (SC2). It closes the old
 // single-transcript bug where only the orchestrator transcript was summed and every subagent's
 // input/cache tokens went uncounted: Account walks the main transcript AND every subagent
-// transcript, sums the five priced token buckets PER MODEL, prices each model from the rate table,
-// and tracks a per-file byte watermark so re-runs parse only appended bytes and add the delta
+// transcript, sums the five priced token buckets PER MODEL, prices each model from the embedded
+// model roster (ai-shared-lib/go/roster, contract preferred over list — see rosterRate), and
+// tracks a per-file byte watermark so re-runs parse only appended bytes and add the delta
 // (idempotent resume — no full re-parse).
 //
 // Split of concerns matches the package contract: parsing takes an io.Reader and the accounting
@@ -531,11 +534,34 @@ func (a *Accounting) recompute(rates RateTable) {
 	a.CostByModel, a.CostUSD, a.Turns, a.Unpriced = priceModels(a.Models, rates)
 }
 
-// priceModels is the one place buckets become dollars: for each model it sums turns, prices matched
-// models from the rate table (contract-preferred, else list — the table is prepared by the caller),
-// and collects any model that matched NO rate into unpriced (sorted, surfaced — never silently
-// priced at $0). byModel is nil when nothing priced; unpriced is nil when every model matched. When
-// rates is empty, buckets are still counted for Turns but no cost is computed.
+// rosterRate resolves model's per-MTok rate from the embedded model roster
+// (ai-shared-lib/go/roster), contract preferred over list — the roster's own Price() already
+// applies that preference, so this only translates its PriceTable into the local Rate shape.
+// ok is false for anything the roster can't price (unrecognized id, a sentinel, or a row sourced
+// on neither basis): the caller records that as unpriced rather than guessing a rate.
+func rosterRate(model string) (rate Rate, ok bool) {
+	pt, err := roster.Price(model)
+	if err != nil {
+		return Rate{}, false
+	}
+	return Rate{
+		Input:        pt.Input,
+		CacheWrite5m: pt.CacheWrite5m,
+		CacheWrite1h: pt.CacheWrite1h,
+		CacheRead:    pt.CacheRead,
+		Output:       pt.Output,
+	}, true
+}
+
+// priceModels is the one place buckets become dollars: for each model it sums turns and, when
+// pricing is requested, prices it from the roster (rosterRate — contract preferred over list) and
+// collects any model the roster can't price into unpriced (sorted, surfaced — never silently
+// priced at $0 or assumed onto a neighboring tier). byModel is nil when nothing priced; unpriced
+// is nil when every model resolved. rates gates pricing on/off only: an empty table is the
+// caller's documented opt-out (e.g. the `usage` command, which discards cost fields), leaving
+// buckets counted for Turns with no cost math run; a non-empty table's per-model values are no
+// longer consulted for the actual rate — see LoadRateTable's doc for the specs-file path that
+// role is retained for.
 func priceModels(models map[string]*ModelBuckets, rates RateTable) (byModel map[string]float64, total float64, turns int64, unpriced []string) {
 	byModel = map[string]float64{}
 	for m, b := range models {
@@ -543,7 +569,7 @@ func priceModels(models map[string]*ModelBuckets, rates RateTable) (byModel map[
 		if len(rates) == 0 {
 			continue
 		}
-		rate, _, ok := rates.Match(m)
+		rate, ok := rosterRate(m)
 		if !ok {
 			unpriced = append(unpriced, m)
 			continue

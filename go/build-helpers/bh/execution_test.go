@@ -49,14 +49,14 @@ func TestNextTaskRespectsDeps(t *testing.T) {
 		t.Fatalf("fresh next = %+v", r)
 	}
 	// T1 done -> T2 eligible
-	if err := RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone)}, at0); err != nil {
+	if err := RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone), Commit: ptrS("aaa1111")}, at0); err != nil {
 		t.Fatal(err)
 	}
 	if r := NextTask(ex, p); r.Task == nil || r.Task.ID != "M1.P1.T2" {
 		t.Fatalf("after T1 next = %+v", r)
 	}
 	// both done -> done
-	_ = RecordTask(&ex, "M1.P1.T2", RecordFields{Status: ptr(StatusDone)}, at0)
+	_ = RecordTask(&ex, "M1.P1.T2", RecordFields{Status: ptr(StatusDone), Commit: ptrS("bbb2222")}, at0)
 	if r := NextTask(ex, p); !r.Done {
 		t.Fatalf("expected done, got %+v", r)
 	}
@@ -77,7 +77,7 @@ func TestRecordAccruesCost(t *testing.T) {
 	p := validPlan()
 	ex, _ := InitExec(p, InitExecOptions{Slug: "demo", At: at0})
 	_ = RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone), Test: ptrS("PASS"), Review: ptrS("ACCEPT"), Commit: ptrS("a1b2c3d"), Cost: ptrF(0.27)}, at0)
-	_ = RecordTask(&ex, "M1.P1.T2", RecordFields{Status: ptr(StatusDone), Cost: ptrF(0.22)}, at0)
+	_ = RecordTask(&ex, "M1.P1.T2", RecordFields{Status: ptr(StatusDone), Commit: ptrS("bbb2222"), Cost: ptrF(0.22)}, at0)
 	if ex.RunConfig.SpentUSD != 0.49 {
 		t.Fatalf("spent = %v, want 0.49", ex.RunConfig.SpentUSD)
 	}
@@ -89,6 +89,58 @@ func TestRecordAccruesCost(t *testing.T) {
 	}
 	if err := RecordTask(&ex, "NOPE", RecordFields{}, at0); err == nil {
 		t.Fatal("expected error recording unknown task")
+	}
+}
+
+// TestRecordTaskRefusesDoneWithNoCommit is the writer-side fail-fast: status=done may never
+// persist against a task carrying no commit — neither supplied on this call nor already on the
+// row — and the error names both the task id and the missing field so it can't be mistaken for a
+// generic validation failure.
+func TestRecordTaskRefusesDoneWithNoCommit(t *testing.T) {
+	p := validPlan()
+	ex, _ := InitExec(p, InitExecOptions{Slug: "demo", At: at0})
+	err := RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone)}, at0)
+	if err == nil {
+		t.Fatal("expected refusal for status=done with no commit supplied and none recorded")
+	}
+	if !strings.Contains(err.Error(), "M1.P1.T1") || !strings.Contains(err.Error(), "commit") {
+		t.Fatalf("error must name the task id and the missing field, got: %v", err)
+	}
+	if ex.Tasks[0].Status != StatusNotStarted || ex.Tasks[0].Commit != "" || len(ex.Log) != 0 {
+		t.Fatalf("refused write must persist nothing, got: %+v log=%v", ex.Tasks[0], ex.Log)
+	}
+}
+
+// TestRecordTaskAcceptsDoneWithCommitSuppliedOrAlreadyRecorded covers both legal done paths: a
+// commit supplied on this call, and a commit already on the row from a prior call (this call
+// supplies none) — the boundary case the fail-fast must not over-refuse.
+func TestRecordTaskAcceptsDoneWithCommitSuppliedOrAlreadyRecorded(t *testing.T) {
+	p := validPlan()
+	ex, _ := InitExec(p, InitExecOptions{Slug: "demo", At: at0})
+	if err := RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone), Commit: ptrS("aaa1111")}, at0); err != nil {
+		t.Fatalf("done with a supplied commit should be accepted: %v", err)
+	}
+	// Already-done task with a recorded commit re-records done, supplying no commit this time.
+	if err := RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone), Note: ptrS("re-recorded")}, at0); err != nil {
+		t.Fatalf("done on a task already carrying a commit should be accepted: %v", err)
+	}
+	if ex.Tasks[0].Commit != "aaa1111" {
+		t.Fatalf("prior commit should be left intact, got %q", ex.Tasks[0].Commit)
+	}
+}
+
+// TestRecordTaskDoneRefusalDoesNotAffectNonDoneStatuses proves the fail-fast is scoped to
+// status=done: every other status must persist with no commit at all.
+func TestRecordTaskDoneRefusalDoesNotAffectNonDoneStatuses(t *testing.T) {
+	p := validPlan()
+	for _, s := range []Status{StatusInProgress, StatusBlocked, StatusFailed, StatusSuperseded} {
+		ex, _ := InitExec(p, InitExecOptions{Slug: "demo", At: at0})
+		if err := RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(s)}, at0); err != nil {
+			t.Fatalf("status=%s with no commit should be accepted, got: %v", s, err)
+		}
+		if ex.Tasks[0].Status != s {
+			t.Fatalf("status=%s did not persist: %+v", s, ex.Tasks[0])
+		}
 	}
 }
 

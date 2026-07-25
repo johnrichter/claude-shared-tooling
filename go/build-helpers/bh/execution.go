@@ -426,7 +426,11 @@ func RecordListVsActualNote(ex *ExecState, statusLineTotalUSD float64, capturedB
 }
 
 // RecordTask applies a per-task transition, recomputes cumulative spend from per-task costs
-// (never hand-summed), bumps timestamps, and appends a log line. Mutates ex in place.
+// (never hand-summed), bumps timestamps, and appends a log line. Mutates ex in place. A write is
+// refused (nothing persisted, ex untouched) whenever it would leave the task status=done with no
+// commit — the resolved end-state, so both a done transition supplying none (and none on the row)
+// and a commit-clearing write on an already-done task are caught. A done task that already carries
+// a commit may re-record done, or update other fields, without repeating it.
 func RecordTask(ex *ExecState, taskID string, f RecordFields, at string) error {
 	idx := -1
 	for i := range ex.Tasks {
@@ -439,10 +443,26 @@ func RecordTask(ex *ExecState, taskID string, f RecordFields, at string) error {
 		return fmt.Errorf("record: task %q not in execution state", taskID)
 	}
 	t := &ex.Tasks[idx]
+	if f.Status != nil && !f.Status.Known() {
+		return fmt.Errorf("record: invalid status %q", *f.Status)
+	}
+	// Fail-fast against the RESULTING row, not just this call's --status: refuse before any
+	// mutation whenever the transition would leave the task status=done with no commit — whether
+	// via a done transition that supplies none (and none is on the row) or via clearing the commit
+	// on an already-done task. Checking the resolved end-state closes every writer path into the
+	// stale-execution state, not only the --status done one.
+	resultStatus := t.Status
 	if f.Status != nil {
-		if !f.Status.Known() {
-			return fmt.Errorf("record: invalid status %q", *f.Status)
-		}
+		resultStatus = *f.Status
+	}
+	resultCommit := t.Commit
+	if f.Commit != nil {
+		resultCommit = *f.Commit
+	}
+	if resultStatus == StatusDone && strings.TrimSpace(resultCommit) == "" {
+		return fmt.Errorf("record: task %q: status=done requires field %q — none supplied and none already recorded", taskID, "commit")
+	}
+	if f.Status != nil {
 		t.Status = *f.Status
 	}
 	if f.Test != nil {
