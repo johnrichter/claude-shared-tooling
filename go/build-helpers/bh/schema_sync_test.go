@@ -3,9 +3,6 @@ package bh
 import (
 	"encoding/json"
 	"os"
-	"regexp"
-	"sort"
-	"strings"
 	"testing"
 )
 
@@ -130,170 +127,24 @@ func TestProvenanceIsAllowedRootKey(t *testing.T) {
 	}
 }
 
-// ---- four-way model-ID sync: plan-schema.json's model enum, types.go's Model
-// consts, anthropic-specifications.json's pricing.list map, and build-engine.workflow.js's
-// DEFAULT_RATES must all name exactly the same set of priced model IDs. "inherit" is a
-// Go/schema-only sentinel (no rate anywhere) and is excluded from the priced-model comparison.
-// Without this test, a model ID added to the schema and to types.go but never priced falls
-// through outRate()'s unconditional Opus-tier fallback in build-engine.workflow.js — the task
-// runs and is silently billed at the Opus rate, right or wrong, with no error and no test
-// failure.
-
-const typesGoPath = "types.go"
 const specsPath = "../../anthropic-specifications.json"
-const buildEnginePath = "../../build-engine.workflow.js"
 
-var modelConstRE = regexp.MustCompile(`Model[A-Za-z0-9]+\s+Model\s*=\s*"([^"]+)"`)
-
-// goModelIDs parses the Model const block directly out of types.go source (rather than
-// hard-coding the list in the test) so a new/renamed const is picked up automatically — the
-// same reason schemaEnum reads plan-schema.json instead of a copied literal.
-func goModelIDs(t *testing.T) []string {
-	t.Helper()
-	raw, err := os.ReadFile(typesGoPath)
-	if err != nil {
-		t.Fatalf("could not read %s: %v", typesGoPath, err)
-	}
-	matches := modelConstRE.FindAllStringSubmatch(string(raw), -1)
-	if len(matches) == 0 {
-		t.Fatalf("no `ModelXxx Model = \"...\"` consts found in %s — regex out of sync with types.go?", typesGoPath)
-	}
-	out := make([]string, 0, len(matches))
-	for _, m := range matches {
-		out = append(out, m[1])
-	}
-	return out
-}
-
-// specsPricingModelIDs reads anthropic-specifications.json's `pricing.list` map keys — the
-// canonical rate table.
-func specsPricingModelIDs(t *testing.T) []string {
-	t.Helper()
-	raw, err := os.ReadFile(specsPath)
-	if err != nil {
-		t.Fatalf("anthropic-specifications.json not found at %s: %v", specsPath, err)
-	}
-	var doc struct {
-		Pricing struct {
-			List map[string]any `json:"list"`
-		} `json:"pricing"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		t.Fatalf("anthropic-specifications.json is not valid JSON: %v", err)
-	}
-	out := make([]string, 0, len(doc.Pricing.List))
-	for k := range doc.Pricing.List {
-		out = append(out, k)
-	}
-	return out
-}
-
-var defaultRatesBlockRE = regexp.MustCompile(`(?s)DEFAULT_RATES\s*=\s*\{(.*?)\}`)
-var defaultRatesKeyRE = regexp.MustCompile(`'([^']+)'\s*:`)
-
-// defaultRatesModelIDs parses DEFAULT_RATES's keys out of build-engine.workflow.js source.
-func defaultRatesModelIDs(t *testing.T) []string {
-	t.Helper()
-	raw, err := os.ReadFile(buildEnginePath)
-	if err != nil {
-		t.Skipf("build-engine.workflow.js not found at %s (skipping four-way sync guard): %v", buildEnginePath, err)
-	}
-	block := defaultRatesBlockRE.FindStringSubmatch(string(raw))
-	if block == nil {
-		t.Fatalf("could not find `const DEFAULT_RATES = { ... }` in %s — regex out of sync with build-engine.workflow.js?", buildEnginePath)
-	}
-	matches := defaultRatesKeyRE.FindAllStringSubmatch(block[1], -1)
-	if len(matches) == 0 {
-		t.Fatalf("DEFAULT_RATES block in %s parsed but yielded no keys", buildEnginePath)
-	}
-	out := make([]string, 0, len(matches))
-	for _, m := range matches {
-		out = append(out, m[1])
-	}
-	return out
-}
-
-func toSet(ids []string) map[string]bool {
-	set := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		set[id] = true
-	}
-	return set
-}
-
-func sortedList(set map[string]bool) []string {
-	out := make([]string, 0, len(set))
-	for id := range set {
-		out = append(out, id)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// TestModelIDFourWaySync is the empirical enforcement the model-id-enum-set-sync rule only
-// reminds toward: it diffs the selectable model-ID set across all four independent enumerators
-// and fails loudly the moment any one of them drifts from the other three.
-func TestModelIDFourWaySync(t *testing.T) {
-	schema := toSet(schemaEnum(t, loadSchema(t), "model"))
-	delete(schema, string(ModelInherit)) // sentinel: Go/schema-only, never priced
-
-	goIDs := toSet(goModelIDs(t))
-	delete(goIDs, string(ModelInherit))
-
-	specsPricing := toSet(specsPricingModelIDs(t))
-	defaultRates := toSet(defaultRatesModelIDs(t))
-
-	sources := map[string]map[string]bool{
-		"plan-schema.json model.enum":                schema,
-		"types.go Model consts":                      goIDs,
-		"anthropic-specifications.json pricing.list": specsPricing,
-		"build-engine.workflow.js DEFAULT_RATES":     defaultRates,
-	}
-
-	// Union of every ID seen anywhere; any ID missing from any one source is a drift.
-	union := map[string]bool{}
-	for _, set := range sources {
-		for id := range set {
-			union[id] = true
-		}
-	}
-
-	for _, id := range sortedList(union) {
-		var missingFrom []string
-		for name, set := range sources {
-			if !set[id] {
-				missingFrom = append(missingFrom, name)
-			}
-		}
-		if len(missingFrom) > 0 {
-			sort.Strings(missingFrom)
-			t.Errorf("model ID %q is missing from: %s — update all four enumerators together", id, strings.Join(missingFrom, ", "))
-		}
-	}
-}
-
-// TestKnownModelsArePriced is the silent-fallback guard the model-id-enum-set-sync rule's
-// Failure mode describes: every Model the Go side treats as Known() (except the "inherit"
-// sentinel) must resolve to a rate in BOTH anthropic-specifications.json's pricing.list and
-// build-engine.workflow.js's DEFAULT_RATES. Without this, a model recognized by types.go/the
-// schema but never priced falls through outRate()'s unconditional Opus-tier fallback with no
-// error — this test is what closes that gap (referenced by the rule's Remediation).
-func TestKnownModelsArePriced(t *testing.T) {
-	specsPricing := toSet(specsPricingModelIDs(t))
-	defaultRates := toSet(defaultRatesModelIDs(t))
-
-	for _, id := range goModelIDs(t) {
-		if id == string(ModelInherit) {
-			continue // sentinel: Go/schema-only, never priced
-		}
-		if !Model(id).Known() {
-			continue // covered by TestModelEnumMatchesSchema / drift elsewhere
-		}
-		if !specsPricing[id] {
-			t.Errorf("Known() model %q has no rate in anthropic-specifications.json pricing.list", id)
-		}
-		if !defaultRates[id] {
-			t.Errorf("Known() model %q has no entry in build-engine.workflow.js DEFAULT_RATES", id)
-		}
-	}
-}
+// ---- retirement note (model-set four-way sync) ----
+//
+// This file used to carry TestModelIDFourWaySync and TestKnownModelsArePriced: a regex-scraped
+// diff of the selectable model-ID set across plan-schema.json's model.enum, types.go's Model
+// consts, anthropic-specifications.json's pricing.list, and build-engine.workflow.js's
+// DEFAULT_RATES. Retired now that three of those four are roster-gen targets — mechanical
+// projections of schemas/model-roster/model-roster.json, currency-checked in CI by
+// tooling/roster-currency (this repo's anthropic-specifications.json) and by the marketplace
+// repo's own equivalent job (its plan-schema.json and build-engine.workflow.js) — each
+// regenerating its target from the roster and failing on any byte difference. That's a
+// stronger guarantee than a set-membership diff: it catches value drift, not just ID drift,
+// and traces every failure to the one input that fixes it — the roster.
+//
+// types.go's Model consts are the fourth source and are NOT roster-gen output — the type system
+// needs a real Go identifier per model, which the generator does not (and should not) emit.
+// TestModelEnumMatchesSchema above still guards that hand-authored enumerator against the
+// schema's roster-derived model.enum, so a model the roster adds but types.go never picks up is
+// still caught; it just runs as a two-way check against the generated schema instead of a
+// four-way regex scrape across four sources, two of which no longer need independent checking.
