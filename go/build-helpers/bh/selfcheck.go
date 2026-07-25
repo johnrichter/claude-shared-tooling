@@ -9,13 +9,17 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/johnrichter/claude-shared-tooling/go/roster"
 )
 
 // This file implements the session-tier self-check (design SC7): both build-with-team and
-// plan-with-team self-check their LIVE session tier at Phase 0 against a caller-supplied
-// {floor, ceiling} band. The bands themselves are NOT hardcoded here — each skill passes its
-// own (plan-with-team's Opus-only floor vs build-with-team's Sonnet-only band) — this package
-// only owns the resolve/compare mechanics common to both.
+// plan-with-team self-check their LIVE session tier at Phase 0 against a {floor, ceiling} band.
+// A caller supplies its own band either literally (four Model/Effort values) or by name
+// (namedBands, resolved via ResolveBand) — plan-with-team's Opus-only floor vs build-with-team's
+// Sonnet-only band. Either way, ordering is enforced solely through roster.Compare
+// (ai-shared-lib/go/roster): this package owns the resolve/compare mechanics common to both, not
+// a model capability table.
 
 // modelProbe reads just the model off one transcript line, preferring the message-nested shape
 // (the common case) over a top-level model field. Deliberately decoupled from usage.go's
@@ -85,23 +89,26 @@ type TierBand struct {
 	CeilingEffort Effort `json:"ceiling_effort"`
 }
 
-// modelRank orders models by capability, weakest to strongest — the SOLE ranking the self-check
-// uses. Distinct from CheckTiers' xhigh/max availability tables (bh/plan.go): those gate PLAN
-// authoring; this gates a LIVE session against a runtime band. A model absent from this table
-// (unranked/unrecognized) gets rank -1, so it is always below any real floor rather than silently
-// passing.
-var modelRank = map[Model]int{
-	ModelHaiku45:  0,
-	ModelSonnet46: 1,
-	ModelSonnet5:  2,
-	ModelOpus46:   3,
-	ModelOpus47:   4,
-	ModelOpus48:   5,
-	ModelFable5:   6,
+// namedBands are the roster-resolved bands self-check's --band flag may select in place of the
+// four literal --floor-*/--ceiling-* flags (SC-MODELROSTER's "derived, not enumerated" treatment
+// of the two skill bands: plan-with-team's Opus floor, build-with-team's Sonnet band). Ordering
+// is always enforced through roster.Compare regardless of how the band was supplied, so a newly
+// released model slots in correctly on either side without a code change here.
+var namedBands = map[string]TierBand{
+	"plan":  {FloorModel: ModelOpus48, FloorEffort: EffortHigh, CeilingModel: ModelOpus48, CeilingEffort: EffortMax},
+	"build": {FloorModel: ModelSonnet5, FloorEffort: EffortMedium, CeilingModel: ModelSonnet5, CeilingEffort: EffortHigh},
 }
 
-// effortRank orders effort low -> max. effortBase (below) exceeds the highest effort rank so a
-// model-rank difference always dominates the combined score in tierRank.
+// ResolveBand looks up a named band. ok is false for a name outside this package's own closed
+// set — a caller/argv error (unlike an unrecognized MODEL, which is a roster-stale verdict), so
+// main.go treats it as a usage error, never a self-check verdict.
+func ResolveBand(name string) (TierBand, bool) {
+	b, ok := namedBands[name]
+	return b, ok
+}
+
+// effortRank orders effort low -> max, used only to break a tie when roster.Compare finds two
+// models equally ranked (typically the same model on both sides of a comparison).
 var effortRank = map[Effort]int{
 	EffortLow:    0,
 	EffortMedium: 1,
@@ -110,76 +117,91 @@ var effortRank = map[Effort]int{
 	EffortMax:    4,
 }
 
-const effortBase = 10 // > max effortRank(4); keeps model the dominant term in tierRank
-
-// modelOnlyRank looks up m's capability rank, tolerant of the trailing -YYYYMMDD real transcript
-// model IDs carry (e.g. "claude-sonnet-5-20260101" for the bare pinned "claude-sonnet-5") — the
-// same dateSuffixRE accounting.go's RateTable.Match strips, reused here as the one place this
-// package normalizes a dated transcript ID to its bare pinned form. A model unrecognized even
-// after stripping (unranked/unknown) gets rank -1, so it is always below any real floor rather
-// than silently passing.
-func modelOnlyRank(m Model) int {
-	if r, ok := modelRank[m]; ok {
+func effortRankOf(e Effort) int {
+	if r, ok := effortRank[e]; ok {
 		return r
 	}
-	if stripped := dateSuffixRE.ReplaceAllString(string(m), ""); stripped != string(m) {
-		if r, ok := modelRank[Model(stripped)]; ok {
-			return r
-		}
-	}
-	return -1
+	return 0
 }
 
-// tierRank combines model + effort into one composite score so a floor..ceiling band — even one
-// spanning two different models — reduces to a single integer range check: below the floor's
-// score aborts, above the ceiling's score warns, in between (inclusive) is silently fine. An
-// unrecognized effort ranks as the bottom of the effort scale rather than inflating the score.
-func tierRank(m Model, e Effort) int {
-	er, ok := effortRank[e]
-	if !ok {
-		er = 0
+// compareTier orders (m1, e1) against (m2, e2): model is the dominant dimension, via
+// roster.Compare (the SOLE model ordering this package uses); effort only breaks a tie between
+// equally-ranked models. Returns roster.StaleError (wrapped, unmodified) when either model is
+// absent from the roster or is an undeclared cross-family pair — the caller turns that into the
+// roster-stale verdict, never a below-floor guess.
+func compareTier(m1 Model, e1 Effort, m2 Model, e2 Effort) (int, error) {
+	cmp, err := roster.Compare(string(m1), string(m2))
+	if err != nil {
+		return 0, err
 	}
-	return modelOnlyRank(m)*effortBase + er
+	if cmp != 0 {
+		return cmp, nil
+	}
+	switch {
+	case effortRankOf(e1) < effortRankOf(e2):
+		return -1, nil
+	case effortRankOf(e1) > effortRankOf(e2):
+		return 1, nil
+	default:
+		return 0, nil
+	}
 }
 
 // SelfCheckResult is the self-check verdict. Abort means the caller MUST stop (below the floor,
-// OR a session-id mismatch per SCf); otherwise Warnings carries zero or more non-fatal notices
-// (above the ceiling, effort undetectable) and the caller proceeds. SessionIDChecked/Match are
-// only meaningful when the caller opted into the SCf identity guard (main.runSelfCheck's
-// --session-id/--scratchpad-path); both stay false when that guard wasn't requested, so a JSON
-// consumer can distinguish "not checked" from "checked and matched".
+// OR a session-id mismatch per SCf). RosterStale means the roster has no answer for the observed
+// model or a band endpoint (SC-MODELROSTER) — a THIRD outcome, distinct from Abort: the caller
+// must refresh the roster, not assume the session is under-tiered; Abort stays false on this
+// path. Otherwise Warnings carries zero or more non-fatal notices (above the ceiling, effort
+// undetectable) and the caller proceeds. SessionIDChecked/Match are only meaningful when the
+// caller opted into the SCf identity guard (main.runSelfCheck's --session-id/--scratchpad-path);
+// both stay false when that guard wasn't requested, so a JSON consumer can distinguish "not
+// checked" from "checked and matched".
 type SelfCheckResult struct {
 	Model            Model    `json:"model"`
 	Effort           Effort   `json:"effort,omitempty"`
 	EffortDetected   bool     `json:"effort_detected"`
 	Abort            bool     `json:"abort"`
+	RosterStale      bool     `json:"roster_stale,omitempty"`
 	Warnings         []string `json:"warnings,omitempty"`
 	Reason           string   `json:"reason"`
 	SessionIDChecked bool     `json:"session_id_checked,omitempty"`
 	SessionIDMatch   bool     `json:"session_id_match,omitempty"`
 }
 
-// SelfCheck enforces band on the observed (model, effort) session tier.
+// SelfCheck enforces band on the observed (model, effort) session tier, ordering solely through
+// roster.Compare (bh/roster's Compare, embedded roster data — no hardcoded rank table).
 //
-// When effortDetected is true, both dimensions are enforced together via tierRank: below floor
-// aborts, above ceiling warns, in band is silent.
+// When effortDetected is true, both dimensions are enforced together via compareTier: below
+// floor aborts, above ceiling warns, in band is silent.
 //
 // When effortDetected is false (SC7: "$CLAUDE_EFFORT and settings.json effortLevel both absent"),
 // ONLY the model dimension is enforced — floor/ceiling's effort fields are ignored rather than
 // guessed — and a warning always notes the effort check was skipped, even when the model itself
 // is within band. This never aborts on a dimension that cannot be observed, but never silently
 // passes the full band unchecked either.
+//
+// A model (observed or either band endpoint) absent from the roster, or an undeclared
+// cross-family pair, sets RosterStale and returns immediately: never a below-floor guess.
 func SelfCheck(model Model, effort Effort, effortDetected bool, band TierBand) SelfCheckResult {
 	r := SelfCheckResult{Model: model, Effort: effort, EffortDetected: effortDetected}
 
 	if !effortDetected {
 		r.Warnings = append(r.Warnings, "effort undetectable ($CLAUDE_EFFORT and settings.json effortLevel both absent) -- enforcing the model band only")
-		mr, floorMR, ceilMR := modelOnlyRank(model), modelOnlyRank(band.FloorModel), modelOnlyRank(band.CeilingModel)
+		belowFloor, err := roster.Compare(string(model), string(band.FloorModel))
+		if err != nil {
+			r.RosterStale, r.Reason = true, err.Error()
+			return r
+		}
+		aboveCeiling, err := roster.Compare(string(model), string(band.CeilingModel))
+		if err != nil {
+			r.RosterStale, r.Reason = true, err.Error()
+			return r
+		}
 		switch {
-		case mr < floorMR:
+		case belowFloor < 0:
 			r.Abort = true
 			r.Reason = fmt.Sprintf("model %q is below the floor model %q", model, band.FloorModel)
-		case mr > ceilMR:
+		case aboveCeiling > 0:
 			r.Warnings = append(r.Warnings, fmt.Sprintf("model %q is above the ceiling model %q", model, band.CeilingModel))
 			r.Reason = "above the ceiling model (warn only)"
 		default:
@@ -188,12 +210,21 @@ func SelfCheck(model Model, effort Effort, effortDetected bool, band TierBand) S
 		return r
 	}
 
-	observed, floor, ceiling := tierRank(model, effort), tierRank(band.FloorModel, band.FloorEffort), tierRank(band.CeilingModel, band.CeilingEffort)
+	belowFloor, err := compareTier(model, effort, band.FloorModel, band.FloorEffort)
+	if err != nil {
+		r.RosterStale, r.Reason = true, err.Error()
+		return r
+	}
+	aboveCeiling, err := compareTier(model, effort, band.CeilingModel, band.CeilingEffort)
+	if err != nil {
+		r.RosterStale, r.Reason = true, err.Error()
+		return r
+	}
 	switch {
-	case observed < floor:
+	case belowFloor < 0:
 		r.Abort = true
 		r.Reason = fmt.Sprintf("%s/%s is below the floor %s/%s", model, effort, band.FloorModel, band.FloorEffort)
-	case observed > ceiling:
+	case aboveCeiling > 0:
 		r.Warnings = append(r.Warnings, fmt.Sprintf("%s/%s is above the ceiling %s/%s", model, effort, band.CeilingModel, band.CeilingEffort))
 		r.Reason = "above the ceiling (warn only)"
 	default:
