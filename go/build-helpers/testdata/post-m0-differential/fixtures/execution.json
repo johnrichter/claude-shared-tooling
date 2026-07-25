@@ -1,0 +1,48 @@
+{
+  "schema": "execution-state/v1",
+  "schema_version": 3,
+  "project": "probe",
+  "name": "probe — Execution",
+  "topic": "tooling",
+  "goal": "differential probe fixture",
+  "provenance": {
+    "design_updated": "",
+    "plan_updated": "",
+    "derived_at": "2026-01-01T00:00:00Z"
+  },
+  "started": "2026-01-01T00:00:00Z",
+  "updated": "2026-01-01T00:00:00Z",
+  "run_config": {
+    "pause_mode": "phase",
+    "budget": "unlimited",
+    "budget_ceiling_usd": null,
+    "spent_usd": 0,
+    "tokens_out": 0,
+    "rates": "list-price"
+  },
+  "tasks": [
+    {
+      "id": "M1.P1.T1",
+      "summary": "s1",
+      "deliverable_kind": "code",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "status": "not-started",
+      "cost_usd": 0,
+      "tokens_out": 0,
+      "updated": "2026-01-01T00:00:00Z"
+    },
+    {
+      "id": "M1.P1.T2",
+      "summary": "s2",
+      "deliverable_kind": "code",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "status": "not-started",
+      "cost_usd": 0,
+      "tokens_out": 0,
+      "updated": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "log": []
+}
