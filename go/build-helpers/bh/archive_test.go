@@ -182,7 +182,7 @@ func TestArchive_ExecJSONRoundTripIsLossless(t *testing.T) {
 func TestArchive_RefusesNonTerminalMilestoneWithNoPartialWrite(t *testing.T) {
 	p := archivePlan()
 	ex, _ := InitExec(p, InitExecOptions{Slug: "demo", At: at0})
-	_ = RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone), Cost: ptrF(0.1)}, at0)
+	_ = RecordTask(&ex, "M1.P1.T1", RecordFields{Status: ptr(StatusDone), Commit: ptrS("aaa1111"), Cost: ptrF(0.1)}, at0)
 	// T2 left not-started -> M1 is not wholly terminal.
 	_, err := Archive(p, ex, ArchiveDoc{}, ArchiveOptions{MilestoneIDs: []string{"M1"}}, at0)
 	if err == nil {
@@ -261,7 +261,7 @@ func TestArchive_AccumulatesAcrossCalls(t *testing.T) {
 	// Mark M2 done in the shrunk live exec, then archive it in a second call against the
 	// already-populated archive doc — the store must accumulate, not overwrite.
 	ex2 := first.Exec
-	if err := RecordTask(&ex2, "M2.P1.T1", RecordFields{Status: ptr(StatusDone), Cost: ptrF(0.05)}, at0); err != nil {
+	if err := RecordTask(&ex2, "M2.P1.T1", RecordFields{Status: ptr(StatusDone), Commit: ptrS("ccc3333"), Cost: ptrF(0.05)}, at0); err != nil {
 		t.Fatal(err)
 	}
 	second, err := Archive(first.Plan, ex2, first.Archive, ArchiveOptions{MilestoneIDs: []string{"M2"}}, "2026-07-03T00:00:00Z")

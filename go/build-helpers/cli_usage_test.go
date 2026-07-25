@@ -63,6 +63,7 @@ func TestCLI_RecordUsageFlags_PopulateAllFourTokenClasses(t *testing.T) {
 
 	recorded := runCLI(t, bin, "record", execPath, "M1.P1.T1",
 		"--status", "done",
+		"--commit", "aaa1111",
 		"--cost", "0.42",
 		"--tokens-out", "300", // output — same basis as legacy TokensOut
 		"--input-tokens", "500",
@@ -150,7 +151,7 @@ func TestCLI_RecordWithoutUsageFlags_LeavesUsageAbsent(t *testing.T) {
 	}
 
 	recorded := runCLI(t, bin, "record", execPath, "M1.P1.T1",
-		"--status", "done", "--cost", "0.10", "--at", "2026-07-01T00:05:00Z",
+		"--status", "done", "--commit", "aaa1111", "--cost", "0.10", "--at", "2026-07-01T00:05:00Z",
 	)
 	var probe map[string]json.RawMessage
 	if err := json.Unmarshal(recorded, &probe); err != nil {
