@@ -23,7 +23,10 @@ def load(path: Path) -> dict[str, Any]:
         raw = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise RosterError(f"cannot read roster at {path}: {exc}") from exc
-    doc = json.loads(raw)
+    try:
+        doc = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RosterError(f"roster at {path} is not valid JSON: {exc}") from exc
     version = doc.get("_schema_version")
     if not isinstance(version, int) or version > SUPPORTED_SCHEMA_VERSION:
         raise RosterError(

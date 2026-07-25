@@ -320,6 +320,13 @@ class RosterLoadTests(unittest.TestCase):
         with self.assertRaises(RosterError):
             load_roster(Path("/nonexistent/model-roster.json"))
 
+    def test_malformed_json_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "model-roster.json"
+            path.write_text("{ not valid json", encoding="utf-8")
+            with self.assertRaises(RosterError):
+                load_roster(path)
+
 
 class CliIntegrationTests(unittest.TestCase):
     """Drives generate.py as a subprocess against throwaway two-root temp trees, exactly as

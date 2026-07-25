@@ -85,6 +85,23 @@ jobs:
       - name: Run unit tests
         run: python -m unittest discover -s tests -p "test_*.py" -v
 
+  # SC-MODELROSTER / SC-CODEGOV: schemas/model-roster/model-roster.json is the single source of
+  # record for the selectable Claude model set. This job regenerates every roster-derived
+  # artifact this repo commits and fails on any byte difference, so a hand-edited artifact or a
+  # roster change landed without regenerating fails the same way go.anthropic-specifications.json
+  # would silently drift otherwise. See tooling/roster-currency/README.md.
+  roster-currency:
+    name: roster-currency
+    runs-on: ubuntu-latest
+    needs: guardrail
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Regenerate-and-diff every roster-derived artifact
+        run: python3 tooling/roster-currency/check.py
+
   rust:
     name: rust-${{ matrix.name }}
     runs-on: ${{ matrix.os }}
