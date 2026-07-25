@@ -21,13 +21,16 @@ sources only when changing behavior, then recompile every target + re-commit.
 
 Each binary is platform-specific. After editing the sources, cross-compile every supported target
 and re-commit all four (pure Go, no cgo, so this needs no target toolchains beyond the Go compiler
-itself):
+itself). `CGO_ENABLED=0` is pinned on every line — the host's ambient default (e.g. `CGO_ENABLED=1`
+with a `gcc` on `PATH`) can silently link a cgo runtime into a cross-compiled target, which breaks
+the pure-Go, no-target-toolchain contract this module promises and produces a binary the parity gate
+must reject:
 
 ```sh
-GOOS=linux  GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags='-s -w' -o ../.bin/build-helpers-linux-amd64 .
-GOOS=linux  GOARCH=arm64 go build -trimpath -buildvcs=false -ldflags='-s -w' -o ../.bin/build-helpers-linux-arm64 .
-GOOS=darwin GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags='-s -w' -o ../.bin/build-helpers-darwin-amd64 .
-GOOS=darwin GOARCH=arm64 go build -trimpath -buildvcs=false -ldflags='-s -w' -o ../.bin/build-helpers-darwin-arm64 .
+CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags='-s -w' -o ../.bin/build-helpers-linux-amd64 .
+CGO_ENABLED=0 GOOS=linux  GOARCH=arm64 go build -trimpath -buildvcs=false -ldflags='-s -w' -o ../.bin/build-helpers-linux-arm64 .
+CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags='-s -w' -o ../.bin/build-helpers-darwin-amd64 .
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -buildvcs=false -ldflags='-s -w' -o ../.bin/build-helpers-darwin-arm64 .
 # .gitattributes routes go/.bin/* through LFS
 ```
 

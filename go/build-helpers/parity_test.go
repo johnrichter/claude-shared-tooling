@@ -244,7 +244,10 @@ func freshBuildHash(t *testing.T, goos, goarch string) (string, error) {
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "fresh")
 	cmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-ldflags", "-s -w", "-o", out, ".")
-	cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch)
+	// CGO_ENABLED=0 is pinned rather than inherited from the host: an ambient CGO_ENABLED=1 with a
+	// gcc on PATH can silently link a cgo runtime into a cross-compiled target, which would make
+	// this fresh build match a similarly cgo-linked committed binary instead of catching it.
+	cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=0")
 	if b, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("%v\n%s", err, b)
 	}
