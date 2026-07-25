@@ -473,6 +473,56 @@ func TestAccounting_UnknownModelSurfaced(t *testing.T) {
 	assertClose(t, acct.CostUSD, acct.CostByModel["claude-sonnet-5"], "cost excludes unknown model")
 }
 
+// TestRosterRate_MatchesPreM0RateTable proves the roster is now the sole price source and that its
+// answer is byte-for-byte identical, for every model still in anthropic-specifications.json's
+// pricing.list, to the pre-M0 hand-maintained rate table it replaces.
+func TestRosterRate_MatchesPreM0RateTable(t *testing.T) {
+	rates := loadTestRates(t)
+	for model, want := range rates {
+		got, ok := rosterRate(model)
+		if !ok {
+			t.Errorf("model %s: roster could not price it, want %+v", model, want)
+			continue
+		}
+		if got != want {
+			t.Errorf("model %s: roster rate %+v != pre-M0 rate table %+v", model, got, want)
+		}
+	}
+}
+
+// TestPriceModels_EmptyRatesGatesOffCostButStillCountsTurns proves the len(rates)==0 check is the
+// SOLE on/off gate for cost math post-roster-rewire: with no rate table, buckets are still summed
+// into Turns but rosterRate is never even consulted, so byModel/unpriced stay nil/empty regardless
+// of whether the model is roster-known.
+func TestPriceModels_EmptyRatesGatesOffCostButStillCountsTurns(t *testing.T) {
+	models := map[string]*ModelBuckets{
+		"claude-sonnet-5":       {Input: 1000, Output: 100, Turns: 3},
+		"totally-unknown-model": {Input: 500, Output: 50, Turns: 2},
+	}
+	byModel, total, turns, unpriced := priceModels(models, RateTable{})
+	if byModel != nil {
+		t.Fatalf("byModel = %v, want nil when rates is empty", byModel)
+	}
+	if total != 0 {
+		t.Fatalf("total = %v, want 0 when rates is empty", total)
+	}
+	if turns != 5 {
+		t.Fatalf("turns = %d, want 5 (buckets still counted with rates off)", turns)
+	}
+	if unpriced != nil {
+		t.Fatalf("unpriced = %v, want nil when rates is empty (pricing was never attempted)", unpriced)
+	}
+}
+
+// TestRosterRate_SentinelIsNotPriceable proves a dispatch sentinel (e.g. "inherit") is never priced
+// as if it were a model: it has no roster row and no price, so rosterRate must report ok=false
+// rather than defaulting to $0 or to a neighboring tier's rate.
+func TestRosterRate_SentinelIsNotPriceable(t *testing.T) {
+	if _, ok := rosterRate("inherit"); ok {
+		t.Fatal("rosterRate(\"inherit\") = ok, want false: a dispatch sentinel has no price row")
+	}
+}
+
 // TestAccounting_LedgerRoundTripsAcrossProcessBoundary is a regression pin for the rotation fix's
 // load-bearing assumption that the per-file Ledger the fix relies on actually survives a real resume
 // (execution.json persisted to disk, process exits, a later invocation loads it back). The rotation

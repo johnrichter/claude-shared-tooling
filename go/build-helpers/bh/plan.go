@@ -4,10 +4,13 @@ import (
 	"cmp"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/johnrichter/claude-shared-tooling/go/roster"
 )
 
 var (
@@ -197,12 +200,6 @@ func Diff(oldP, newP Plan) DiffResult {
 
 // ---- tier checks ----
 
-// Effort availability per Anthropic's effort docs (https://platform.claude.com/docs/en/build-with-claude/effort):
-// xhigh is Opus 4.7+, Sonnet 5, and Fable 5; max is Opus 4.6+, Sonnet 4.6+, and Fable 5. Sonnet 4.6 has max but NOT xhigh.
-var xhighOK = map[Model]bool{ModelOpus48: true, ModelOpus47: true, ModelSonnet5: true}
-var maxOK = map[Model]bool{ModelOpus48: true, ModelOpus47: true, ModelOpus46: true, ModelSonnet5: true, ModelSonnet46: true}
-var tierExempt = map[Model]bool{ModelInherit: true, ModelFable5: true}
-
 type TierIssue struct {
 	ID    string `json:"id"`
 	Issue string `json:"issue"`
@@ -212,26 +209,54 @@ type TierResult struct {
 	Issues []TierIssue `json:"issues"`
 }
 
-// CheckTiers validates each task's (model, effort) combo against documented availability:
-// xhigh is Opus 4.7+ and Sonnet 5; max is Opus 4.6+/Sonnet 4.6+. inherit and fable are exempt.
+// modelSelectable reports whether id is a valid plan-pinnable model: the roster's
+// selectable=='new-work' projection (ai-shared-lib/go/roster), OR a declared dispatch sentinel
+// (e.g. "inherit"), which has no selectable field but is enum-valid by definition. This is
+// deliberately NOT the authoring gate's selectable!='retired' allowlist — the two consumers read
+// different roster projections by design (SC-MODELROSTER).
+func modelSelectable(id string) bool {
+	sel, err := roster.Selectable(id)
+	if err != nil {
+		var sentinelErr *roster.SentinelError
+		return errors.As(err, &sentinelErr)
+	}
+	return sel == roster.SelectableNewWork
+}
+
+// effortNames renders a roster effort list for an issue message, so the message always reflects
+// the roster's actual answer rather than a hand-maintained claim about which models support which
+// tier.
+func effortNames(efforts []roster.Effort) string {
+	names := make([]string, len(efforts))
+	for i, e := range efforts {
+		names[i] = string(e)
+	}
+	return strings.Join(names, ", ")
+}
+
+// CheckTiers validates each task's (model, effort) combo entirely from the roster
+// (ai-shared-lib/go/roster): model validity is modelSelectable; effort validity is the model's
+// effort_available list, with an effort-exempt model or a dispatch sentinel accepting every
+// level (roster.EffortAvailable folds both into AllEfforts). A model the roster cannot resolve
+// (unrecognized, or a sentinel) skips the effort-availability check — the model issue above
+// already covers it, so a stale/sentinel model never also produces a spurious effort complaint.
 func CheckTiers(p Plan) TierResult {
 	issues := []TierIssue{}
 	for _, r := range WalkTasks(p) {
 		t := r.Task
-		if !t.Model.Known() {
+		if !modelSelectable(string(t.Model)) {
 			issues = append(issues, TierIssue{t.ID, fmt.Sprintf("model '%s' not in the selectable set", t.Model)})
 		}
 		if !t.Effort.Known() {
 			issues = append(issues, TierIssue{t.ID, fmt.Sprintf("effort '%s' not a valid tier", t.Effort)})
-		}
-		if tierExempt[t.Model] {
 			continue
 		}
-		if t.Effort == EffortXHigh && !xhighOK[t.Model] {
-			issues = append(issues, TierIssue{t.ID, fmt.Sprintf("effort 'xhigh' requires Opus 4.7+, Sonnet 5, or Fable 5 — '%s' does not support it", t.Model)})
+		avail, err := roster.EffortAvailable(string(t.Model))
+		if err != nil {
+			continue
 		}
-		if t.Effort == EffortMax && !maxOK[t.Model] {
-			issues = append(issues, TierIssue{t.ID, fmt.Sprintf("effort 'max' requires Opus 4.6+ or Sonnet 4.6+ — '%s' does not support it", t.Model)})
+		if !slices.Contains(avail, roster.Effort(t.Effort)) {
+			issues = append(issues, TierIssue{t.ID, fmt.Sprintf("effort '%s' is not available for model '%s' (roster allows: %s)", t.Effort, t.Model, effortNames(avail))})
 		}
 	}
 	return TierResult{OK: len(issues) == 0, Issues: issues}
