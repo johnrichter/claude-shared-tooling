@@ -6,6 +6,7 @@ Scope:
 
 - Python side: zero third-party runtime dependencies (stdlib only).
 - Go side (`go/build-helpers`): one third-party dependency, `doublestar` (glob matching in `bh/surface.go`), statically linked into the distributed `go/.bin/build-helpers-*` binaries.
+- Go side (`go/logkit`): `zerolog` (the JSON stream's byte writer) and `jcs` (RFC 8785 canonicalization), plus zerolog's own `go-isatty`, `go-colorable` and `golang.org/x/sys` dependencies, statically linked into any binary that imports `go/logkit`.
 - All other third-party code is the 50 Rust crates below, statically linked into the distributed binary.
 
 The MIT, BSD-3-Clause, Zlib, Unicode-3.0, and Apache-2.0 licenses relied on below each require their copyright notice and permission/license text to travel with any binary that includes the licensed code. This file reproduces that attribution and license text for the statically-linked components, satisfying those obligations.
@@ -16,15 +17,15 @@ Several crates offer a choice of license via an SPDX `OR` expression (e.g. `MIT 
 
 Election rule applied: **elect MIT wherever MIT is offered** in an `OR` expression.
 
-Working through all 50 crates under this rule, the licenses we actually rely on reduce to exactly five:
+Working through all 50 Rust crates plus the Go modules above under this rule, the licenses we actually rely on reduce to exactly five: MIT, BSD-3-Clause, Zlib, Unicode-3.0 and Apache-2.0.
 
 | License | How it applies |
 | --- | --- |
-| MIT | Elected for every crate whose SPDX expression offers it — the large majority. |
-| BSD-3-Clause | Mandatory `AND` term on `encoding_rs` = `(Apache-2.0 OR MIT) AND BSD-3-Clause`. We elect MIT for the `OR`; BSD-3-Clause still applies. |
+| MIT | Elected for every crate whose SPDX expression offers it — the large majority; also `zerolog`, `go-isatty` and `go-colorable` on the Go side, each MIT with no `OR` alternative. |
+| BSD-3-Clause | Mandatory `AND` term on `encoding_rs` = `(Apache-2.0 OR MIT) AND BSD-3-Clause`. We elect MIT for the `OR`; BSD-3-Clause still applies. Also `golang.org/x/sys`, BSD-3-Clause with no `OR` alternative — a different copyright holder and text from the `encoding_rs` one, kept as its own section below. |
 | Zlib | `foldhash` = `Zlib` with no `OR` alternative — no election, Zlib is the only license. |
 | Unicode-3.0 | Mandatory `AND` term on `unicode-ident` = `(MIT OR Apache-2.0) AND Unicode-3.0`. We elect MIT for the `OR`; Unicode-3.0 still applies. |
-| Apache-2.0 | `ryu-js` (a `serde_jcs` dependency) = `Apache-2.0 OR BSL-1.0` — MIT is not offered, so this is the one crate where the election rule's preferred branch doesn't apply. We elect Apache-2.0 over BSL-1.0 (Boost) since it is the license this repository already carries text for as a fallback and is the more widely reviewed of the two. |
+| Apache-2.0 | Two components, neither offering MIT: `jcs` (Go side) = `Apache-2.0` with no `OR` alternative, so this obligation is unconditional; and `ryu-js` (a Rust `serde_jcs` dependency) = `Apache-2.0 OR BSL-1.0`, the one crate where the MIT-first election rule has no MIT branch to take. We elect Apache-2.0 over BSL-1.0 (Boost) for `ryu-js` because `jcs` already obliges this file to carry the Apache-2.0 text, so the election adds no new obligation. |
 
 Unlicense and BSL-1.0 appear in the source CSV as `OR` alternatives but are never elected — every crate offering either one also offers a license from the table above, which we elect instead. Their license texts are not bundled here because we do not rely on them.
 
@@ -83,6 +84,11 @@ Unlicense and BSL-1.0 appear in the source CSV as `OR` alternatives but are neve
 | valuable | https://github.com/tokio-rs/valuable | MIT | MIT |
 | serde_jcs | https://github.com/l1h3r/serde_jcs | MIT OR Apache-2.0 | MIT |
 | ryu-js | https://github.com/boa-dev/ryu-js | Apache-2.0 OR BSL-1.0 | Apache-2.0 |
+| zerolog | https://github.com/rs/zerolog | MIT | MIT |
+| jcs | https://github.com/gowebpki/jcs | Apache-2.0 | Apache-2.0 |
+| go-isatty | https://github.com/mattn/go-isatty | MIT | MIT |
+| go-colorable | https://github.com/mattn/go-colorable | MIT | MIT |
+| x/sys | https://cs.opensource.google/go/x/sys | BSD-3-Clause | BSD-3-Clause |
 
 ## License texts
 
@@ -139,6 +145,9 @@ Applies to the components below, used under MIT. Copyright holder per component,
 - pin-project-lite — Taiki Endo
 - valuable — Tokio Contributors <team@tokio.rs>
 - serde_jcs — l1h3r
+- zerolog — Olivier Poitrey
+- go-isatty — Yasuhiro MATSUMOTO
+- go-colorable — Yasuhiro Matsumoto
 
 License text:
 
@@ -231,6 +240,42 @@ the following restrictions:
 3. This notice may not be removed or altered from any source distribution.
 ```
 
+### BSD-3-Clause (golang.org/x/sys)
+
+Applies to `x/sys`, a transitive dependency of `zerolog` (via `go-isatty`). Distinct copyright and text from the `encoding_rs`/WHATWG BSD-3-Clause above.
+
+License text:
+
+```
+Copyright 2009 The Go Authors.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * Neither the name of Google LLC nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
 ### Unicode-3.0
 
 Mandatory `AND` obligation on `unicode-ident`, covering the Unicode character-property data tables the crate embeds (the crate's own code is under MIT, listed above; overall crate copyright per the CSV is David Tolnay).
@@ -281,9 +326,9 @@ authorization of the copyright holder.
 
 ### Apache-2.0
 
-Applies to `ryu-js`, a `serde_jcs` dependency offering `Apache-2.0 OR BSL-1.0` with no MIT alternative — the one crate in this repository where the standing MIT-first election doesn't apply. Copyright per the crate's own `Cargo.toml`: David Tolnay <dtolnay@gmail.com> and boa-dev.
+Applies to the two components that do not offer MIT. `jcs` (Go side) = `Apache-2.0` with no `OR` alternative — the RFC 8785 canonicalizer `go/logkit` uses to produce byte-identical wire output across languages; copyright per `LICENSE-3rdparty.csv`: gowebpki contributors. `ryu-js` (Rust side) = `Apache-2.0 OR BSL-1.0`, a `serde_jcs` dependency and the one crate where the standing MIT-first election has no MIT branch to take; copyright per the crate's own `Cargo.toml`: David Tolnay <dtolnay@gmail.com> and boa-dev.
 
-License text, as it appears in the crate's `LICENSE-APACHE` file:
+License text, as it appears in `ryu-js`'s `LICENSE-APACHE` file — the canonical Apache-2.0 text, covering both components:
 
 ```
                                  Apache License
