@@ -1,0 +1,34 @@
+[package]
+name = "clikit"
+version = "0.1.0"
+edition = "2021"
+description = "clikit — the fleet's CLI output, error and exit contract: one normalized result record on stdout, one of eleven exit codes, logging delegated to logkit."
+license = "MIT"
+publish = false
+
+[dependencies]
+# MIT OR Apache-2.0, actively maintained, pure-Rust: derives this crate's
+# `Serialize` impls (`ResultRecord`, `Diagnostic`, `Triage`) and backs
+# `data`/`context`'s arbitrary structured values (`serde_json::Value`/`Map`).
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+# MIT OR Apache-2.0, pure-Rust: the same RFC 8785 (JCS) canonicalizer logkit
+# uses. `clikit.contract.json`'s `canonical_json` adopts logkit's rule by
+# reference rather than restating it, so this crate reuses the identical
+# canonicalizer rather than a second hand-rolled one.
+serde_jcs = "0.2.0"
+# In-repo sibling crate: the terminating-log-record and diagnostic-mapping
+# seam this crate owns (`clikit-cli-contract.spec.md`, "Streams and logkit
+# delegation") is built directly on logkit's `Logger`/`Level`/`Record`
+# types. Git-tag dependency per SC-VERSIONING (never a relative `path`,
+# which can't survive logkit being tagged and consumed independently of
+# clikit); `rust/Cargo.toml`'s `[patch]` table redirects this to the
+# in-tree workspace member so a local checkout builds against the crate it
+# ships alongside, not a network fetch of a tag that may not exist yet for
+# the commit in hand.
+logkit = { git = "https://github.com/johnrichter/claude-shared-tooling.git", tag = "rust/logkit/v0.1.0" }
+
+[dev-dependencies]
+
+[lints]
+workspace = true
