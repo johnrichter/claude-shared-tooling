@@ -1,0 +1,333 @@
+{
+  "kind": "clikit-contract",
+  "version": "clikit@1.0.0",
+  "description": "The data half of the clikit CLI contract: everything an implementation must agree on that the record schema cannot express. Declares the exit-code taxonomy (the eleven classes, their integers, what each one means and where its boundary with its neighbours runs), the triage directive kinds and their rules, the codes reserved to the library, the output bounds, the surfaces exempt from the contract, and the logkit delegation - the mapping from a clikit diagnostic onto a logkit record, which logkit defers to this file. Record shape lives in result-record.schema.json; the normative prose standard is clikit-cli-contract.spec.md. INVARIANTS: `exit_taxonomy.classes` is exhaustive and non-overlapping - one entry per member of the schema's status enum, in the same order, and one entry per member of the schema's exit_code enum; every `reserved_codes` entry's first segment is a status name; `triage.kinds` matches the schema's triage_kind enum; the canonical serialization is logkit's, adopted by reference and not restated.",
+  "record_schema": {
+    "$id": "https://github.com/johnrichter/claude-shared-tooling/schemas/clikit/result-record.schema.json",
+    "version": "1.0.0",
+    "schema_version": 1
+  },
+  "logkit": {
+    "module": "schemas/logkit",
+    "version": "logkit@1.0.0",
+    "record_schema_major": 1,
+    "delegation": "clikit does not define logging and states no logging rule of its own. Every log line a clikit CLI writes is a logkit record under the logkit standard, with logkit's levels, fields, timestamps, canonical serialization and dual rendering. The one thing clikit owns at the seam is the mapping below, which logkit's own contract explicitly defers to this file.",
+    "service_binding": "The `service` a process gives logkit is the same string as `command[0]` in its result record. One process, one identity, or a result and its logs cannot be correlated.",
+    "reserved_log_field": {
+      "key": "clikit",
+      "type": "object",
+      "meaning": "A single reserved key inside a logkit record's `fields`, carrying this contract's view of the outcome. One nested key rather than several flat ones, so clikit can reserve names without competing with a caller's own `fields` keys (`exit_code` is already used by callers for a subprocess's exit status).",
+      "members": [
+        { "key": "error_code", "type": "string", "meaning": "The `code` of the diagnostic this record is about. Present only on a record that reports one diagnostic." },
+        { "key": "exit_code", "type": "integer", "meaning": "The integer the process is about to exit with. Present on the terminating record." },
+        { "key": "status", "type": "string", "meaning": "The status name paired with that integer. Present on the terminating record." }
+      ]
+    },
+    "error_mapping": [
+      { "from": "error.message", "to": "logkit error.message", "note": "Verbatim. Both contracts bound a message at 4096 characters and forbid control characters, so it crosses unchanged." },
+      { "from": "error.code", "to": "logkit fields.clikit.error_code", "note": "NOT logkit's `error.kind`: that field means the failure's type as the emitting language names it, which is a different fact and may be present alongside." },
+      { "from": "error.context", "to": "logkit fields.*", "note": "Each context member becomes a `fields` member of the same name. A member colliding with a logkit root field name is nested under the reserved `clikit` key instead of being dropped or renamed." },
+      { "from": "error.triage", "to": "-", "note": "Not logged. A directive is for the caller reading the result, and duplicating it into the log stream makes the log the second place a fix is stated." }
+    ],
+    "terminating_record": {
+      "rule": "Immediately before exit, a CLI writes exactly one logkit record carrying `fields.clikit.exit_code` and `fields.clikit.status`. Its level is the class's `log_level` below. A command with more context may log at a HIGHER level than the default; never at a lower one.",
+      "fatal_note": "Class 90 logs at `fatal`, and logkit's `fatal` deliberately has no side effect of its own - it writes, flushes and returns. The process exits through this taxonomy, which is why exit codes live in one contract instead of inside a logging library."
+    }
+  },
+  "canonical_json": {
+    "adopted_from": "schemas/logkit/logkit.contract.json#/canonical_json",
+    "rule": "The result record is serialized by exactly the rules logkit pins for a log record - RFC 8785 (JCS) key ordering, numbers, strings and encoding, plus logkit's no-duplicate-keys, omitted-empty-containers, one-record-per-LF-terminated-line and single-write framing. They are adopted by reference and NOT restated here; a divergence between the two is a defect in whichever file restates rather than references.",
+    "why": "Two canonicalizations in one fleet is two of them to keep correct, and the cross-language conformance suites for both contracts reuse one canonicalizer.",
+    "additions": [
+      "Exactly one record per invocation on stdout, so there is no interleaving to protect against and the LF is the end of the CLI's stdout.",
+      "The record carries no clock reading, no host identity and no build version, so identical input yields identical bytes - which is what makes both a per-CLI golden-output test and the cross-language conformance gate possible."
+    ]
+  },
+  "streams": {
+    "stdout": "Exactly one result record, canonical JSON, LF-terminated, written immediately before exit. Nothing else is ever written to stdout - no progress, no prompt, no captured subprocess output.",
+    "stderr": "logkit records only, in whichever of logkit's two renderings is configured.",
+    "unconditional": "The record is not a mode. No flag suppresses it, reshapes it or pretty-prints it, because a caller must be able to parse the result without knowing which flags the invocation carried.",
+    "stdin": "Not constrained by this contract. A command that reads stdin declares that input's shape as part of its own contract.",
+    "unwritable_stdout": "A CLI that cannot write its record - stdout closed, disk full - exits 90 with no record. A caller that reads no record from a clikit CLI treats it as an unclassified tool failure."
+  },
+  "exit_taxonomy": {
+    "properties": [
+      "A classification, not a severity ordering. 90 is not `worse` than 41 and the integers must never be compared with < or >; the only meaningful comparisons are `== 0` and `== 10`.",
+      "Exhaustive: every terminating outcome falls in exactly one class. An outcome that fits none of them is `internal` (90) - the taxonomy is never extended in the field.",
+      "Non-overlapping: each class's `boundaries` fixes where it ends against every neighbour it could be confused with.",
+      "1, 2, 126, 127 and 128+N are unused on purpose. They belong to the runtime and the shell, so a code from a clikit CLI is never ambiguous with a panic, a `command not found` or a signal death."
+    ],
+    "caller_guidance": [
+      "Branch on the integer when the caller cannot parse JSON; read `status` and `errors[0]` when it can. Both are always present and always agree.",
+      "`if cmd; then` treats 10 as failure. A caller that wants `did it produce a usable result` tests `code == 0 || code == 10`.",
+      "An out-of-taxonomy code means the process died outside clikit. Do not map it into the taxonomy and do not expect a record."
+    ],
+    "classes": [
+      {
+        "code": 0,
+        "status": "success",
+        "summary": "The command did what was asked and the result is complete and unqualified.",
+        "use_when": [
+          "The requested operation ran to completion with nothing to qualify.",
+          "A read command found what it was asked for. An idempotent write found the world already in the requested state."
+        ],
+        "boundaries": [
+          { "vs": "caveats", "rule": "Anything the caller would want to know about the completeness or provenance of the result is a caveat, and a caveat is class 10 - not a success with a note in `data`." }
+        ],
+        "diagnostics": "none - `errors` and `caveats` are both absent",
+        "typical_triage": [],
+        "log_level": "info"
+      },
+      {
+        "code": 10,
+        "status": "caveats",
+        "summary": "The command did what was asked and the result is usable, but it is qualified.",
+        "use_when": [
+          "Partial coverage: some inputs were skipped, unreadable or out of scope, and the rest were processed.",
+          "A degraded source: a cache was served because the authoritative source was unavailable.",
+          "A handled degradation: an optional capability was missing and the command completed without it."
+        ],
+        "boundaries": [
+          { "vs": "success", "rule": "10 whenever the caller acting on the result needs to know what was qualified." },
+          { "vs": "gate_negative", "rule": "10 still delivered the result that was asked for. 20 delivered an answer, and the answer is no." },
+          { "vs": "any failure class", "rule": "10 means the result is usable as it stands. If the caller must act before the result means anything, the run failed and the class is 20 or above." }
+        ],
+        "diagnostics": "`caveats` required, one per qualification; `errors` absent",
+        "typical_triage": [ "reinvoke", "run_tool" ],
+        "log_level": "warn"
+      },
+      {
+        "code": 20,
+        "status": "gate_negative",
+        "summary": "An expected negative: the command was asked a question about something that exists and the answer is no.",
+        "use_when": [
+          "A gate refuses the action it was asked to authorize.",
+          "A check, lint or policy evaluation finds violations.",
+          "A comparison, match or membership test comes back false."
+        ],
+        "boundaries": [
+          { "vs": "internal", "rule": "20 is the tool working. The tool failing is 90. This is the single most important line in the taxonomy: a check that finds violations has succeeded at checking." },
+          { "vs": "not_found", "rule": "40 is about whether the caller's named subject exists. 20 is a judgment about a subject that does exist." },
+          { "vs": "precondition_unmet", "rule": "30 means the question could not be asked. 20 means it was asked and answered." }
+        ],
+        "diagnostics": "`errors` required, one per finding, governing finding first",
+        "typical_triage": [ "reinvoke", "run_tool", "manual" ],
+        "log_level": "info"
+      },
+      {
+        "code": 30,
+        "status": "precondition_unmet",
+        "summary": "The state the operation requires is not in place, and the command did not attempt the operation.",
+        "use_when": [
+          "A required artifact the caller did not name is missing: an index not built, a config not initialized, a dependency not installed.",
+          "The process is not in a context the command requires: not inside a repository, no active session, no credentials configured.",
+          "A required external tool is absent from PATH."
+        ],
+        "boundaries": [
+          { "vs": "not_found", "rule": "If the missing thing was named in the caller's argv it is 40; if it is something the command needs in order to work at all it is 30." },
+          { "vs": "usage", "rule": "50 is a defect in the invocation. 30 is a correct invocation against a world that is not ready." },
+          { "vs": "transient", "rule": "60 resolves by waiting. 30 stays unmet until someone changes the world." },
+          { "vs": "permission", "rule": "70 is access refused to something that exists and is configured. 30 is nothing to be refused yet." }
+        ],
+        "diagnostics": "`errors` required",
+        "typical_triage": [ "reinvoke", "run_tool" ],
+        "log_level": "error"
+      },
+      {
+        "code": 40,
+        "status": "not_found",
+        "summary": "A subject the caller named does not exist.",
+        "use_when": [
+          "A path, key, id, branch, record or resource given in the invocation is absent.",
+          "A lookup by a caller-supplied selector matches nothing and the command's job was to return that one thing."
+        ],
+        "boundaries": [
+          { "vs": "usage", "rule": "A malformed selector is 50 - it could not name anything. A well-formed selector that names nothing is 40." },
+          { "vs": "gate_negative", "rule": "A search whose job is to report matches returns 0 with an empty result, not 40. 40 is for a subject the caller asserted exists." },
+          { "vs": "conflict", "rule": "40 is absent. 41 is present in the wrong state." },
+          { "vs": "permission", "rule": "When existence itself is not disclosable to this caller, report 70 - never 40, which would leak the answer." }
+        ],
+        "diagnostics": "`errors` required, one per missing subject",
+        "typical_triage": [ "reinvoke", "manual" ],
+        "log_level": "error"
+      },
+      {
+        "code": 41,
+        "status": "conflict",
+        "summary": "The subject exists in a state incompatible with the request.",
+        "use_when": [
+          "A create would overwrite something that already exists.",
+          "The subject is locked, checked out, in use, or held by another holder.",
+          "The caller's expected version lost a concurrent update.",
+          "The requested transition is not legal from the subject's current state."
+        ],
+        "boundaries": [
+          { "vs": "not_found", "rule": "41 is present in the wrong state; 40 is absent." },
+          { "vs": "precondition_unmet", "rule": "41 is about the caller's named subject; 30 is about the environment the command needs." },
+          { "vs": "transient", "rule": "A lock that a caller may simply wait out is 60. A conflict that persists until someone resolves it is 41." }
+        ],
+        "diagnostics": "`errors` required",
+        "typical_triage": [ "reinvoke", "manual" ],
+        "log_level": "error"
+      },
+      {
+        "code": 50,
+        "status": "usage",
+        "summary": "The invocation itself is wrong. Nothing was attempted.",
+        "use_when": [
+          "An unknown subcommand, flag or option.",
+          "A missing required argument, or a mutually exclusive pair given together.",
+          "An argument that fails type, range or format validation.",
+          "Input on stdin that does not parse or does not satisfy the command's declared input contract."
+        ],
+        "boundaries": [
+          { "vs": "not_found", "rule": "50 is about the shape of the invocation; 40 is about the existence of what a well-formed invocation named." },
+          { "vs": "precondition_unmet", "rule": "50 is the caller's mistake; 30 is the environment's state." },
+          { "vs": "unsupported", "rule": "80 is a well-formed request for something this tool does not do; 50 is a request that is not well-formed." }
+        ],
+        "diagnostics": "`errors` required",
+        "typical_triage": [ "reinvoke" ],
+        "log_level": "error"
+      },
+      {
+        "code": 60,
+        "status": "transient",
+        "summary": "A failure that an identical re-invocation may resolve, with no change by anyone.",
+        "use_when": [
+          "A network timeout, a connection reset, a 5xx from an upstream.",
+          "A rate limit, a throttle or a temporary quota rejection.",
+          "Lock contention or a busy resource with a bounded wait."
+        ],
+        "boundaries": [
+          { "vs": "permission", "rule": "60 is `try again`; 70 is `trying again will never work`. An expired credential that a refresh fixes is 60; a credential that is not permitted is 70." },
+          { "vs": "precondition_unmet", "rule": "60 resolves on its own; 30 needs the world changed." },
+          { "vs": "internal", "rule": "A failure the tool cannot classify is 90, not 60. 60 is a claim that retrying is reasonable, and a wrong claim sends callers into a retry loop." }
+        ],
+        "diagnostics": "`errors` required",
+        "typical_triage": [ "reinvoke" ],
+        "log_level": "error"
+      },
+      {
+        "code": 70,
+        "status": "permission",
+        "summary": "Access is refused and an identical re-invocation will be refused again.",
+        "use_when": [
+          "A filesystem, OS or platform permission denies the operation.",
+          "Authentication is rejected, or an authorization scope is insufficient.",
+          "A policy or sandbox boundary forbids the operation for this caller."
+        ],
+        "boundaries": [
+          { "vs": "transient", "rule": "70 never resolves by retrying alone; access has to be granted." },
+          { "vs": "gate_negative", "rule": "20 is this tool's own judgment, and the tool defines the rule. 70 is another authority's refusal that this tool only reports." },
+          { "vs": "not_found", "rule": "Report 70 rather than 40 when disclosing existence would itself leak information." }
+        ],
+        "diagnostics": "`errors` required",
+        "typical_triage": [ "manual", "run_tool" ],
+        "log_level": "error"
+      },
+      {
+        "code": 80,
+        "status": "unsupported",
+        "summary": "A well-formed request this tool does not serve - out of scope, not implemented, or not available on this platform or version.",
+        "use_when": [
+          "The operation is outside this CLI's remit and another tool owns it.",
+          "The capability is not implemented on this OS, architecture or build.",
+          "An input format or protocol version the tool does not handle."
+        ],
+        "boundaries": [
+          { "vs": "usage", "rule": "50 is a malformed invocation; 80 is a valid invocation of something absent by design." },
+          { "vs": "precondition_unmet", "rule": "30 can be satisfied by installing or initializing something; 80 cannot be satisfied by this tool at all." },
+          { "vs": "internal", "rule": "80 is a known, deliberate gap; 90 is an unknown one." }
+        ],
+        "diagnostics": "`errors` required",
+        "typical_triage": [ "run_tool", "manual" ],
+        "log_level": "error",
+        "note": "This is the class that closes the forced-use loop: a CLI that will not do something names the exact OS tool and the exact invocation that will, so routing callers to the CLI first never leaves them stranded. A `run_tool` directive here is effectively mandatory - use `manual` only when no executable can do it."
+      },
+      {
+        "code": 90,
+        "status": "internal",
+        "summary": "The tool itself failed: a defect, a violated invariant, an unhandled state, or an outcome it cannot classify.",
+        "use_when": [
+          "An invariant the tool asserts does not hold.",
+          "An unexpected error from a dependency that the tool cannot map to any other class.",
+          "The tool could not build a valid result record.",
+          "Any outcome that fits none of the ten classes above."
+        ],
+        "boundaries": [
+          { "vs": "gate_negative", "rule": "A negative answer is the tool working, and is 20. 90 is the tool broken." },
+          { "vs": "every caller-caused and environment-caused class", "rule": "90 blames the tool. Using it for a bad invocation, a missing file or a denied permission hides a real defect signal behind noise." },
+          { "vs": "transient", "rule": "Unclassifiable defaults to 90, never to 60: it is safer to stop than to retry an unknown failure." }
+        ],
+        "diagnostics": "`errors` required",
+        "typical_triage": [ "manual" ],
+        "log_level": "fatal"
+      }
+    ]
+  },
+  "triage": {
+    "purpose": "Every diagnostic ends in what to do next, expressed so a caller can act without reading prose. This is the field that makes a structured error worth more than a message, and it is required on every entry of `errors` and `caveats`.",
+    "kinds": [
+      {
+        "kind": "reinvoke",
+        "meaning": "Run this same CLI again, with the command given. Element 0 of `command` is this tool.",
+        "requires": [ "command" ],
+        "forbids": [],
+        "use_when": "The caller can reach the intended outcome through this tool: a corrected invocation, a prerequisite subcommand to run first, or - for a transient failure - the identical command after `after_seconds`."
+      },
+      {
+        "kind": "run_tool",
+        "meaning": "Run a different executable, with the command given. Element 0 of `command` is not this tool.",
+        "requires": [ "command" ],
+        "forbids": [ "after_seconds" ],
+        "use_when": "The work belongs elsewhere: an unsupported operation another tool performs, or a prerequisite installed by a package manager. This is the sanctioned exit from the CLI-before-raw-OS-tool routing rule, which is why the tool names the exact invocation instead of the tool's name alone."
+      },
+      {
+        "kind": "manual",
+        "meaning": "No invocation fixes this; a person must act. `instruction` says what to do.",
+        "requires": [ "instruction" ],
+        "forbids": [ "command", "after_seconds" ],
+        "use_when": "The fix is outside any command line the tool can name - granting access, resolving a conflict by judgment, reporting a defect - or the tool cannot supply a value the command would need."
+      }
+    ],
+    "rules": [
+      "Executable as given. Concrete paths, branches and values - never a placeholder such as <branch>, never a shell line with quoting or redirection. A directive the caller must edit before running is `manual` with an instruction.",
+      "argv, not a shell string. Each element is one argument, already unquoted; the caller may exec it directly.",
+      "Best single next step, not a menu. One directive per diagnostic; when several fixes exist, name the one the tool recommends and put the alternatives in the message or `instruction`.",
+      "Directives are advice, never actions. The tool does not run its own directive, and emitting one has no side effect.",
+      "A directive is deterministic for identical input, like every other part of the record.",
+      "`after_seconds` is a floor, not a schedule: it says the earliest a retry is worth attempting, and backoff policy across attempts is the caller's."
+    ]
+  },
+  "reserved_codes": [
+    { "code": "caveats.clikit.diagnostics_truncated", "meaning": "The command produced more diagnostics than the array bound allows; the retained ones are the first by the tool's own ordering, and the total is in `context.total`." },
+    { "code": "usage.clikit.invocation_rejected", "meaning": "The command framework rejected the invocation before the command ran, and clikit adapted its parse failure into this record." },
+    { "code": "internal.clikit.result_unrepresentable", "meaning": "The command's own result failed validation against the record schema before it could be written; clikit emitted this minimal record in its place." }
+  ],
+  "reserved_code_namespace": "`<class>.clikit.*` is reserved to the clikit library in every class. A CLI never authors a code in that namespace; every other code below the class segment is the tool's own and adding one is not a contract change.",
+  "bounds": {
+    "why": "Bounded output is a contract property, not a style preference: the caller of these CLIs is usually a model with a context budget, and an unbounded result is the failure mode the contract exists to prevent.",
+    "record_soft_max_bytes": 65536,
+    "record_soft_max_rule": "A record over the soft maximum is a design smell, not a validation failure: the payload belongs in a file with its path in `data`. The bound is on the serialized record including its LF.",
+    "schema_enforced": [
+      "`data`: at most 64 members; `error.context`: at most 32 members.",
+      "`errors` and `caveats`: at most 50 members each.",
+      "`message` and `instruction`: at most 4096 characters, single line.",
+      "`code`: at most 128 characters, two to four segments.",
+      "`command`: at most 8 elements; a triage `command`: at most 128 elements."
+    ],
+    "overflow_rule": "A command with more diagnostics than the bound allows retains the first 50 by its own ordering - the governing one always among them - and adds `caveats.clikit.diagnostics_truncated` carrying the total. It never silently drops the remainder and never grows the array.",
+    "never_in_data": [
+      "A captured subprocess stdout or stderr stream.",
+      "A file's contents, a diff or a log excerpt.",
+      "Anything a human would scroll rather than read."
+    ]
+  },
+  "exempt_surfaces": [
+    { "surface": "--help / -h", "behavior": "The command framework's generated help text on stdout, exit 0. Not a result record." },
+    { "surface": "--version", "behavior": "The build's version on stdout, exit 0. Not a result record." },
+    { "surface": "generated shell completions", "behavior": "The framework's completion script on stdout, exit 0. Not a result record." }
+  ],
+  "exempt_surfaces_rule": "These three are meta-surfaces of the command framework, not operations, and their output is consumed by a shell or a person rather than by a caller parsing a result. Everything else a CLI does emits a record. The exemption is exactly this list; a CLI does not extend it.",
+  "framework_adaptation": "The framework's own error path is disabled: cobra's and clap's default behavior is to print usage text to stderr and exit 1, which is outside this taxonomy. An implementation turns off framework error and usage printing and its own exit call, catches the parse failure, and emits a class-50 record through clikit. Shell surfaces call the clikit helper or the CLI and never hand-write JSON."
+}
