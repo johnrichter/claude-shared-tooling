@@ -55,6 +55,13 @@ jobs:
         run: python3 scripts/check_secrets.py --root .
       - name: No-raw-binary scan (tracked tree, authoritative)
         run: python3 scripts/check_no_raw_binary.py --tracked --root .
+      # SC-CODEGOV: the dist-guard allowlist is a generated artifact — regenerate it from its
+      # producer and fail on any byte difference, so a hand-edited allowlist.json or a producer
+      # change landed without regenerating fails the same way. (The scan gate that rejects
+      # committed binaries is staged until the pre-SC-DISTRIBUTION go/.bin/* debt is retired
+      # through CD; see tooling/dist-guard/README.md.)
+      - name: dist-guard allowlist is current with its producer (SC-CODEGOV)
+        run: python3 tooling/dist-guard/check.py check --root .
       # SC-RESOLVE guardrail: a go.mod/go.sum that resolves to a binary/LFS
       # git attribute (instead of text) breaks external `go get` and diff/merge
       # for every consumer — this class only surfaced at the release barrier,
