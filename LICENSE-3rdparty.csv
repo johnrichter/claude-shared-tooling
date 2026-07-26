@@ -35,6 +35,21 @@ deranged,https://github.com/jhpratt/deranged,MIT OR Apache-2.0,Jacob Pratt <jaco
 num-conv,https://github.com/jhpratt/num-conv,MIT OR Apache-2.0,Jacob Pratt <jacob@jhpratt.dev>
 powerfmt,https://github.com/jhpratt/powerfmt,MIT OR Apache-2.0,Jacob Pratt <jacob@jhpratt.dev>
 doublestar,https://github.com/bmatcuk/doublestar,MIT,Bob Matcuk
+tracing,https://github.com/tokio-rs/tracing,MIT,Eliza Weisman <eliza@buoyant.io> and Tokio Contributors <team@tokio.rs>
+tracing-core,https://github.com/tokio-rs/tracing,MIT,Tokio Contributors <team@tokio.rs>
+tracing-attributes,https://github.com/tokio-rs/tracing,MIT,Tokio Contributors <team@tokio.rs>
+tracing-log,https://github.com/tokio-rs/tracing,MIT,Tokio Contributors <team@tokio.rs>
+tracing-subscriber,https://github.com/tokio-rs/tracing,MIT,Tokio Contributors <team@tokio.rs>
+sharded-slab,https://github.com/hawkw/sharded-slab,MIT,Eliza Weisman <eliza@buoyant.io>
+thread_local,https://github.com/Amanieu/thread_local-rs,MIT OR Apache-2.0,Amanieu d'Antras <amanieu@gmail.com>
+once_cell,https://github.com/matklad/once_cell,MIT OR Apache-2.0,Aleksey Kladov <aleksey.kladov@gmail.com>
+lazy_static,https://github.com/rust-lang-nursery/lazy-static.rs,MIT OR Apache-2.0,Marvin Löbel <loebel.marvin@gmail.com>
+nu-ansi-term,https://github.com/nushell/nu-ansi-term,MIT,ogham@bsago.me and Ryan Scheel (Havvy) <ryan.havvy@gmail.com> and Josh Triplett <josh@joshtriplett.org> and The Nushell Project Developers
+smallvec,https://github.com/servo/rust-smallvec,MIT OR Apache-2.0,The Servo Project Developers
+pin-project-lite,https://github.com/taiki-e/pin-project-lite,Apache-2.0 OR MIT,Taiki Endo
+valuable,https://github.com/tokio-rs/valuable,MIT,Tokio Contributors <team@tokio.rs>
+serde_jcs,https://github.com/l1h3r/serde_jcs,MIT OR Apache-2.0,l1h3r
+ryu-js,https://github.com/boa-dev/ryu-js,Apache-2.0 OR BSL-1.0,David Tolnay <dtolnay@gmail.com> and boa-dev
 ruff,https://github.com/astral-sh/ruff,MIT,Astral Software Inc.
 jsonschema,https://github.com/python-jsonschema/jsonschema,MIT,Julian Berman <Julian+jsonschema@GrayVines.com>
 jsonschema-specifications,https://github.com/python-jsonschema/jsonschema-specifications,MIT,Julian Berman <Julian+jsonschema-specifications@GrayVines.com>
