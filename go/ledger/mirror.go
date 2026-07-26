@@ -12,9 +12,9 @@ import (
 // order; List is what a reader wanting the ranked order calls.
 const mirrorTemplateText = `# Ledger
 
-| ID | Criticality | Impact | Urgency | Statement | Added |
-| --- | --- | --- | --- | --- | --- |
-{{range .entries}}| {{.id}} | {{.criticality}} | {{.impact}} | {{.urgency}} | {{.statement}} | {{.added}} |
+| ID | Criticality | Impact | Urgency | Statement | Added | Resolution | Citation | Recurrence |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+{{range .entries}}| {{.id}} | {{.criticality}} | {{.impact}} | {{.urgency}} | {{.statement}} | {{.added}} | {{.resolution}} | {{if .citation.kind}}{{.citation.kind}}:{{.citation.value}}{{end}} | {{.recurrence}} |
 {{end}}`
 
 // mirrorTemplate is parsed once at init and reused by every Open call — a text/template.

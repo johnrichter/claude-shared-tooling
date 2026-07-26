@@ -10,4 +10,13 @@
 // Every successful Add persists the ledger as a canonical JSON document plus its Markdown
 // mirror in one atomic pair (docmirror.WritePair over jsondoc's RFC 8785 canonicalization) —
 // there is no code path that updates one file without the other.
+//
+// Resolve, Retract, and Recur close the loop an append-only register otherwise leaves open. An
+// entry reaches one of five closed outcomes (Resolution.Known(): closed, fixed-live, carried,
+// retracted, stopgap), each requiring a typed Citation — never a prose note — as evidence.
+// Retracted is its own outcome, not a flavour of closed: a Retract call also records a
+// Retraction (the refuting evidence plus the id of the entry that supersedes it), and a
+// retracted entry is excluded from List's default ranking and from Partition's act-now split,
+// though never dropped from Rollup's total accounting. Recur increments an entry's recurrence
+// counter, idempotently per planning cycle, when it survives to another cycle unconsumed.
 package ledger

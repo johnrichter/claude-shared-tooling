@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -309,7 +310,7 @@ func TestReopen_PreservesRankingAndFilters(t *testing.T) {
 		t.Fatalf("reopened List length %d, want %d", len(got), len(want))
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Fatalf("reopened entry %d = %+v, want %+v", i, got[i], want[i])
 		}
 	}
