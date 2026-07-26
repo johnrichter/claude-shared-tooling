@@ -2,8 +2,10 @@ package ledger
 
 import "fmt"
 
-// ValidationError is returned by Add when a statement or score is malformed. Nothing is
-// written to disk and no entry is appended when this is returned.
+// ValidationError is returned when a caller-supplied value is malformed: a statement or score
+// on Add, a resolution or citation on Resolve, a refuting-evidence/superseded-id relation on
+// Retract, or a cycle on Recur. Nothing is written to disk and the ledger's in-memory state is
+// left untouched when this is returned.
 type ValidationError struct {
 	Field   string
 	Message string
@@ -11,6 +13,16 @@ type ValidationError struct {
 
 func (e *ValidationError) Error() string {
 	return fmt.Sprintf("ledger: invalid %s: %s", e.Field, e.Message)
+}
+
+// NotFoundError is returned by Resolve, Retract, and Recur when id names no entry in the
+// ledger.
+type NotFoundError struct {
+	ID string
+}
+
+func (e *NotFoundError) Error() string {
+	return fmt.Sprintf("ledger: no entry with id %q", e.ID)
 }
 
 // SchemaError wraps a canonical JSON file whose declared schema this package cannot read:

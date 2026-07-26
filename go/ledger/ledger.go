@@ -88,22 +88,146 @@ func (l *Ledger) Add(statement string, impact, urgency int) (Entry, error) {
 		Added:       time.Now().UTC().Format(time.RFC3339),
 	}
 
-	next := Document{
-		Schema:  SchemaVersion,
-		Entries: append(append([]Entry(nil), l.doc.Entries...), entry),
-	}
-
-	if err := docmirror.WritePair(l.jsonPath, l.mdPath, next, mirrorTemplate, l.perm); err != nil {
+	entries := append(append([]Entry(nil), l.doc.Entries...), entry)
+	if err := l.persist(entries); err != nil {
 		return Entry{}, err
 	}
-	l.doc = next
 	return entry, nil
+}
+
+// persist writes entries as l's new document state (canonical JSON plus Markdown mirror, one
+// atomic pair) and, only on success, makes it l's in-memory state — the same
+// validate-then-write-then-commit shape Add already uses, shared here so Resolve, Retract, and
+// Recur leave l untouched on any write failure too.
+func (l *Ledger) persist(entries []Entry) error {
+	next := Document{Schema: SchemaVersion, Entries: entries}
+	if err := docmirror.WritePair(l.jsonPath, l.mdPath, next, mirrorTemplate, l.perm); err != nil {
+		return err
+	}
+	l.doc = next
+	return nil
 }
 
 // nextID derives the next entry id from how many entries already exist. Ids are assigned by
 // append position, never reused, and never influenced by caller input.
 func nextID(existing []Entry) string {
 	return fmt.Sprintf("ENTRY-%04d", len(existing)+1)
+}
+
+// indexOf returns the position of the entry with the given id, or -1 if none exists.
+func (l *Ledger) indexOf(id string) int {
+	for i, e := range l.doc.Entries {
+		if e.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// Resolve marks entry id with resolution and its REQUIRED supporting citation, then persists
+// the ledger. resolution must be one of the four non-retract outcomes (Closed, FixedLive,
+// Carried, Stopgap); Retract is the dedicated path for the fifth, since retraction always
+// carries the extra refuting-evidence/superseded-id relation a bare resolution does not.
+//
+// citation is validated before anything is written — an unknown kind, an empty value, or a
+// prose value is refused, and l's on-disk state is left exactly as it was.
+//
+// Resolve also refuses an id already Retracted: retraction is terminal and distinct from the
+// other four outcomes, so an ordinary Resolve call must not silently promote a refuted entry
+// back into active resolution — that would erase the "never held" fact Retract recorded.
+// Retract is the only path that can act on an already-retracted entry.
+func (l *Ledger) Resolve(id string, resolution Resolution, citation Citation) (Entry, error) {
+	if resolution == ResolutionRetracted {
+		return Entry{}, &ValidationError{Field: "resolution", Message: "retracted must go through Retract, which also records the refuting evidence and superseded entry id"}
+	}
+	if !resolution.Known() {
+		return Entry{}, &ValidationError{Field: "resolution", Message: fmt.Sprintf("unknown resolution %q", string(resolution))}
+	}
+	if err := citation.Validate(); err != nil {
+		return Entry{}, err
+	}
+
+	idx := l.indexOf(id)
+	if idx < 0 {
+		return Entry{}, &NotFoundError{ID: id}
+	}
+	if l.doc.Entries[idx].Resolution == ResolutionRetracted {
+		return Entry{}, &ValidationError{Field: "id", Message: fmt.Sprintf("entry %q is retracted, cannot resolve — retraction is terminal", id)}
+	}
+
+	entries := append([]Entry(nil), l.doc.Entries...)
+	entries[idx].Resolution = resolution
+	entries[idx].Citation = citation
+
+	if err := l.persist(entries); err != nil {
+		return Entry{}, err
+	}
+	return entries[idx], nil
+}
+
+// Retract marks entry id Retracted — a refuted entry that stops ranking among live work.
+// refutingEvidence is the REQUIRED citation showing why the entry never held, and
+// supersededEntryID is the REQUIRED id of the entry that replaces it; both are validated
+// before anything is written and carried on the resulting Retraction relation.
+func (l *Ledger) Retract(id string, refutingEvidence Citation, supersededEntryID string) (Entry, error) {
+	retraction := Retraction{RefutingEvidence: refutingEvidence, SupersededEntryID: supersededEntryID}
+	if err := retraction.Validate(); err != nil {
+		return Entry{}, err
+	}
+
+	idx := l.indexOf(id)
+	if idx < 0 {
+		return Entry{}, &NotFoundError{ID: id}
+	}
+
+	entries := append([]Entry(nil), l.doc.Entries...)
+	entries[idx].Resolution = ResolutionRetracted
+	entries[idx].Citation = refutingEvidence
+	entries[idx].Retraction = retraction
+
+	if err := l.persist(entries); err != nil {
+		return Entry{}, err
+	}
+	return entries[idx], nil
+}
+
+// Recur records that entry id has reached planning cycle cycle still unconsumed (no
+// resolution yet), incrementing its recurrence counter — the signal that makes an unspent
+// register entry visible rather than merely regrettable. Recur is idempotent per cycle: any
+// cycle the entry has already recurred in is a no-op, even one revisited out of order, so
+// replaying a planning pass cannot inflate the count. Only a cycle not seen before increments,
+// and the counter never decreases.
+//
+// Recur refuses an id that already carries a resolution — recurrence tracks live exposure,
+// not resolved history.
+func (l *Ledger) Recur(id, cycle string) (Entry, error) {
+	cycle = strings.TrimSpace(cycle)
+	if cycle == "" {
+		return Entry{}, &ValidationError{Field: "cycle", Message: "must not be empty"}
+	}
+
+	idx := l.indexOf(id)
+	if idx < 0 {
+		return Entry{}, &NotFoundError{ID: id}
+	}
+	entry := l.doc.Entries[idx]
+	if entry.Resolution.Known() {
+		return Entry{}, &ValidationError{Field: "id", Message: fmt.Sprintf("entry %q is already resolved (%s), cannot recur", id, entry.Resolution)}
+	}
+	for _, seen := range entry.RecurCycles {
+		if seen == cycle {
+			return entry, nil
+		}
+	}
+
+	entries := append([]Entry(nil), l.doc.Entries...)
+	entries[idx].RecurCycles = append(append([]string(nil), entry.RecurCycles...), cycle)
+	entries[idx].Recurrence++
+
+	if err := l.persist(entries); err != nil {
+		return Entry{}, err
+	}
+	return entries[idx], nil
 }
 
 // Filter narrows a List read; multiple filters compose with AND semantics.
@@ -124,13 +248,30 @@ func MinUrgency(min int) Filter {
 	return func(e Entry) bool { return e.Urgency >= min }
 }
 
-// List returns every entry passing all of filters (AND), ranked by descending criticality;
-// entries tied on criticality keep their append order (stable sort) so List's output is
-// deterministic across repeated calls against the same ledger state. No filters returns every
-// entry, ranked.
+// List returns every entry passing all of filters (AND) whose resolution is not Retracted,
+// ranked by descending criticality; entries tied on criticality keep their append order
+// (stable sort) so List's output is deterministic across repeated calls against the same
+// ledger state. No filters returns every live entry, ranked.
+//
+// A Retracted entry never appears here — a refuted entry does not rank among live work.
+// ListWithRetracted is the explicit opt-in read for a caller that wants it back.
 func (l *Ledger) List(filters ...Filter) []Entry {
+	return l.list(false, filters)
+}
+
+// ListWithRetracted behaves like List but also admits Retracted entries into the ranked
+// output. It exists so a refuted entry stays readable on request without ever ranking among
+// live work by default.
+func (l *Ledger) ListWithRetracted(filters ...Filter) []Entry {
+	return l.list(true, filters)
+}
+
+func (l *Ledger) list(includeRetracted bool, filters []Filter) []Entry {
 	out := make([]Entry, 0, len(l.doc.Entries))
 	for _, e := range l.doc.Entries {
+		if !includeRetracted && e.Resolution == ResolutionRetracted {
+			continue
+		}
 		keep := true
 		for _, f := range filters {
 			if !f(e) {
@@ -152,6 +293,11 @@ func (l *Ledger) List(filters ...Filter) []Entry {
 // threshold). The split is total, lossless, and exactly-once: a single pass, each entry's
 // criticality read once, and each entry appended to exactly one of the two returned slices —
 // len(actNow)+len(deferred) always equals len(entries).
+//
+// Partition itself is oblivious to Resolution — a Retracted entry passed to it still lands in
+// actNow or deferred by criticality alone. Retracted entries stay out of the act-now partition
+// because List, the usual source of entries for this call, already excludes them; see
+// (*Ledger).Partition for the ledger-backed call that wires the two together.
 func Partition(entries []Entry, threshold int) (actNow, deferred []Entry) {
 	for _, e := range entries {
 		if e.Criticality >= threshold {
@@ -161,4 +307,40 @@ func Partition(entries []Entry, threshold int) (actNow, deferred []Entry) {
 		}
 	}
 	return actNow, deferred
+}
+
+// Partition splits l's live-ranked entries (List's output — Retracted excluded) into actNow
+// and deferred at threshold. Retracted entries are never in either bucket here, but are still
+// counted in Rollup — the split stays total and lossless across all three buckets combined.
+func (l *Ledger) Partition(threshold int) (actNow, deferred []Entry) {
+	return Partition(l.List(), threshold)
+}
+
+// Rollup is a total, lossless three-way accounting of a ledger's entries: ActNow+Deferred is
+// the live (non-retracted) count, and Retracted is counted alongside it rather than dropped —
+// so a caller reading only List/Partition's live-ranked view can still confirm every entry the
+// ledger ever held is accounted for somewhere. ActNow+Deferred+Retracted always equals Total.
+type Rollup struct {
+	ActNow    int
+	Deferred  int
+	Retracted int
+	Total     int
+}
+
+// Rollup reports how l's entries currently divide across act-now, deferred, and retracted at
+// the given criticality threshold — the same threshold Partition would use for the live split.
+func (l *Ledger) Rollup(threshold int) Rollup {
+	var r Rollup
+	for _, e := range l.doc.Entries {
+		r.Total++
+		switch {
+		case e.Resolution == ResolutionRetracted:
+			r.Retracted++
+		case e.Criticality >= threshold:
+			r.ActNow++
+		default:
+			r.Deferred++
+		}
+	}
+	return r
 }
