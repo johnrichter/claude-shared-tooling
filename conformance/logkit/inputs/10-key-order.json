@@ -1,0 +1,16 @@
+{
+  "id": "10-key-order",
+  "purpose": "Keys given in an order no sort would produce, spanning the code-point neighbourhood where digits, uppercase, underscore and lowercase meet, so both renderings must sort rather than preserve insertion order.",
+  "level_token": "debug",
+  "timestamp": "2026-07-26T09:49:00.000Z",
+  "service": "navigator",
+  "message": "facet query parsed",
+  "fields": {
+    "zz": 5,
+    "Z": 4,
+    "_leading": 3,
+    "aa": 2,
+    "A": 1,
+    "0_first": 0
+  }
+}

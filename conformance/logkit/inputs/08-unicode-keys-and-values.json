@@ -1,0 +1,18 @@
+{
+  "id": "08-unicode-keys-and-values",
+  "purpose": "Non-ASCII keys sort by code point at every depth, and non-ASCII values are emitted as literal UTF-8 rather than escaped. Keys stay in the Basic Multilingual Plane: above it, UTF-16 code-unit order (what the canonical JSON sorts by) and code-point order disagree, and the contract does not yet say which one the human rendering follows.",
+  "level_token": "info",
+  "timestamp": "2026-07-26T09:47:00.001Z",
+  "service": "navigator",
+  "message": "frontmatter tag vocabulary loaded",
+  "fields": {
+    "a_ascii": "plain",
+    "café": "naïve",
+    "Übersicht": "zwei wörter",
+    "日本": {
+      "あ": 1,
+      "ア": 2
+    },
+    "rocket": "🚀 shipped"
+  }
+}

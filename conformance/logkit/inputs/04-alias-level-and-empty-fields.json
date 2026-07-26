@@ -1,0 +1,9 @@
+{
+  "id": "04-alias-level-and-empty-fields",
+  "purpose": "An inbound level token that is a case variant of an equivalent alias: it normalizes to warn and preserves no native_level. An empty fields object must be omitted from the record entirely.",
+  "level_token": "  WARNING  ",
+  "timestamp": "2026-07-26T09:44:30.999Z",
+  "service": "sitemap-parser",
+  "message": "sitemap window filtered every url",
+  "fields": {}
+}

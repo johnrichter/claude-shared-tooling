@@ -1,0 +1,15 @@
+{
+  "id": "05-lossy-alias-panic",
+  "purpose": "A non-equivalent inbound alias: panic maps to fatal and the source token survives in the reserved native_level key, case intact.",
+  "level_token": "PANIC",
+  "timestamp": "2026-07-26T09:45:00.000Z",
+  "service": "anoikis-tools",
+  "message": "state store unreadable",
+  "fields": {
+    "path": ".anoikis/state.json"
+  },
+  "error": {
+    "message": "unexpected end of JSON input",
+    "kind": "*json.SyntaxError"
+  }
+}

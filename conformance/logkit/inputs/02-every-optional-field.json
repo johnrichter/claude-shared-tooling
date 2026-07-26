@@ -1,0 +1,26 @@
+{
+  "id": "02-every-optional-field",
+  "purpose": "All four optional root fields present at once, so the canonical key order and the human attribute order are pinned across the full record.",
+  "level_token": "error",
+  "timestamp": "2026-07-26T09:44:12.007Z",
+  "service": "git-tools",
+  "service_version": "1.4.0",
+  "message": "worktree create refused",
+  "fields": {
+    "branch": "feat/x",
+    "exit_code": 128
+  },
+  "error": {
+    "message": "fatal: 'feat/x' is already checked out at '/w/a'",
+    "kind": "git.ExitError",
+    "stack": [
+      "git/worktree:88 Create",
+      "git/cmd:41 run"
+    ]
+  },
+  "caller": {
+    "file": "bh/worktree.go",
+    "line": 88,
+    "function": "Create"
+  }
+}

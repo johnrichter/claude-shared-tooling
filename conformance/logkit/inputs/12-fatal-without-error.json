@@ -1,0 +1,12 @@
+{
+  "id": "12-fatal-without-error",
+  "purpose": "level and error are independent: the highest level carries no error member, and the record is the same shape as any other.",
+  "level_token": "fatal",
+  "timestamp": "2026-07-26T09:51:59.999Z",
+  "service": "clikit",
+  "message": "configuration root is not writable",
+  "service_version": "0.1.0-dev",
+  "fields": {
+    "root": "/var/lib/clikit"
+  }
+}

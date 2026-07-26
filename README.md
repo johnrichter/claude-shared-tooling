@@ -8,6 +8,7 @@ Each tool is stdlib-only today and doubles as an importable module for programma
 - **CLI tools** — three small utilities, each also usable as a library (see [Tools](#tools)).
 - **`schemas/`** — generalized, non-proprietary schema and format definitions others can adopt (see `schemas/README.md`).
 - **`rust/`** — a Cargo workspace of deterministic, no-ML Rust crates (see [Rust workspace](#rust-workspace)).
+- **`conformance/`** — cross-language byte-identity gates for the contracts in `schemas/` that more than one language implements: shared inputs, recorded goldens, and a runner that fails on any difference between implementations (`conformance/logkit/README.md`).
 
 ## Tools
 

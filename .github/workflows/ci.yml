@@ -23,6 +23,11 @@
 # runner exists natively for that {os, arch} pair (same native/cross split as
 # the Rust matrix above — macos-x86_64 is build+lint only).
 #
+# logkit-conformance — single job, parallel to the rust/go matrices: the cross-language
+# byte-identity gate for the logkit record contract. Arch-independent (canonical JSON is
+# byte-defined, not host-defined), so it runs once on linux-x86_64, but it needs the Go and
+# Rust toolchains together because it drives both implementations in one run.
+#
 # golangci-lint — single job, parallel to the rust/go matrices, mirroring the
 # Rust arch matrix's clippy gate: version-pinned (config + install both pin
 # v2.12.2), zero-warning bar, no arch dependence so it runs once on linux-x86_64.
@@ -246,6 +251,40 @@ jobs:
             exit 1
           fi
           echo "::warning::known exception: rust/frontmatter -> facetquery path dependency (see tooling/version-guard/README.md)"
+
+  # SC-CONTRACT guardrail: schemas/logkit is one record contract with several implementations,
+  # and "the same event produces the same bytes" is the only property that makes it an interop
+  # contract rather than three similar loggers. This job runs the shared golden input set
+  # through every implementation and fails on any byte difference — language against language,
+  # and each language against the recorded goldens. It also runs the gate's own selftest, which
+  # plants a single-language drift and requires the gate to catch it, so a gate that has stopped
+  # discriminating fails here instead of passing quietly. Any finding is a pause for a human:
+  # there is no declared-delta list and no per-case waiver. See conformance/logkit/README.md.
+  logkit-conformance:
+    name: logkit-conformance
+    runs-on: ubuntu-latest
+    needs: guardrail
+    steps:
+      # go.mod is LFS-routed (see the go job below) — lfs: true smudges go/logkit's manifest so
+      # setup-go reads the real go directive instead of a pointer stub.
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/logkit/go.mod
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Every implementation emits the same normalized record (SC-CONTRACT)
+        run: python3 conformance/logkit/check.py
+      # Planted-drift test: prove the gate discriminates. Each plant is a one-token edit to one
+      # language's level token, applied to the working tree and reverted from the bytes read
+      # before it was applied; the third plant removes a golden, which must fail rather than be
+      # regenerated. The gate must return 1 for each.
+      - name: Planted single-language drift fails the gate (SC-CONTRACT)
+        run: python3 conformance/logkit/check.py --selftest
 
   rust:
     name: rust-${{ matrix.name }}

@@ -1,0 +1,13 @@
+{
+  "id": "06-lossy-alias-trace",
+  "purpose": "The other non-equivalent alias: trace maps to debug, keeps its source token, and the reserved key sorts among the authored ones rather than being special-cased.",
+  "level_token": "trace",
+  "timestamp": "2026-07-26T09:45:01.250Z",
+  "service": "article-meta",
+  "message": "candidate metadata block rejected",
+  "fields": {
+    "block": "json-ld",
+    "native_reason": "no published date",
+    "zone": "head"
+  }
+}
