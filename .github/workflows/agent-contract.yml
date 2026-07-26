@@ -1,0 +1,66 @@
+# SC-AGENTCONTRACT: required agent-contract gate (see go/agentcontract's package doc).
+#
+# Split out of ci.yml into its own workflow file for the same reason codegov.yml is split
+# out: a stable, independently addressable trigger/name, since a separate workflow file
+# cannot join ci.yml's single job graph via `needs:`. Re-runs the guardrail scan itself
+# before building or running anything against the checkout.
+#
+# Two things happen here: (1) the agentcontract package itself is built, vetted and tested
+# like any other Go module in this repo; (2) its built agentcontract-lint binary is run
+# against this repo's full tree, checking every "agents" directory it finds — the
+# discriminator-matrix and instruction-property lint documented in go/agentcontract's
+# package doc. A repo with no "agents" directory yet passes vacuously; the gate is wired
+# in ahead of the first roster this workspace authors, per the toolbelt design's tiering
+# rule (roster authoring is gated by this check existing, not by any roster in it yet).
+
+name: SC-AGENTCONTRACT
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  agent-contract:
+    name: agentcontract-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # No ci.yml `guardrail` job to depend on from this separate workflow file — re-run the
+      # same secret/binary scan here so this gate never builds or executes against an
+      # unscanned checkout.
+      - name: Secret scan (authority layer)
+        run: python3 scripts/check_secrets.py --root .
+      - name: No-raw-binary scan (tracked tree, authoritative)
+        run: python3 scripts/check_no_raw_binary.py --tracked --root .
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/agentcontract/go.mod
+      - name: gofmt (zero-diff lint bar)
+        working-directory: go/agentcontract
+        run: |
+          diff="$(gofmt -l .)"
+          if [ -n "$diff" ]; then
+            echo "$diff"
+            exit 1
+          fi
+      - name: go vet
+        working-directory: go/agentcontract
+        run: go vet ./...
+      - name: go test
+        working-directory: go/agentcontract
+        run: go test ./...
+      - name: Build agentcontract-lint
+        working-directory: go/agentcontract
+        run: go build -o "$RUNNER_TEMP/agentcontract-lint" ./cmd/agentcontract-lint
+      - name: Agent-contract lint (discriminator matrix + instruction properties)
+        run: "$RUNNER_TEMP/agentcontract-lint" .
