@@ -47,6 +47,12 @@
       "kind": "ci-guard",
       "status": "active"
     },
+    "ai-shared-lib.invariant-lint": {
+      "path": "ai-shared-lib/tooling/invariant-lint/check.py",
+      "owner": "ai-shared-lib",
+      "kind": "ci-guard",
+      "status": "active"
+    },
     "ai-shared-lib.invariant-registry": {
       "path": "ai-shared-lib/schemas/invariant-registry/check.py",
       "owner": "ai-shared-lib",
@@ -454,7 +460,8 @@
       "status": "shipped",
       "gate_id": "ai-shared-lib.roster-currency",
       "reason_lower_rung": "Currency is a comparison between a generator's output and every committed consumer of it - a whole-tree property no tool call can decide.",
-      "test_id": "ai-shared-lib/tests/test_roster_gen.py::RealRepoByteParityTests"
+      "test_id": "ai-shared-lib/tests/test_roster_gen.py::CliIntegrationTests::test_check_passes_on_a_clean_tree_then_catches_a_hand_edit",
+      "notes": "Retargeted from RealRepoByteParityTests, which is unconditionally skipped in this repo's own CI (it needs a marketplace sibling checkout) and so never actually ran as this invariant's rung-3 target - invariant-lint's rung-3 check caught the gap. CliIntegrationTests exercises the same regenerate/compare logic against throwaway trees and runs unconditionally."
     },
     {
       "id": "ai-shared-lib.release-transaction.every-enumerator-resolved",
@@ -493,6 +500,18 @@
       "reason_lower_rung": "Completeness is a comparison between the set of gates a checkout actually runs and the set declared here; it is a property of two trees, not of any call.",
       "test_id": "ai-shared-lib/tests/test_invariant_registry.py::CompletenessTests",
       "notes": "The lint is shipped and wired as a required check, and the named test that resolves this rung-3 target ships in the same change - at rung 3 the test IS the target, so the entry is shipped only once that test exists and runs."
+    },
+    {
+      "id": "ai-shared-lib.invariant-lint.rungs-verified",
+      "statement": "Every shipped rung-1 fail_fast_symbol resolves in its named source file, and every shipped rung-3 test_id exists in the shipped suite and is observed to run rather than skipped.",
+      "rung": 3,
+      "fail_direction": "closed",
+      "blast_radius": "A false positive fails one CI run over a definition-anchored miss, correctable by fixing the resolver or the entry. An uncaught rename, move, deletion, or silent skip leaves rungs 1 and 3 indistinguishable from the completeness-only tiers by anyone reading a green build, which is the exact drift this tool exists to close.",
+      "owner": "ai-shared-lib",
+      "status": "shipped",
+      "gate_id": "ai-shared-lib.invariant-lint",
+      "reason_lower_rung": "Resolving a symbol against its source file and observing whether a named test actually ran are both properties of the tree and the running suite, not of any single tool call a PreToolUse hook could see.",
+      "test_id": "ai-shared-lib/tests/test_invariant_lint.py::CoreResolutionTests"
     },
     {
       "id": "governance-code.authoring-doc.states-the-comment-policy",

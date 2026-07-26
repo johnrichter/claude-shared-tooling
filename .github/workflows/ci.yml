@@ -167,6 +167,30 @@ jobs:
       - name: Registry is valid, non-duplicating and complete (SC-ENFORCE)
         run: .venv/bin/python schemas/invariant-registry/check.py
 
+  # SC-ENFORCE guardrail: the two machine-checked rungs of the invariant registry are
+  # verified, not merely declared. This job resolves every shipped rung-1 fail_fast_symbol
+  # in its named source file and runs every shipped rung-3 test_id, failing on a rename, a
+  # move, a deletion, a nonexistent test, or a test that resolves but is skipped. See
+  # tooling/invariant-lint/README.md.
+  invariant-lint:
+    name: invariant-lint
+    runs-on: ubuntu-latest
+    needs: guardrail
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package
+        run: pip install -e .
+      # A rung-3 test_id is re-executed in a subprocess by invariant-lint itself, so any
+      # dependency that test needs (the pinned schema validator, for the invariant-registry
+      # suite) must already be on this interpreter, same as the unit-tests job.
+      - name: Install the pinned schema validator
+        run: pip install -r schemas/invariant-registry/requirements.txt
+      - name: Rung-1 symbols resolve, rung-3 tests exist and run (SC-ENFORCE)
+        run: python3 tooling/invariant-lint/check.py
+
   # SC-MODELROSTER / SC-CODEGOV: schemas/model-roster/model-roster.json is the single source of
   # record for the selectable Claude model set. This job regenerates every roster-derived
   # artifact this repo commits and fails on any byte difference, so a hand-edited artifact or a
