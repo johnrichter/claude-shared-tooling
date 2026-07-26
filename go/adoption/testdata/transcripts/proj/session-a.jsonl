@@ -1,0 +1,7 @@
+{"type":"user","sessionId":"session-a","isSidechain":false,"message":{"role":"user","content":[{"type":"text","text":"commit the pending changes"}]}}
+{"type":"assistant","sessionId":"session-a","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"git-tools commit -m \"add feature\""}}]}}
+{"type":"assistant","sessionId":"session-a","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"git-tools worktree create --branch feat/x"}}]}}
+this line is not valid json and must be skipped
+{"type":"assistant","sessionId":"session-a","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"git status --short"}}]}}
+{"type":"assistant","sessionId":"session-a","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"git-tools commit -m \"second commit\""}}]}}
+{"type":"assistant","sessionId":"session-a","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"git-tools worktree list"}}]}}
