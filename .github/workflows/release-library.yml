@@ -1,0 +1,77 @@
+# Reusable SC-DISTRIBUTION release template — LIBRARY track.
+#
+# A library releases by pinning a git tag; there is nothing to archive. Consumers pull the
+# tagged source directly (a Rust git-tag dependency, a Go module tag, a documented commit).
+# A module-owning workflow calls this via `workflow_call`; it tags and cuts the official
+# platform release, nothing else — dist-guard (tooling/dist-guard/) is what keeps a built
+# artifact from ever needing to be committed in the first place.
+#
+# GitLab equivalent: the same tag-push + `release-cli create` pair as an `include:`d job in a
+# caller `.gitlab-ci.yml`. No separate GitLab template exists in this repo; this file is the
+# GitHub Actions implementation of the SC-DISTRIBUTION library contract.
+
+name: SC-DISTRIBUTION release (library)
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Tag to cut, e.g. schemas/model-roster/v1.2.3 (SC-VERSIONING: tag prefix == module path)."
+        required: true
+        type: string
+      release_notes:
+        description: "Release body; omitted lets the platform auto-generate notes from commits."
+        required: false
+        type: string
+        default: ""
+      dry_run:
+        description: "Verify only — skip the tag push and the platform release."
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      GH_TOKEN:
+        description: "Token with contents:write, for `gh release create`. Unused in dry-run."
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: tag-and-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Reject an existing tag (no overwrite)
+        run: |
+          if git rev-parse "${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "::error::tag ${{ inputs.version }} already exists - a release tag is never reused"
+            exit 1
+          fi
+
+      - name: Tag HEAD
+        if: ${{ !inputs.dry_run }}
+        run: |
+          git tag -a "${{ inputs.version }}" -m "${{ inputs.version }}"
+          git push origin "${{ inputs.version }}"
+
+      - name: Publish the official release (tag only, no archive)
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          if [ -n "$RELEASE_NOTES" ]; then
+            gh release create "${{ inputs.version }}" --title "${{ inputs.version }}" --notes "$RELEASE_NOTES"
+          else
+            gh release create "${{ inputs.version }}" --title "${{ inputs.version }}" --generate-notes
+          fi
+
+      - name: Dry-run summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "dry-run: would tag and release ${{ inputs.version }} - no archive attached (library track)"

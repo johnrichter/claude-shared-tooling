@@ -1,0 +1,11 @@
+{
+  "version": "1.0.0",
+  "description": "SC-FREEZE: List of frozen plugin/corpus homes that reject any write via CI/pre-merge guard",
+  "frozen_homes": [
+    "plugin-homes/datadog-docs-agent",
+    "plugin-homes/datadog-code-agent",
+    "corpus/datadog-docs-agent",
+    "corpus/datadog-code-agent"
+  ],
+  "note": "This is the single source of record for frozen homes. Changes to this list require review. Paths are checked as prefix matches (directory-level boundaries)."
+}
