@@ -1,0 +1,38 @@
+{
+  "id": "09-conflict-errors-and-caveats",
+  "purpose": "Errors and caveats on one record: errors[0] is the governing error and only its class must equal the record's status, so the second error may sit in another class, and the caveat reports what else the run had to qualify.",
+  "command": ["git-tools", "worktree", "create"],
+  "status": "conflict",
+  "errors": [
+    {
+      "code": "conflict.worktree.branch_checked_out",
+      "message": "branch 'feat/x' is already checked out at '/w/a'",
+      "triage": {
+        "kind": "reinvoke",
+        "command": ["git-tools", "worktree", "create", "--branch", "feat/x-2"]
+      },
+      "context": {
+        "branch": "feat/x",
+        "worktree": "/w/a"
+      }
+    },
+    {
+      "code": "precondition_unmet.git.staged_changes",
+      "message": "the index has staged changes the new worktree would not see",
+      "triage": {
+        "kind": "manual",
+        "instruction": "commit or stash the staged changes before creating the worktree"
+      }
+    }
+  ],
+  "caveats": [
+    {
+      "code": "caveats.worktree.hooks_not_installed",
+      "message": "a worktree created here would carry no hooks",
+      "triage": {
+        "kind": "reinvoke",
+        "command": ["git-tools", "hooks", "install"]
+      }
+    }
+  ]
+}

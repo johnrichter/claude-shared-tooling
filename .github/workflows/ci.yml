@@ -28,6 +28,10 @@
 # byte-defined, not host-defined), so it runs once on linux-x86_64, but it needs the Go and
 # Rust toolchains together because it drives both implementations in one run.
 #
+# clikit-conformance — same shape, same reasoning, for the clikit CLI output contract: one
+# normalized result record and one of eleven exit codes, byte-identical and integer-identical
+# across the Go and Rust implementations.
+#
 # golangci-lint — single job, parallel to the rust/go matrices, mirroring the
 # Rust arch matrix's clippy gate: version-pinned (config + install both pin
 # v2.12.2), zero-warning bar, no arch dependence so it runs once on linux-x86_64.
@@ -285,6 +289,43 @@ jobs:
       # regenerated. The gate must return 1 for each.
       - name: Planted single-language drift fails the gate (SC-CONTRACT)
         run: python3 conformance/logkit/check.py --selftest
+
+  # SC-CONTRACT guardrail: schemas/clikit is one output/error/exit contract with several
+  # implementations, and "the same outcome produces the same record bytes and the same exit code"
+  # is the only property that makes it an interop contract rather than two similar CLI libraries.
+  # This job runs the shared golden input set through every implementation and fails on any
+  # difference — language against language, each language against the recorded goldens, and every
+  # golden against the contract's own source files in schemas/clikit (the one check a
+  # cross-language agreement cannot substitute for: a wrong status/exit-code pairing both
+  # languages share is invisible to comparison). It also runs the gate's own selftest, which
+  # plants a single-language drift, removes a golden and mispairs a record, requiring the gate to
+  # catch each. Any finding is a pause for a human: there is no declared-delta list and no
+  # per-case waiver. See conformance/clikit/README.md.
+  clikit-conformance:
+    name: clikit-conformance
+    runs-on: ubuntu-latest
+    needs: guardrail
+    steps:
+      # No lfs: true — every file this gate reads (the suite, both implementations, the contract,
+      # and go/clikit's manifests, which the SC-RESOLVE step above requires to be text) is a
+      # plain tracked file, so a default checkout is already complete for it.
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/clikit/go.mod
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Every implementation emits the same record and the same exit code (SC-CONTRACT)
+        run: python3 conformance/clikit/check.py
+      # Planted-drift test: prove the gate discriminates. Each source plant is a one-token edit to
+      # one language (Go's exit-code pairing, Rust's record version), applied to the working tree
+      # and reverted from the bytes read before it was applied; two more plants remove a golden,
+      # which must fail rather than be regenerated, and the last mispairs a record in memory to
+      # exercise the contract check. The gate must return 1 for each.
+      - name: Planted single-language drift fails the gate (SC-CONTRACT)
+        run: python3 conformance/clikit/check.py --selftest
 
   rust:
     name: rust-${{ matrix.name }}

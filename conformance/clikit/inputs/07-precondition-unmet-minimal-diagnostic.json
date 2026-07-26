@@ -1,0 +1,16 @@
+{
+  "id": "07-precondition-unmet-minimal-diagnostic",
+  "purpose": "The smallest failure record: no data, one diagnostic with no context, and a manual directive - the shape for a fix no invocation of this tool can perform.",
+  "command": ["navigator", "index", "build"],
+  "status": "precondition_unmet",
+  "errors": [
+    {
+      "code": "precondition_unmet.storage.read_only_mount",
+      "message": "the index directory is on a read-only mount, so no index can be built",
+      "triage": {
+        "kind": "manual",
+        "instruction": "mount var/index writable on this host, then build the index"
+      }
+    }
+  ]
+}

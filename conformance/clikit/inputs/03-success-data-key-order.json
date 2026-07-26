@@ -1,0 +1,13 @@
+{
+  "id": "03-success-data-key-order",
+  "purpose": "Data keys given in an order no sort would produce, spanning the neighbourhood where a digit, an underscore and a letter meet, so the canonical rendering must sort them rather than preserve insertion order. Each value is the position its key must end up in.",
+  "command": ["navigator", "facets", "list"],
+  "status": "success",
+  "data": {
+    "z_last": 5,
+    "aa": 4,
+    "a_b": 3,
+    "a0": 2,
+    "a": 1
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "id": "02-success-every-data-value-kind",
+  "purpose": "Every JSON value kind a data member can hold: string, integer, float, boolean, explicit null, array, and a nested object whose own keys must sort at depth while the array keeps its given order.",
+  "command": ["navigator", "search"],
+  "status": "success",
+  "data": {
+    "dry_run": false,
+    "hits": 3,
+    "index_path": "var/index/navigator.bm25",
+    "matched_paths": ["agent/identity.md", "README.md"],
+    "previous_index": null,
+    "score_floor": 0.25,
+    "window": {
+      "to": "2026-07-26",
+      "from": "2026-07-01"
+    }
+  }
+}

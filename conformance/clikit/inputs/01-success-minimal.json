@@ -1,0 +1,6 @@
+{
+  "id": "01-success-minimal",
+  "purpose": "The four required fields and nothing else: data, errors and caveats must all be absent, never null and never an empty container.",
+  "command": ["navigator", "doctor"],
+  "status": "success"
+}

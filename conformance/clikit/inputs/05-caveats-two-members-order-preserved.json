@@ -1,0 +1,32 @@
+{
+  "id": "05-caveats-two-members-order-preserved",
+  "purpose": "A usable result that is qualified: two caveats in the tool's own most-actionable-first order, which no sort would produce, so the array must be emitted as given. The first carries a context and a run_tool directive with an instruction; the second carries neither a context nor a command.",
+  "command": ["language-tools", "build"],
+  "status": "caveats",
+  "data": {
+    "built": ["go"],
+    "skipped": ["rust"]
+  },
+  "caveats": [
+    {
+      "code": "caveats.toolchain.target_skipped",
+      "message": "the rust target was skipped: no rust toolchain on this host",
+      "triage": {
+        "kind": "run_tool",
+        "command": ["rustup", "toolchain", "install", "stable"],
+        "instruction": "install the stable toolchain, then re-run the build to include the rust target"
+      },
+      "context": {
+        "target": "rust"
+      }
+    },
+    {
+      "code": "caveats.docs.api_reference_stale",
+      "message": "the api reference was not regenerated: its generator is not installed",
+      "triage": {
+        "kind": "manual",
+        "instruction": "install the doc generator on this host, then rebuild to refresh the api reference"
+      }
+    }
+  ]
+}

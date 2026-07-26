@@ -1,0 +1,22 @@
+{
+  "id": "11-transient-after-seconds-and-instruction",
+  "purpose": "A reinvoke carrying every optional member it may hold: a retry floor and an instruction. after_seconds is meaningful only here, on a transient failure an identical re-invocation may resolve.",
+  "command": ["anthropic-tools", "rates", "fetch"],
+  "status": "transient",
+  "errors": [
+    {
+      "code": "transient.http.rate_limited",
+      "message": "the upstream rate limited this request",
+      "triage": {
+        "kind": "reinvoke",
+        "command": ["anthropic-tools", "rates", "fetch"],
+        "instruction": "the upstream named 30 seconds as the earliest useful retry; backoff beyond that is the caller's policy",
+        "after_seconds": 30
+      },
+      "context": {
+        "http_status": 429,
+        "url": "https://api.anthropic.com/v1/models"
+      }
+    }
+  ]
+}

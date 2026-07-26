@@ -1,0 +1,20 @@
+{
+  "id": "14-internal-reserved-result-unrepresentable",
+  "purpose": "The library-reserved internal code and the minimal record clikit emits in place of a result that failed validation. Class 90 logs at logkit's fatal, which has no side effect of its own - the process still exits through this record's exit code.",
+  "command": ["anoikis-tools", "plan", "validate"],
+  "status": "internal",
+  "errors": [
+    {
+      "code": "internal.clikit.result_unrepresentable",
+      "message": "the command's own result failed record validation and could not be written",
+      "triage": {
+        "kind": "manual",
+        "instruction": "report this with the command line attached; re-invocation cannot repair it"
+      },
+      "context": {
+        "field": "data",
+        "reason": "a member name is not snake_case"
+      }
+    }
+  ]
+}

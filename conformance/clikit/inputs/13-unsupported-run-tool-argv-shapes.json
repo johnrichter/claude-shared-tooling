@@ -1,0 +1,20 @@
+{
+  "id": "13-unsupported-run-tool-argv-shapes",
+  "purpose": "A code at the maximum four segments, and the run_tool handoff class 80 effectively mandates: a bare command with no instruction, whose argv elements are already unquoted - one element carries spaces, parentheses and quotation marks and still crosses as a single element, because a directive is argv and never a shell line.",
+  "command": ["claude-tools", "archive", "extract"],
+  "status": "unsupported",
+  "errors": [
+    {
+      "code": "unsupported.archive.format.not_implemented",
+      "message": "rar archives are not handled by this tool",
+      "triage": {
+        "kind": "run_tool",
+        "command": ["unar", "-o", "var/out", "var/in/bundle \"final\" (v2).rar"]
+      },
+      "context": {
+        "format": "rar",
+        "path": "var/in/bundle \"final\" (v2).rar"
+      }
+    }
+  ]
+}

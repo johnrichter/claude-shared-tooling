@@ -1,0 +1,14 @@
+01-success-minimal success 0
+02-success-every-data-value-kind success 0
+03-success-data-key-order success 0
+04-success-number-forms success 0
+05-caveats-two-members-order-preserved caveats 10
+06-gate-negative-reinvoke-instruction gate_negative 20
+07-precondition-unmet-minimal-diagnostic precondition_unmet 30
+08-not-found-two-segment-code not_found 40
+09-conflict-errors-and-caveats conflict 41
+10-usage-reserved-invocation-rejected usage 50
+11-transient-after-seconds-and-instruction transient 60
+12-permission-unicode-and-escapes permission 70
+13-unsupported-run-tool-argv-shapes unsupported 80
+14-internal-reserved-result-unrepresentable internal 90

@@ -2,7 +2,7 @@
 
 The contract every CLI's stdout, stderr and exit status obeys. An invocation writes **one bounded result record** to stdout, exits with **one of eleven codes**, and states **no logging rule of its own** — log output is `logkit`'s.
 
-This directory is the contract, and it lands before its implementations: `go/clikit` and `rust/clikit` in Phase A (conformance-gated against each other) plus a non-gated shell helper, and `python/clikit` in Phase B. It consumes `schemas/logkit` and does not redefine logging.
+This directory is the contract, and it lands before its implementations: `go/clikit` and `rust/clikit` in Phase A (gated byte-for-byte against each other by `conformance/clikit`, which also judges its own goldens against the files here) plus a non-gated shell helper, and `python/clikit` in Phase B. It consumes `schemas/logkit` and does not redefine logging.
 
 ## Layout
 
