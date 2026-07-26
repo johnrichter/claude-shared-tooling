@@ -17,3 +17,10 @@ missing_docs = "warn"
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
+
+# frontmatter depends on facetquery by git tag (SC-VERSIONING), but both crates
+# live in this workspace and are released together — redirect that git source
+# to the in-tree member so a local checkout builds against its own facetquery,
+# never a network fetch of a tag that may not exist yet for the commit in hand.
+[patch."https://github.com/johnrichter/claude-shared-tooling.git"]
+facetquery = { path = "facetquery" }

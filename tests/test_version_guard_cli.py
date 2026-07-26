@@ -173,14 +173,13 @@ class RealRepoRegressionTests(unittest.TestCase):
                 result = _run("check-tag", tag, "--repo-root", str(_REPO_ROOT))
                 self.assertEqual(result.returncode, 1)
 
-    def test_real_tree_check_deps_flags_documented_frontmatter_violation(self) -> None:
-        """README's own "Today's known violation" — rust/frontmatter's `path =
-        "../facetquery"` dependency. Pins that check-deps actually flags what the
-        README claims it flags, against the real tree, not a fixture."""
+    def test_real_tree_has_no_path_dependencies(self) -> None:
+        """rust/frontmatter's former `path = "../facetquery"` dependency (the
+        README's one-time "known violation") is now a git-tag dependency
+        (`rust/facetquery/v0.1.0`), resolved locally via `[patch]` in
+        `rust/Cargo.toml`. Pins that the real tree is clean against check-deps."""
         result = _run("check-deps", "--repo-root", str(_REPO_ROOT))
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("facetquery", result.stderr)
-        self.assertIn("frontmatter", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

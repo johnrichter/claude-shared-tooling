@@ -47,11 +47,16 @@ globset = "0.4.18"
 # clock/`now`, matching this crate's pure, deterministic validation
 # contract.
 time = { version = "0.3.53", default-features = false, features = ["parsing", "macros"] }
-# Workspace path dependency (facetquery <- frontmatter, per the crate
+# Cross-module dependency (facetquery <- frontmatter, per the crate
 # boundary doc): the `query` module bridges `ParsedFrontmatter` + `Profile`
 # to facetquery's generic `FacetSource` trait, so a caller parses a
 # `facetquery@1` query once and matches it against many frontmatter files.
-facetquery = { path = "../facetquery" }
+# Git-tag dependency per SC-VERSIONING (never a relative `path`, which can't
+# survive facetquery being tagged and consumed independently of frontmatter);
+# `rust/Cargo.toml`'s `[patch]` table redirects this to the in-tree workspace
+# member so a local checkout builds against the crate it ships alongside,
+# not a network fetch.
+facetquery = { git = "https://github.com/johnrichter/claude-shared-tooling.git", tag = "rust/facetquery/v0.1.0" }
 
 [dev-dependencies]
 
