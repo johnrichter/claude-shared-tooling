@@ -19,7 +19,13 @@ lifecycle. Holds only deterministic, no-ML machinery.
   parses a query string to an AST and evaluates it against any generic facet source. Normative
   spec in `schemas/facetquery/`; `frontmatter/` depends on this crate so a parsed query matches
   against many files. See `facetquery/src/lib.rs`.
-- (forward-looking) a tree-sitter-based symbol-extraction crate joins as a fourth workspace
+- **`logkit/`** — the fleet's cross-language structured logging standard: one `Logger` call builds
+  a normalized record and renders it as canonical JSON for machines and, optionally, one line for
+  a person, from the same in-memory value. `tracing`/`tracing-subscriber` are used only as the
+  byte-moving writer (dispatch, level filtering, the `Layer` trait) — this crate owns the record's
+  field names, level set, timestamp format and both renderings. Normative spec and schema in
+  `schemas/logkit/`; byte-identical with the Go and Python implementations. See `logkit/src/lib.rs`.
+- (forward-looking) a tree-sitter-based symbol-extraction crate joins as a further workspace
   member in a later navigator milestone.
 
 ## Dependency policy

@@ -1,0 +1,43 @@
+[package]
+name = "logkit"
+version = "0.1.0"
+edition = "2021"
+description = "logkit — the fleet's cross-language structured logging standard: one normalized record, rendered as canonical JSON for machines and one line for people. tracing+tracing-subscriber are the byte writer only; this crate owns the record."
+license = "MIT"
+publish = false
+
+[dependencies]
+# MIT, actively maintained: the event/span facade and the subscriber
+# machinery that dispatches an event to this crate's own `Layer`. Used only
+# as the byte-moving pipeline (dispatch, level filtering plumbing, `Layer`
+# trait) — the record's field names, level set and timestamp are never
+# tracing's own defaults; see `logger.rs`.
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+# MIT OR Apache-2.0, actively maintained, pure-Rust: derives the record's
+# `Serialize` impl and backs `fields`' arbitrary structured values
+# (`serde_json::Value`/`Map`).
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+# MIT OR Apache-2.0, pure-Rust: RFC 8785 (JCS) canonicalization on top of
+# `serde_json::Serializer` — sorted keys at every depth (UTF-16 code-unit
+# order) and ECMA-262 shortest-round-trip numbers, which is what makes this
+# crate's output byte-identical to the Go and Python implementations
+# instead of merely equivalent. Replaces a hand-rolled canonicalizer, which
+# is exactly the "agrees until the first float or non-ASCII string" trap
+# `schemas/logkit/logkit.contract.json`'s `canonical_json.why` warns about.
+serde_jcs = "0.2.0"
+# MIT OR Apache-2.0, pure-Rust civil-calendar-date/time type (same crate
+# already vetted for `rust/frontmatter` and `rust/facetquery`). `std` is the
+# only feature needed here: it is what brings `OffsetDateTime::now_utc`, the
+# emitter's wall clock this crate's timestamp is built from.
+time = { version = "0.3.53", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+# `macros` adds the compile-time `datetime!` literal used only by
+# `timestamp`'s own tests; Cargo unions this with the `std`-only feature set
+# above for the crate's normal build.
+time = { version = "0.3.53", default-features = false, features = ["macros"] }
+
+[lints]
+workspace = true

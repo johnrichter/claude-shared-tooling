@@ -4,7 +4,8 @@ members = [
     "bm25",
     "frontmatter",
     "facetquery",
-    # M2.*: navigator symbol crate (tree-sitter-based) joins here as a fourth member.
+    "logkit",
+    # M2.*: navigator symbol crate (tree-sitter-based) joins here as a fifth member.
 ]
 
 # Shared lints enforced across every workspace member — each member's

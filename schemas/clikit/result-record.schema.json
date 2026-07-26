@@ -1,0 +1,683 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/johnrichter/claude-shared-tooling/schemas/clikit/result-record.schema.json",
+  "title": "clikit normalized result record",
+  "version": "1.0.0",
+  "description": "One CLI invocation's result in its normalized form: the single record a clikit CLI writes to stdout, whatever the outcome. This schema is the source of truth for the record's field names, types and required-vs-optional status; clikit-cli-contract.spec.md is the normative standard around it (bounded output, error and caveat semantics, triage directive semantics, the exit-code taxonomy, logkit delegation) and clikit.contract.json carries the taxonomy table, the triage kinds, the reserved codes, the bounds and the logkit mapping those rules key on. The root object is CLOSED: `data` is the only extension point, so a consumer can validate strictly without a later addition breaking it. The record is a pure function of the invocation - no clock reading, no host or build identity - so identical input yields identical stdout bytes. `status` and `exit_code` are a pinned pair: the integer is the coarse no-parse branching channel and the name is what a JSON consumer matches exhaustively; the root `allOf` fixes the pairing, one branch per class, and the branch also fixes which of `errors` and `caveats` may appear. Log output is NOT defined here: it is logkit's, by reference.",
+  "type": "object",
+  "required": [
+    "command",
+    "exit_code",
+    "schema_version",
+    "status"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "MAJOR version of this record contract. A consumer built against version N refuses a record declaring more than N rather than reading unknown semantics; the top-level field set, the status enum and the exit-code integers are frozen for the life of a MAJOR, so a consumer built against N reads every N record."
+    },
+    "command": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/tool_name"
+        }
+      ],
+      "items": {
+        "$ref": "#/$defs/subcommand_name"
+      },
+      "description": "The resolved command path that produced this record, root command first: element 0 is the tool's own identity and equals the `service` the same process gives logkit, and the remaining elements are the subcommand path. Canonical names only - an alias is resolved to the name it aliases, and no flag, option or operand appears here. Depth is capped so the field stays a routing key and never becomes a copy of argv."
+    },
+    "status": {
+      "$ref": "#/$defs/status",
+      "description": "The outcome class as a name, for a consumer that parses the record. Exactly one of eleven; paired with `exit_code` by the root `allOf`. Match it exhaustively - an unrecognized status is an error, never a default."
+    },
+    "exit_code": {
+      "$ref": "#/$defs/exit_code",
+      "description": "The integer the process exits with, carried in the record so a captured record is self-describing without its process context. Paired with `status` by the root `allOf`. A classification, not a severity ordering: the only meaningful comparison is against 0 (and 10, which is also a usable result)."
+    },
+    "data": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 64,
+      "description": "The command's own answer: the task-precise payload, and the ONLY extension point of the record. Each command's `data` members are that command's contract, declared by that CLI; clikit bounds the shape and defines no member. Never a raw command dump, a captured subprocess stream or a file's contents - anything that large is written to a file whose path goes here. Omitted entirely when the command has nothing to report; never emitted as {} or null.",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[a-z][a-z0-9_]*$",
+        "description": "snake_case. These are field names authored by the tool, so the spelling is the tool's to control - unlike a map keyed by data, which belongs one level down under a named member."
+      }
+    },
+    "errors": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "description": "Why the outcome is not plain success, most-actionable-first. Present for every failure class (20 and above) and absent for 0 and 10. `errors[0]` is the GOVERNING error: its code's class equals this record's `status`, which is what makes the exit code derivable from the record. An expected negative (a gate answering no) is carried here too - the exit class, not the presence of this array, says whether the tool itself failed.",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "#/$defs/error"
+          },
+          {
+            "properties": {
+              "code": {
+                "$ref": "#/$defs/failure_code"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "caveats": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "description": "Qualifications on a result that is still usable - partial coverage, a degraded source, a skipped item. Same shape as an error, including the required triage directive, because a caveat is also something the caller can act on. Required at class 10 and forbidden at class 0; permitted alongside `errors` at every failure class, where it reports what else the run had to qualify.",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "#/$defs/error"
+          },
+          {
+            "properties": {
+              "code": {
+                "$ref": "#/$defs/caveat_code"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "const": "success"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "exit_code": {
+            "const": 0
+          },
+          "errors": false,
+          "caveats": false
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "const": "caveats"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "caveats"
+        ],
+        "properties": {
+          "exit_code": {
+            "const": 10
+          },
+          "errors": false
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "const": "gate_negative"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "errors"
+        ],
+        "properties": {
+          "exit_code": {
+            "const": 20
+          },
+          "errors": {
+            "prefixItems": [
+              {
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "pattern": "^gate_negative\\."
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "const": "precondition_unmet"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "errors"
+        ],
+        "properties": {
+          "exit_code": {
+            "const": 30
+          },
+          "errors": {
+            "prefixItems": [
+              {
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "pattern": "^precondition_unmet\\."
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "const": "not_found"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "errors"
+        ],
+        "properties": {
+          "exit_code": {
+            "const": 40
+          },
+          "errors": {
+            "prefixItems": [
+              {
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "pattern": "^not_found\\."
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "const": "conflict"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "errors"
+        ],
+        "properties": {
+          "exit_code": {
+            "const": 41
+          },
+          "errors": {
+            "prefixItems": [
+              {
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "pattern": "^conflict\\."
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "const": "usage"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "errors"
+        ],
+        "properties": {
+          "exit_code": {
+            "const": 50
+          },
+          "errors": {
+            "prefixItems": [
+              {
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "pattern": "^usage\\."
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "const": "transient"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "errors"
+        ],
+        "properties": {
+          "exit_code": {
+            "const": 60
+          },
+          "errors": {
+            "prefixItems": [
+              {
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "pattern": "^transient\\."
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "const": "permission"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "errors"
+        ],
+        "properties": {
+          "exit_code": {
+            "const": 70
+          },
+          "errors": {
+            "prefixItems": [
+              {
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "pattern": "^permission\\."
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "const": "unsupported"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "errors"
+        ],
+        "properties": {
+          "exit_code": {
+            "const": 80
+          },
+          "errors": {
+            "prefixItems": [
+              {
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "pattern": "^unsupported\\."
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "const": "internal"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "errors"
+        ],
+        "properties": {
+          "exit_code": {
+            "const": 90
+          },
+          "errors": {
+            "prefixItems": [
+              {
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "pattern": "^internal\\."
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "status": {
+      "description": "The closed outcome-class set. Exactly eleven members, one per exit code, lowercase snake_case. A class outside this set does not exist: an outcome that fits none of them is `internal`. Adding or removing a member is a MAJOR change, because downstream matches on it are exhaustive.",
+      "enum": [
+        "success",
+        "caveats",
+        "gate_negative",
+        "precondition_unmet",
+        "not_found",
+        "conflict",
+        "usage",
+        "transient",
+        "permission",
+        "unsupported",
+        "internal"
+      ]
+    },
+    "exit_code": {
+      "description": "The closed exit-code set, in the same order as $defs/status. 1, 2, 126, 127 and 128+N are deliberately absent: they are the shell's and the runtime's, so a clikit CLI can never collide with them and a caller seeing one knows the process died outside clikit.",
+      "enum": [
+        0,
+        10,
+        20,
+        30,
+        40,
+        41,
+        50,
+        60,
+        70,
+        80,
+        90
+      ]
+    },
+    "error": {
+      "description": "One structured, actionable statement of why the outcome is not plain success. The shape is the same in `errors` and in `caveats`; the array it sits in says how it bears on the result. `triage` is REQUIRED: a diagnostic that does not tell the caller what to do next is not finished.",
+      "type": "object",
+      "required": [
+        "code",
+        "message",
+        "triage"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/diagnostic_code"
+        },
+        "message": {
+          "$ref": "#/$defs/line",
+          "description": "What went wrong, in the caller's terms, as one line. No stack trace, no captured subprocess output, no repetition of the code. Variable detail belongs in `context`."
+        },
+        "triage": {
+          "$ref": "#/$defs/triage"
+        },
+        "context": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 32,
+          "description": "Bounded structured detail for THIS diagnostic - the offending path, the conflicting branch, the upstream status. Omitted when there is none; never {} or null.",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_]*$"
+          }
+        }
+      }
+    },
+    "diagnostic_code": {
+      "description": "A diagnostic's stable machine identity, and the field that carries its class: the FIRST segment is the status name this diagnostic belongs to, so class and code can never drift apart and no separate class field exists. Two to four dot-separated snake_case segments; the recommended form is `<class>.<domain>.<condition>`. `success` is not a valid prefix - class 0 carries no diagnostics. The namespace below the class is open: a tool adds codes freely and that is not a contract change. `<class>.clikit.*` is reserved to the clikit library itself.",
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^(caveats|conflict|gate_negative|internal|not_found|permission|precondition_unmet|transient|unsupported|usage)(\\.[a-z0-9]+(_[a-z0-9]+)*){1,3}$"
+    },
+    "failure_code": {
+      "description": "A `diagnostic_code` in one of the nine failure classes: the `caveats` prefix is excluded, so a caveat can never be filed as an error.",
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^(conflict|gate_negative|internal|not_found|permission|precondition_unmet|transient|unsupported|usage)(\\.[a-z0-9]+(_[a-z0-9]+)*){1,3}$"
+    },
+    "caveat_code": {
+      "description": "A `diagnostic_code` in the `caveats` class: the only prefix a `caveats` member may carry, so an error can never be filed as a caveat.",
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^caveats(\\.[a-z0-9]+(_[a-z0-9]+)*){1,3}$"
+    },
+    "triage": {
+      "description": "The fix directive: what the caller does next. Exactly one kind, and the kind decides which members are present. A directive is executable as given - concrete values, never a placeholder to fill in; when the tool cannot name the values, the kind is `manual`.",
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/triage_kind"
+        },
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/argv_token"
+          },
+          "description": "argv, not a shell line: element 0 is the executable and every other element is one argument, already unquoted, with no shell metacharacter interpreted and no redirection. The caller may execute it directly without a shell."
+        },
+        "instruction": {
+          "$ref": "#/$defs/line",
+          "description": "What a person must do, as one line. Required for `manual`, where there is no command to run; optional elsewhere, where it says why the command fixes the diagnostic."
+        },
+        "after_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400,
+          "description": "Wait this long before re-invoking. Only meaningful for a `reinvoke` of a transient failure; absent means retry immediately."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "reinvoke"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "command"
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "run_tool"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "after_seconds": false
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "manual"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "instruction"
+            ],
+            "properties": {
+              "command": false,
+              "after_seconds": false
+            }
+          }
+        }
+      ]
+    },
+    "triage_kind": {
+      "description": "The closed directive set. `reinvoke` runs this same CLI again (element 0 of the command is this tool); `run_tool` hands off to a different executable, which is the sanctioned exit from the CLI-before-raw-OS-tool rule; `manual` is for a fix no invocation can perform. Adding a member is a MAJOR change, because callers match it exhaustively.",
+      "enum": [
+        "reinvoke",
+        "run_tool",
+        "manual"
+      ]
+    },
+    "tool_name": {
+      "description": "The CLI's own identity: the same value the process gives logkit as `service`, so a result and its logs correlate on one name. Same lexical rules as logkit's `service`.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "subcommand_name": {
+      "description": "One canonical subcommand name in the resolved command path.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "argv_token": {
+      "description": "One argv element of a triage command: any non-empty string with no control character, so the directive survives the one-line JSON rendering unchanged.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^[^\\u0000-\\u001F\\u007F]+$"
+    },
+    "line": {
+      "description": "A non-empty single-line string: no control characters, so it survives the one-line JSON rendering unchanged. Same bound as logkit's `line`, so a message crosses between the two contracts without truncation.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^[^\\u0000-\\u001F\\u007F]+$"
+    }
+  }
+}
