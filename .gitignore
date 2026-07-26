@@ -59,6 +59,7 @@ gcloud-*.json
 credentials
 credentials.json
 secrets.*
+!secrets.go
 *.secret
 .npmrc
 .pypirc
