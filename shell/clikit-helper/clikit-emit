@@ -1,0 +1,61 @@
+#!/bin/bash
+# clikit-emit — emit a clikit result record from a shell surface.
+#
+# This is the only sanctioned way shell code produces clikit records. It delegates
+# all JSON emission to a clikit emitter (CLI or library), never hand-writes JSON.
+#
+# Usage:
+#
+#   clikit-emit [OPTIONS]
+#
+# Options:
+#
+#   --command PARTS...  Resolved command path, comma-separated. Example: --command git-tools,worktree,create
+#   --status STATUS     Outcome class name (success, caveats, gate_negative, precondition_unmet, not_found, conflict, usage, transient, permission, unsupported, internal)
+#   --exit-code NUM     Exit code integer (0, 10, 20, 30, 40, 41, 50, 60, 70, 80, 90)
+#   --data JSON         Optional command data payload (JSON object)
+#   --error CODE MSG    Add an error diagnostic: CODE (required), MSG (required)
+#   --error-context K V Add context to the last error (key, value pairs; repeatable)
+#   --error-triage K V  Add a triage directive to the last error (key, value pairs)
+#   --caveat CODE MSG   Add a caveat diagnostic: CODE (required), MSG (required)
+#   --caveat-context K V Add context to the last caveat (key, value pairs; repeatable)
+#   --caveat-triage K V  Add a triage directive to the last caveat (key, value pairs)
+#
+# Example: emit a success record (once the emitter is available):
+#
+#   clikit-emit \
+#     --command git-tools,worktree,create \
+#     --status success \
+#     --exit-code 0 \
+#     --data '{"path":"/w/1"}'
+#
+# Example: emit a conflict with a reinvoke directive (once the emitter is available):
+#
+#   clikit-emit \
+#     --command git-tools,worktree,create \
+#     --status conflict \
+#     --exit-code 41 \
+#     --error conflict.worktree.branch_checked_out "branch 'feat/x' is already checked out at '/w/a'" \
+#     --error-context branch feat/x \
+#     --error-context worktree /w/a \
+#     --error-triage kind reinvoke \
+#     --error-triage command git-tools,worktree,create,--branch,feat/x-2
+
+set -euo pipefail
+
+# Path to the clikit executable. Resolves relative to this script's location.
+# Set CLIKIT_BIN environment variable to override.
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly CLIKIT_BIN="${CLIKIT_BIN:-${SCRIPT_DIR}/../../go/.bin/clikit}"
+
+if [[ ! -x "$CLIKIT_BIN" ]]; then
+  # The helper never hand-writes JSON — that is the whole reason it exists. Without
+  # the emitter it cannot produce a record, so per the clikit contract a surface
+  # that cannot write its record exits 90 with no record on stdout; the diagnostic
+  # goes to stderr, which is not part of the result.
+  printf 'clikit-emit: emitter binary not found at %s; build go/clikit or set CLIKIT_BIN to an emitter path\n' "$CLIKIT_BIN" >&2
+  exit 90
+fi
+
+# Invoke the clikit emitter with all arguments passed through.
+exec "$CLIKIT_BIN" emit "$@"
