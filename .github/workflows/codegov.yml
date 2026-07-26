@@ -1,0 +1,64 @@
+# SC-CODEGOV: required code-authoring gate (see tooling/codegov-lint/README.md).
+# Split out of ci.yml into its own workflow file so the check has a stable, independently
+# addressable trigger/name — every other required check lives in ci.yml's single-workflow
+# job graph gated on that file's `guardrail` job; this one can't join that `needs:` chain
+# from a separate workflow file, so it re-runs the same secret/binary guardrail scan itself
+# before linting (see the "own guardrail step" note below).
+#
+# Lints only the files a push/PR actually changes, not this tree's full history — a
+# one-time full-tree audit is `--all`, not wired into this required check (see
+# tooling/codegov-lint/README.md's "Why --diff, not a full-tree scan" note).
+
+name: SC-CODEGOV
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  codegov:
+    name: codegov-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # This workflow has no ci.yml `guardrail` job to depend on (separate workflow file,
+      # can't cross-file `needs:`) — re-run the same secret/binary scan here so codegov-lint
+      # never installs dependencies or executes against an unscanned checkout.
+      - name: Secret scan (authority layer)
+        run: python3 scripts/check_secrets.py --root .
+      - name: No-raw-binary scan (tracked tree, authoritative)
+        run: python3 scripts/check_no_raw_binary.py --tracked --root .
+      - name: Install codegov-lint dependencies
+        run: |
+          python3 -m venv .codegov-venv
+          .codegov-venv/bin/pip install -r tooling/codegov-lint/requirements.txt
+      - name: Resolve diff base
+        id: base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch origin "${{ github.event.pull_request.base.sha }}" --depth=1
+            ref="${{ github.event.pull_request.base.sha }}"
+          else
+            ref="${{ github.event.before }}"
+          fi
+          # First push of a new branch (or a shallow history edge case) reports the
+          # all-zeros sentinel SHA or an unresolvable ref — diff against the empty tree
+          # instead of failing the gate on a ref that was never a real commit.
+          if [ -z "$ref" ] || [ "$ref" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$ref" 2>/dev/null; then
+            ref="$(git hash-object -t tree /dev/null)"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+      - name: SC-CODEGOV lint (diff against base)
+        run: |
+          export PATH="$PWD/.codegov-venv/bin:$PATH"
+          python3 tooling/codegov-lint/check.py --diff "${{ steps.base.outputs.ref }}"

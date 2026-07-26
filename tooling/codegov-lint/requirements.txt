@@ -1,0 +1,5 @@
+# Pinned per SC-DEPPOLICY: robustness-first pick (astral-sh/ruff — actively maintained,
+# widely adopted, first-party pydocstyle implementation), license cleared (MIT, recorded in
+# LICENSE-3rdparty.csv), exact version pinned. Install into an isolated venv — never the
+# system/global interpreter (see tooling/codegov-lint/README.md).
+ruff==0.16.0

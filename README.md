@@ -63,14 +63,18 @@ Every material dependency choice runs a **robustness-first vetting** (maintenanc
 
 Hand-rolling a common capability is the narrow exception — only when no trusted library fits (vetting bar, license, or a hard build-fit constraint) — and requires flagging the rejected candidates, stating the rationale, and getting sign-off.
 
-Every module here is stdlib-only in fact today; `dependencies` stays empty until a vetted dependency actually lands.
+The top-level `claude-tooling` package stays stdlib-only; `tooling/codegov-lint` is the one
+exception today — it pins `ruff` (see its own `requirements.txt` and `LICENSE-3rdparty.csv`)
+as the trusted implementation of its Python docstring check, installed into an isolated venv
+rather than any shared interpreter.
 
 ## Guardrails
 
-A pre-commit hook plus a required CI check scan for accidentally committed secrets before merge:
+A pre-commit hook plus required CI checks gate every merge:
 
 - **Local pre-commit hook** — `git config core.hooksPath .githooks` (convenience; bypassable).
-- **CI required check** — `.github/workflows/ci.yml` runs the guardrail script + the test suite (the authority).
+- **CI required check (secrets)** — `.github/workflows/ci.yml` runs the guardrail script + the test suite (the authority).
+- **CI required check (SC-CODEGOV)** — `.github/workflows/codegov.yml` runs `tooling/codegov-lint` against every task's diff; see `tooling/codegov-lint/README.md`.
 
 ## Versioning
 
