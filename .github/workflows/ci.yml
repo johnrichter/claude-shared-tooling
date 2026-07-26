@@ -133,8 +133,39 @@ jobs:
           python-version: "3.12"
       - name: Install package
         run: pip install -e .
+      # The invariant-registry tests validate against the published schema with the pinned
+      # validator; every other test here is stdlib-only.
+      - name: Install the pinned schema validator
+        run: pip install -r schemas/invariant-registry/requirements.txt
       - name: Run unit tests
         run: python -m unittest discover -s tests -p "test_*.py" -v
+
+  # SC-ENFORCE guardrail: schemas/invariant-registry is the single source of record for every
+  # enforcement invariant this repo and the plugins it governs ship — rung, fail direction, blast
+  # radius, and the per-rung field a consumer verifies. This job runs the registry's own lint: the
+  # document validates against its schema, no invariant is declared twice by restatement, every
+  # declared gate path resolves, a gate publishing its own declaration agrees with the registry,
+  # and every discovered in-scope gate carries an entry. Rung-1 symbol resolution and rung-3
+  # test-id resolution belong to tooling/invariant-lint, not here. Only this repository is checked
+  # out, so the sibling-repo discovery roots report NOT CHECKED rather than passing —
+  # --require-roots is deliberately not set (a repo nobody cloned is a checkout condition, not a
+  # signal). See schemas/invariant-registry/README.md.
+  invariant-registry:
+    name: invariant-registry
+    runs-on: ubuntu-latest
+    needs: guardrail
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Pinned validator in an isolated venv, never the system interpreter (SC-DEPPOLICY).
+      - name: Install the pinned schema validator
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet -r schemas/invariant-registry/requirements.txt
+      - name: Registry is valid, non-duplicating and complete (SC-ENFORCE)
+        run: .venv/bin/python schemas/invariant-registry/check.py
 
   # SC-MODELROSTER / SC-CODEGOV: schemas/model-roster/model-roster.json is the single source of
   # record for the selectable Claude model set. This job regenerates every roster-derived

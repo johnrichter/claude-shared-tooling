@@ -1,0 +1,541 @@
+{
+  "schema": "invariant-registry@1.0.0",
+  "discovery": {
+    "note": "Gates are found through the artifact that RUNS them - a plugin's hooks.json, a CI workflow file - never through a hand-kept list of gate paths, which would be a second place the set could drift. A root whose checkout is absent is reported unresolved and fails nothing.",
+    "roots": [
+      {
+        "repo": "marketplace",
+        "strategy": "claude-plugin-hooks",
+        "globs": [
+          "plugins/*/hooks/hooks.json"
+        ],
+        "in_scope_owners": [
+          "governance-claude-marketplace",
+          "governance-code",
+          "governance-git",
+          "governance-sub-agents"
+        ]
+      },
+      {
+        "repo": "ai-shared-lib",
+        "strategy": "ci-wired-guard",
+        "globs": [
+          ".github/workflows/*.yml"
+        ],
+        "in_scope_owners": [
+          "ai-shared-lib"
+        ]
+      }
+    ]
+  },
+  "gates": {
+    "ai-shared-lib.codegov-lint": {
+      "path": "ai-shared-lib/tooling/codegov-lint/check.py",
+      "owner": "ai-shared-lib",
+      "kind": "ci-guard",
+      "status": "active"
+    },
+    "ai-shared-lib.dist-guard": {
+      "path": "ai-shared-lib/tooling/dist-guard/check.py",
+      "owner": "ai-shared-lib",
+      "kind": "ci-guard",
+      "status": "active"
+    },
+    "ai-shared-lib.freeze-guard": {
+      "path": "ai-shared-lib/tooling/freeze-guard/check.py",
+      "owner": "ai-shared-lib",
+      "kind": "ci-guard",
+      "status": "active"
+    },
+    "ai-shared-lib.invariant-registry": {
+      "path": "ai-shared-lib/schemas/invariant-registry/check.py",
+      "owner": "ai-shared-lib",
+      "kind": "ci-guard",
+      "status": "active"
+    },
+    "ai-shared-lib.release-transaction": {
+      "path": "ai-shared-lib/tooling/release-transaction/check.py",
+      "owner": "ai-shared-lib",
+      "kind": "release-gate",
+      "status": "active",
+      "note": "Runs at the release barrier rather than on every push, so it is not discovered as a CI-wired guard; its entries are declared here all the same."
+    },
+    "ai-shared-lib.roster-currency": {
+      "path": "ai-shared-lib/tooling/roster-currency/check.py",
+      "owner": "ai-shared-lib",
+      "kind": "ci-guard",
+      "status": "active"
+    },
+    "ai-shared-lib.version-guard": {
+      "path": "ai-shared-lib/tooling/version-guard/check.py",
+      "owner": "ai-shared-lib",
+      "kind": "ci-guard",
+      "status": "active"
+    },
+    "git-tools.worktree-gate": {
+      "path": "git-tools/worktree-gate/detect",
+      "owner": "git-tools",
+      "kind": "pretooluse-hook",
+      "status": "planned",
+      "note": "Not built yet; its entries are planned and assert nothing until it ships."
+    },
+    "governance-claude-marketplace.marketplace-gate": {
+      "path": "marketplace/plugins/governance-claude-marketplace/hooks/marketplace-gate.sh",
+      "owner": "governance-claude-marketplace",
+      "kind": "pretooluse-hook",
+      "status": "active"
+    },
+    "governance-code.comment-gate": {
+      "path": "marketplace/plugins/governance-code/hooks/comment-gate.sh",
+      "owner": "governance-code",
+      "kind": "pretooluse-hook",
+      "status": "active"
+    },
+    "governance-git.git-gate": {
+      "path": "marketplace/plugins/governance-git/hooks/git-gate.sh",
+      "owner": "governance-git",
+      "kind": "pretooluse-hook",
+      "status": "active"
+    },
+    "governance-git.write-locus-gate": {
+      "path": "marketplace/plugins/governance-git/hooks/write-locus-gate.sh",
+      "owner": "governance-git",
+      "kind": "pretooluse-hook",
+      "status": "active"
+    },
+    "governance-sub-agents.model-gate": {
+      "path": "marketplace/plugins/governance-sub-agents/hooks/model-gate.sh",
+      "owner": "governance-sub-agents",
+      "kind": "pretooluse-hook",
+      "status": "active"
+    },
+    "plugin-foundation.forced-use": {
+      "path": "ai-shared-lib/plugin-foundation/forced-use",
+      "owner": "plugin-foundation",
+      "kind": "pretooluse-hook",
+      "status": "planned",
+      "note": "Not built yet; its entries are planned and assert nothing until it ships."
+    }
+  },
+  "invariants": [
+    {
+      "id": "ai-shared-lib.state.done-requires-commit-sha",
+      "statement": "A task cannot be persisted as done while its commit SHA is empty and none is already recorded on it.",
+      "rung": 1,
+      "fail_direction": "closed",
+      "blast_radius": "The refusal blocks one write and names the task and the missing field, costing the caller a re-run with the SHA supplied. Allowing the write is what is unrecoverable in practice: a doc set in which every task reads done with no SHA and no cost renders the whole build green, and a reconcile then carries fake work as completed and skips it. A warning here is exactly what gets read past.",
+      "owner": "ai-shared-lib",
+      "status": "shipped",
+      "fail_fast_symbol": "ai-shared-lib/go/build-helpers/bh/execution.go:RecordTask",
+      "notes": "The worked rung-1 example: the writer already holds everything needed to refuse, so the bad state is unrepresentable rather than merely detectable. The refusal moves with the writer when execution state becomes the shared state library; this entry's fail_fast_symbol moves with it in the same change."
+    },
+    {
+      "id": "anoikis-tools.dispatch.oversized-return-refused",
+      "statement": "A dispatch return that exceeds its declared length ceiling or omits a manifest field is refused at the boundary with a named error, and no path absorbs it into a degraded result or spills it to disk.",
+      "rung": 1,
+      "fail_direction": "closed",
+      "blast_radius": "Refusing costs one re-dispatch, and the error names the expected shape so the retry is informed. Accepting costs the deliverable twice - once to produce the oversized return, once for the parent to re-read it - and hides the contract breach behind a result that looks like progress.",
+      "owner": "anoikis-tools",
+      "status": "planned",
+      "fail_fast_symbol": "anoikis-tools/internal/dispatch/boundary/return.go:CheckReturn",
+      "notes": "Intended target: the shipping task fixes the file and symbol and flips status to shipped in the same change."
+    },
+    {
+      "id": "governance-sub-agents.model-gate.unpinned-literal",
+      "statement": "An authored surface (agent/skill frontmatter, workflow.js) pinning a literal model value absent from the roster, a bare alias, or a partial ID is denied.",
+      "rung": 2,
+      "fail_direction": "closed",
+      "blast_radius": "Blocks the single Write/Edit that introduced the bad pin. Author repins to a full roster ID or requests a roster addition; no effect on unrelated files or on non-literal (variable/enum) model references.",
+      "owner": "governance-sub-agents",
+      "status": "shipped",
+      "trigger": "PreToolUse:Write,Edit on **/.claude/agents/**, **/SKILL.md, **/*.workflow.js",
+      "condition": "a literal model:/opts.model: value on the changed text is not a full roster ID (after stripping a trailing [1m] window selector) and is not a variable/enum reference",
+      "gate_id": "governance-sub-agents.model-gate"
+    },
+    {
+      "id": "governance-sub-agents.model-gate.roster-unavailable",
+      "statement": "A missing, empty, comment-only, or unreadable roster data file is a packaging defect, never a deny signal.",
+      "rung": 2,
+      "fail_direction": "open",
+      "blast_radius": "Failing closed here would deny every legitimate pinned ID on every authored surface repo-wide from a single bad release. Failing open denies nothing and emits a loud stderr notice instead, trading a temporarily unenforced allowlist for zero false denials.",
+      "owner": "governance-sub-agents",
+      "status": "shipped",
+      "trigger": "PreToolUse:Write,Edit on **/.claude/agents/**, **/SKILL.md, **/*.workflow.js",
+      "condition": "hooks/model-roster is absent, empty, comment-only, or unreadable at gate time",
+      "gate_id": "governance-sub-agents.model-gate"
+    },
+    {
+      "id": "governance-git.write-locus-gate.in-repo-source-write",
+      "statement": "A mutating write to a code-source file inside a git repository lands in a .claude/worktrees checkout, or it is refused.",
+      "rung": 2,
+      "fail_direction": "closed",
+      "blast_radius": "A false refusal costs the author one worktree creation and a retry. An unblocked direct write to a shared checkout collides with concurrent work and destroys committed history that cannot be reconstructed, which is why this axis inverts the usual preference for a missed deny over a false one.",
+      "owner": "governance-git",
+      "status": "shipped",
+      "trigger": "PreToolUse:Write,Edit on any path whose extension is in the plugin's code-source set",
+      "condition": "the resolved path sits inside a git repository, carries no /.claude/worktrees/ segment, and is not a delivery-agent-team tracking doc under the primary checkout",
+      "gate_id": "governance-git.write-locus-gate",
+      "superseded_by": "git-tools/worktree-gate/detect",
+      "notes": "The replacement widens the same axis to Bash, to file classes outside the source-extension set, and to worktree creation and lifecycle. Retirement happens only once the replacement is adversarially green and shipped, so no window exists in which neither is live."
+    },
+    {
+      "id": "governance-git.write-locus-gate.no-containing-repo",
+      "statement": "A write whose containing git repository cannot be resolved is escalated to the operator instead of being refused outright.",
+      "rung": 2,
+      "fail_direction": "open",
+      "blast_radius": "Escalating costs one operator decision per unresolved write and never blocks work outside any repository. It also lets a repo write through whenever repo resolution fails, which is the case the replacement gate inverts to a refusal after measuring how rarely resolution legitimately fails.",
+      "owner": "governance-git",
+      "status": "shipped",
+      "trigger": "PreToolUse:Write,Edit on any path whose extension is in the plugin's code-source set",
+      "condition": "git rev-parse resolves no toplevel for the target path's directory",
+      "gate_id": "governance-git.write-locus-gate",
+      "superseded_by": "git-tools/worktree-gate/detect"
+    },
+    {
+      "id": "governance-git.git-gate.protected-branch-mutation",
+      "statement": "A commit landing directly on a protected branch, or a force-push onto one, is refused.",
+      "rung": 2,
+      "fail_direction": "closed",
+      "blast_radius": "A false refusal costs one branch-and-retry, and an explicit merge-gate environment variable carves out the legitimate merge path. A force-push that lands rewrites published history for every consumer of that branch.",
+      "owner": "governance-git",
+      "status": "shipped",
+      "trigger": "PreToolUse:Bash on any command string, matched in-script rather than by the harness matcher",
+      "condition": "the command commits onto or force-pushes to main or master, outside the declared merge-gate carve-out",
+      "gate_id": "governance-git.git-gate"
+    },
+    {
+      "id": "governance-git.git-gate.unresolvable-branch",
+      "statement": "A git command whose target branch cannot be resolved produces a reminder rather than a refusal.",
+      "rung": 2,
+      "fail_direction": "open",
+      "blast_radius": "A reminder lets an unresolvable command through, which at worst permits one protected-branch commit that is revertible. Refusing on an unresolved branch would block every git command run outside a checked-out branch - detached HEAD, a fresh clone, a bare repository - for no proven violation.",
+      "owner": "governance-git",
+      "status": "shipped",
+      "trigger": "PreToolUse:Bash on any command string, matched in-script rather than by the harness matcher",
+      "condition": "the read-only branch resolution returns no branch name for the command's target",
+      "gate_id": "governance-git.git-gate"
+    },
+    {
+      "id": "governance-code.comment-gate.banned-token-in-comment",
+      "statement": "An added comment carrying process metadata - port archaeology, an embedded process id, narrated dead code - is refused on the call that introduces it.",
+      "rung": 2,
+      "fail_direction": "closed",
+      "blast_radius": "A refusal blocks the one Write or Edit and names the pattern, costing a reword. The text is cheap to fix at the call and expensive afterwards: comment archaeology is invisible to review at scale and accumulates permanently in every future read of the file.",
+      "owner": "governance-code",
+      "status": "shipped",
+      "trigger": "PreToolUse:Write,Edit on any source-classified path, scanning only genuinely added lines",
+      "condition": "an added line's text is classified as comment and matches a banned process-metadata pattern",
+      "gate_id": "governance-code.comment-gate"
+    },
+    {
+      "id": "governance-code.comment-gate.unattributable-text",
+      "statement": "Text the single-line classifier cannot attribute to a comment - string-literal content, the interior of an unclosed block, a language with no syntax entry - reminds and never refuses.",
+      "rung": 2,
+      "fail_direction": "open",
+      "blast_radius": "A missed reminder costs one unreviewed comment. Refusing on unattributed text would deny legitimate code any time a marker character appears inside a string, and the classifier is a single-line scan rather than a tokenizer, so that case is common rather than exotic.",
+      "owner": "governance-code",
+      "status": "shipped",
+      "trigger": "PreToolUse:Write,Edit on any source-classified path, scanning only genuinely added lines",
+      "condition": "the matching text lands in the code bucket rather than the comment bucket, or a data file fails to load",
+      "gate_id": "governance-code.comment-gate"
+    },
+    {
+      "id": "governance-claude-marketplace.marketplace-gate.catalog-schema",
+      "statement": "A whole-file write of the plugin catalog that is malformed, omits a required entry field, names an unresolvable local source, disagrees with the plugin manifest's version, or duplicates an entry name is refused.",
+      "rung": 2,
+      "fail_direction": "closed",
+      "blast_radius": "A refusal blocks one catalog write and names the offending entry. A landed malformed catalog breaks plugin resolution for every consumer of the marketplace at once, and a version disagreement silently installs a build nobody released.",
+      "owner": "governance-claude-marketplace",
+      "status": "shipped",
+      "trigger": "PreToolUse:Write on **/.claude-plugin/marketplace.json",
+      "condition": "the written document fails any catalog schema assertion: top-level shape, per-entry name/source/version, local source resolution, catalog-versus-manifest version agreement, duplicate entry name",
+      "gate_id": "governance-claude-marketplace.marketplace-gate"
+    },
+    {
+      "id": "governance-claude-marketplace.marketplace-gate.edit-advisory",
+      "statement": "An Edit of the plugin catalog is steered by an advisory, because the whole-file assertions cannot be decided from a diff.",
+      "rung": 4,
+      "fail_direction": "open",
+      "blast_radius": "The advisory is ignorable, so a partial edit can land a catalog defect that the whole-file write path would have refused; the defect surfaces at the next catalog write or install. Refusing every catalog Edit instead would block routine curation on a check that cannot actually be performed, which is a false denial by construction.",
+      "owner": "governance-claude-marketplace",
+      "status": "shipped",
+      "reason_lower_rung": "An Edit payload carries old_string and new_string, not the file, so no whole-file invariant is provable from it. This is the provability boundary of a PreToolUse hook, not a choice about strictness: the same invariant is enforced at rung 2 on the Write path, and degrades here.",
+      "references": [
+        "marketplace/plugins/governance-claude-marketplace/hooks/marketplace-gate.sh"
+      ],
+      "compliance_floors": {
+        "claude-opus-5": null,
+        "claude-sonnet-5": null,
+        "claude-haiku-4-5": null
+      },
+      "measurement_status": "declared-unmeasured",
+      "register_entry_id": "rp-marketplace-catalog-edit-advisory"
+    },
+    {
+      "id": "delivery-agent-team.commit-per-completed-task",
+      "statement": "A completed task is committed before the next one is dispatched, so no finished work sits only in a working tree.",
+      "rung": 4,
+      "fail_direction": "open",
+      "blast_radius": "An ignored advisory leaves finished work uncommitted, recoverable while the tree survives and lost with it. Refusing a dispatch on an uncommitted tree would block every legitimate multi-step task that has not reached a commit point yet, and no tool call carries the evidence needed to tell the two apart.",
+      "owner": "delivery-agent-team",
+      "status": "shipped",
+      "reason_lower_rung": "Whether a task is complete is a judgment about work, not a property of a tool call: no PreToolUse payload distinguishes finished work from work in progress, and no test in a shipped suite can observe a model's dispatch behavior. This is the class the advisory tier exists for, which is precisely why it needs a measured rate rather than firmer wording.",
+      "compliance_floors": {
+        "claude-opus-5": null,
+        "claude-sonnet-5": null
+      },
+      "measurement_status": "declared-unmeasured",
+      "register_entry_id": "rp-dat-commit-per-task",
+      "notes": "A one-off spike on a commit rule measured 8/8 honored on an Opus-class model and 2/8 on a Sonnet-class model. That spread is the evidence that a floor is per-model and that a single wording change is not a control; the values here stay null until the behavioral tier's first calibration run sets them."
+    },
+    {
+      "id": "plugin-foundation.forced-use.routing-rate",
+      "statement": "A session with the CLI available routes work through it rather than the raw OS tool at or above the declared rate.",
+      "rung": 4,
+      "fail_direction": "open",
+      "blast_radius": "Below-rate routing costs the CLI's guarantees on the calls that bypassed it and nothing else; the raw tool still works. Enforcing a rate by denying calls would deny the tool itself on the first misclassification, which is the one failure the forced-use design refuses outright.",
+      "owner": "plugin-foundation",
+      "status": "planned",
+      "reason_lower_rung": "Routing is a rate over a session, not a property of any single call, so no gate can decide it: a deny gate sees one call and cannot know whether the session as a whole is routing. The hard floor that IS per-call - never denying when the CLI is missing - is declared separately at rung 2.",
+      "references": [
+        "ai-shared-lib/plugin-foundation/forced-use"
+      ],
+      "compliance_floors": {
+        "claude-opus-5": null,
+        "claude-sonnet-5": null,
+        "claude-haiku-4-5": null
+      },
+      "measurement_status": "declared-unmeasured",
+      "register_entry_id": "rp-forced-use-routing-rate"
+    },
+    {
+      "id": "plugin-foundation.forced-use.cli-unavailable",
+      "statement": "A redirect never fires while the CLI it redirects to is missing or unbuildable; the raw OS tool stays reachable.",
+      "rung": 2,
+      "fail_direction": "open",
+      "blast_radius": "Failing open costs the CLI's guarantees until provisioning is fixed. Failing closed would deny the underlying tool on every host where provisioning has not completed - a single bad release stops all work everywhere, and the redirect target does not exist to fall back to.",
+      "owner": "plugin-foundation",
+      "status": "planned",
+      "trigger": "PreToolUse:Bash on the command classes the CLI supersedes",
+      "condition": "the pinned CLI binary is absent, unreadable, or fails its version probe",
+      "gate_id": "plugin-foundation.forced-use"
+    },
+    {
+      "id": "git-tools.worktree-gate.repo-write-outside-worktree",
+      "statement": "Any file-modifying call whose target sits inside a git repository is refused unless the active context is a worktree, and the worktree is created before the write when none exists.",
+      "rung": 2,
+      "fail_direction": "closed",
+      "blast_radius": "A false refusal costs a worktree creation and a retry. A parallel-worktree collision destroys committed work with no way to reconstruct it, so the unblocked write is the unrecoverable side. Writes entirely outside any repository are out of scope and never blocked.",
+      "owner": "git-tools",
+      "status": "planned",
+      "trigger": "PreToolUse:Write,Edit,Bash on any file-modifying call, with or without a git command, scoped to targets inside a git repository",
+      "condition": "the resolved target is inside a git repository and the active checkout is the primary one rather than a worktree",
+      "gate_id": "git-tools.worktree-gate"
+    },
+    {
+      "id": "git-tools.worktree-gate.undecidable-bash-write",
+      "statement": "A Bash command that cannot be proved read-only is treated as a repository write.",
+      "rung": 2,
+      "fail_direction": "closed",
+      "blast_radius": "Over-approximation refuses some read-only commands, costing a re-run inside a worktree. Under-approximation lets an unclassified mutating command through, which is the collision this gate exists to prevent. Deciding whether an arbitrary command modifies a repository file is undecidable in general, so the choice is which error to make, not whether to make one.",
+      "owner": "git-tools",
+      "status": "planned",
+      "trigger": "PreToolUse:Bash on any command string, matched in-script rather than by the harness matcher",
+      "condition": "the command is not recognised as read-only - status, diff and log pass; commit, add, redirection, rm, mv, editors and in-repo package installs do not",
+      "gate_id": "git-tools.worktree-gate"
+    },
+    {
+      "id": "git-tools.worktree-gate.data-artifact-unavailable",
+      "statement": "A missing or corrupt data artifact belonging to the gate drives no decision in either direction and is reported as a packaging defect.",
+      "rung": 2,
+      "fail_direction": "open",
+      "blast_radius": "Denying on an unreadable data file turns one bad release into a repo-wide block on every write; the notice costs a temporarily unenforced axis instead. This is the same rule already applied on the model-allowlist axis, and the deliberate exception to this gate's otherwise closed direction.",
+      "owner": "git-tools",
+      "status": "planned",
+      "trigger": "PreToolUse:Write,Edit,Bash on any file-modifying call, evaluated before the classification the artifact feeds",
+      "condition": "a data artifact the classification depends on is absent, unreadable, or fails to parse",
+      "gate_id": "git-tools.worktree-gate"
+    },
+    {
+      "id": "ai-shared-lib.codegov-lint.banned-comment-content",
+      "statement": "No comment on the changed surface of any authored language carries port archaeology, an embedded process id, or a narrated line of dead code.",
+      "rung": 3,
+      "fail_direction": "closed",
+      "blast_radius": "A false positive fails one CI run and costs a reword or a scoped exclusion. Landing the content is what compounds: the comment set is read on every future visit to the file and no later pass rereads it, so the cost is paid indefinitely.",
+      "owner": "ai-shared-lib",
+      "status": "shipped",
+      "gate_id": "ai-shared-lib.codegov-lint",
+      "reason_lower_rung": "The per-call gate sees one tool call and only the added text; a required check over the whole changed file set catches what arrives by any other route - a merge, a generated file, a commit made outside a gated session. The two are the same policy at different reach, so this entry defers to the gate rather than restating its scope.",
+      "references": [
+        "marketplace/plugins/governance-code/hooks/comment-gate.sh"
+      ],
+      "test_id": "ai-shared-lib/tests/test_codegov_lint.py::CliEndToEndTests"
+    },
+    {
+      "id": "ai-shared-lib.codegov-lint.api-doc-presence",
+      "statement": "Every exported Go or Rust declaration and every public Python API on the changed surface carries a doc comment.",
+      "rung": 3,
+      "fail_direction": "closed",
+      "blast_radius": "A false positive fails one CI run; the check is presence-only, so the fix is a one-line doc comment. An undocumented exported symbol is a permanent read cost for every consumer, and nothing downstream detects it.",
+      "owner": "ai-shared-lib",
+      "status": "shipped",
+      "gate_id": "ai-shared-lib.codegov-lint",
+      "reason_lower_rung": "Presence of a doc comment on every exported declaration needs the parsed file, not a diff: an Edit payload shows added text with no view of the declarations around it, so a gate cannot decide it.",
+      "test_id": "ai-shared-lib/tests/test_codegov_lint.py::DocPresenceTests"
+    },
+    {
+      "id": "ai-shared-lib.version-guard.tag-prefix-names-a-module",
+      "statement": "A module release tag's prefix equals the path of a real module in the tree.",
+      "rung": 3,
+      "fail_direction": "closed",
+      "blast_radius": "Rejecting a tag costs a retag before anything is published. A tag whose prefix names no module resolves for no consumer, and a Go or Cargo dependency pinned to it fails at every downstream build until a new tag is cut.",
+      "owner": "ai-shared-lib",
+      "status": "shipped",
+      "gate_id": "ai-shared-lib.version-guard",
+      "reason_lower_rung": "A tag is created by a push, not by a tool call a hook sees, and validating it needs the module layout of the whole tree rather than any single file.",
+      "test_id": "ai-shared-lib/tests/test_version_guard.py::CheckTagTests"
+    },
+    {
+      "id": "ai-shared-lib.version-guard.no-rust-path-dependency",
+      "statement": "No crate depends on a workspace neighbour through a filesystem path instead of a git tag.",
+      "rung": 3,
+      "fail_direction": "closed",
+      "blast_radius": "A failure costs the author a dependency rewrite before merge. A path dependency that lands cannot survive the two crates being tagged and consumed independently, so it breaks every external consumer of the published crate rather than anything in this tree.",
+      "owner": "ai-shared-lib",
+      "status": "shipped",
+      "gate_id": "ai-shared-lib.version-guard",
+      "reason_lower_rung": "The property is about a manifest's relationship to the workspace layout, which needs the tree; a single Edit to a manifest line does not carry it.",
+      "test_id": "ai-shared-lib/tests/test_version_guard.py::ScanManifestTests"
+    },
+    {
+      "id": "ai-shared-lib.dist-guard.no-committed-binary",
+      "statement": "No binary artifact is committed to the tree except the single documented last-resort path.",
+      "rung": 3,
+      "fail_direction": "closed",
+      "blast_radius": "A false positive fails one run and is resolved by an allowlist entry that is itself reviewed and regenerated. A committed binary is unreviewable, bloats every clone permanently, and is the delivery route the distribution design removes.",
+      "owner": "ai-shared-lib",
+      "status": "shipped",
+      "gate_id": "ai-shared-lib.dist-guard",
+      "reason_lower_rung": "The question is whether the tracked tree contains a binary, which is a property of the repository rather than of any one write; a gate would also miss anything arriving by merge.",
+      "test_id": "ai-shared-lib/tests/test_dist_guard.py::ScanSubprocessTests",
+      "notes": "The scan half of this guard is staged out of the required CI path until the pre-distribution prebuilt-binary debt is retired through the release pipeline; the currency half runs today. Until it is wired, enforcement is the test named here plus review, and this entry is what makes that gap legible."
+    },
+    {
+      "id": "ai-shared-lib.dist-guard.allowlist-regenerates-identically",
+      "statement": "Regenerating the binary allowlist from its producer reproduces the committed file byte for byte.",
+      "rung": 3,
+      "fail_direction": "closed",
+      "blast_radius": "A failure costs one regeneration. A hand-edited allowlist widens the binary exception silently, which is exactly the drift that makes the exception unreviewable, and no other check would notice.",
+      "owner": "ai-shared-lib",
+      "status": "shipped",
+      "gate_id": "ai-shared-lib.dist-guard",
+      "reason_lower_rung": "Byte parity between a generated artifact and its producer is a whole-repository comparison; no tool call carries the producer's output.",
+      "test_id": "ai-shared-lib/tests/test_dist_guard.py::AllowlistProducerTests"
+    },
+    {
+      "id": "ai-shared-lib.freeze-guard.no-write-into-a-frozen-home",
+      "statement": "No changed path in the build's diff lands under a frozen plugin or corpus home.",
+      "rung": 3,
+      "fail_direction": "closed",
+      "blast_radius": "A failure costs the author a redirect to the correct home before merge. A write into a frozen home mutates a surface deliberately held still for a separate program of work, and detecting it after the fact means unwinding a merge rather than moving a file.",
+      "owner": "ai-shared-lib",
+      "status": "shipped",
+      "gate_id": "ai-shared-lib.freeze-guard",
+      "reason_lower_rung": "The frozen surface is defined per repository and the check runs over the committed diff, including changes that arrive by merge; a per-call gate covers neither.",
+      "test_id": "ai-shared-lib/tests/test_freeze_guard.py::FreezeGuardIntegrationTests"
+    },
+    {
+      "id": "ai-shared-lib.roster-currency.derived-artifacts-are-current",
+      "statement": "Every artifact derived from the model roster equals what regenerating it from the roster produces.",
+      "rung": 3,
+      "fail_direction": "closed",
+      "blast_radius": "A failure costs one regeneration before merge. Both staleness directions are silent otherwise: a hand-edited derived artifact and a roster change landed without regeneration each leave two disagreeing sources of the model set, which is the drift the single source of record was introduced to end.",
+      "owner": "ai-shared-lib",
+      "status": "shipped",
+      "gate_id": "ai-shared-lib.roster-currency",
+      "reason_lower_rung": "Currency is a comparison between a generator's output and every committed consumer of it - a whole-tree property no tool call can decide.",
+      "test_id": "ai-shared-lib/tests/test_roster_gen.py::RealRepoByteParityTests"
+    },
+    {
+      "id": "ai-shared-lib.release-transaction.every-enumerator-resolved",
+      "statement": "A release resolves every enumerator to satisfied or to a declared, reason-bearing waiver; an unbound or unproven enumerator refuses the release.",
+      "rung": 3,
+      "fail_direction": "closed",
+      "blast_radius": "A refusal costs the releaser the missing evidence and a re-run before anything is published. A partial release ships a version consumers cannot resolve - a tag with no release, a catalog entry pointing at a build that does not exist - and the repair is another release rather than a retry.",
+      "owner": "ai-shared-lib",
+      "status": "shipped",
+      "gate_id": "ai-shared-lib.release-transaction",
+      "reason_lower_rung": "A release spans a version file, a catalog, an enable-state mirror, a tag and a published artifact across repositories; no single tool call sees more than one of them.",
+      "test_id": "ai-shared-lib/tests/test_release_transaction.py::CompleteReleaseTests"
+    },
+    {
+      "id": "ai-shared-lib.release-transaction.open-defect-pauses-next-release",
+      "statement": "An open below-floor compliance defect against a module refuses that module's next release even with every enumerator satisfied.",
+      "rung": 3,
+      "fail_direction": "closed",
+      "blast_radius": "The pause blocks one release until the defect is resolved or the entry is closed, and it never reaches back to the release that shipped the invariant. Without it a measured below-floor rate is an observation nobody has to act on, which is the state that made the whole advisory tier decorative.",
+      "owner": "ai-shared-lib",
+      "status": "shipped",
+      "gate_id": "ai-shared-lib.release-transaction",
+      "reason_lower_rung": "The pause reads a register written by compliance measurement and applies it at the release barrier; neither the register nor the barrier is visible from a tool call.",
+      "test_id": "ai-shared-lib/tests/test_release_transaction.py::ReleasePauseTests",
+      "notes": "This is the hand-off that makes a rung-4 floor consequential: measurement writes the register entry, the release gate reads it."
+    },
+    {
+      "id": "ai-shared-lib.invariant-registry.every-shipped-gate-is-declared",
+      "statement": "Every gate discovered through the artifact that runs it carries a declaration in this registry, and no declaration names a gate or reference path that does not exist.",
+      "rung": 3,
+      "fail_direction": "closed",
+      "blast_radius": "A failure costs the author one registry entry alongside the gate they just shipped. An undeclared gate is invisible to every consumer here - its rung, its fail direction and its blast radius exist only in a script header - which is the state this registry replaces.",
+      "owner": "ai-shared-lib",
+      "status": "shipped",
+      "gate_id": "ai-shared-lib.invariant-registry",
+      "reason_lower_rung": "Completeness is a comparison between the set of gates a checkout actually runs and the set declared here; it is a property of two trees, not of any call.",
+      "test_id": "ai-shared-lib/tests/test_invariant_registry.py::CompletenessTests",
+      "notes": "The lint is shipped and wired as a required check, and the named test that resolves this rung-3 target ships in the same change - at rung 3 the test IS the target, so the entry is shipped only once that test exists and runs."
+    },
+    {
+      "id": "governance-code.authoring-doc.states-the-comment-policy",
+      "statement": "The comment policy is stated where an author reads it before writing any code, not only where a check rejects the result.",
+      "rung": 5,
+      "fail_direction": "open",
+      "blast_radius": "A doc nobody reads costs one gate refusal or one failed CI run per author who has not internalised the policy - recoverable, repeatedly. It cannot be made stronger: there is nothing to deny, because the shape of the comment set is decided before the first gated call.",
+      "owner": "governance-code",
+      "status": "shipped",
+      "reason_lower_rung": "By the time a hook or a required check can fire, the comments have already been written; the doc is the only mechanism that acts before the work takes shape. The residue is caught at rung 2 and rung 3, which is why this entry defers to those targets rather than restating what they enforce.",
+      "references": [
+        "marketplace/plugins/governance-code/hooks/comment-gate.sh",
+        "ai-shared-lib/tooling/codegov-lint/check.py"
+      ],
+      "doc_path": "marketplace/plugins/governance-code/governance-code-authoring.md"
+    },
+    {
+      "id": "governance-sub-agents.tiering-doc.states-the-selection-rule",
+      "statement": "How to choose a model for a dispatch is stated where the author picks one, so the choice is made from the rule rather than corrected after it.",
+      "rung": 5,
+      "fail_direction": "open",
+      "blast_radius": "An unread doc costs one denied write per bad pin, plus the dispatches that ran on an under-tiered model before anyone noticed - the allowlist proves a model exists, never that it was the right one for the work.",
+      "owner": "governance-sub-agents",
+      "status": "shipped",
+      "reason_lower_rung": "Tier suitability is a judgment about the work, not a property of the written value: the gate can prove a pinned ID is on the roster and nothing more, so the part that matters is unreachable below rung 5.",
+      "references": [
+        "marketplace/plugins/governance-sub-agents/hooks/model-gate.sh"
+      ],
+      "doc_path": "marketplace/plugins/governance-sub-agents/governance-model-tiering.md"
+    },
+    {
+      "id": "governance-git.governance-doc.states-the-write-locus-rule",
+      "statement": "The rule that repository writes happen in a worktree is stated where the author decides where to work, before the first write is attempted.",
+      "rung": 5,
+      "fail_direction": "open",
+      "blast_radius": "An unread doc costs a refusal at the first write and the rework of moving in-flight changes into a worktree afterwards, which is more expensive than starting in one. The doc cannot refuse anything itself.",
+      "owner": "governance-git",
+      "status": "shipped",
+      "reason_lower_rung": "Where work is set up is decided before any tool call the gate can see; the gate refuses the first write that proves the setup was wrong, which is late but recoverable, and the doc is what makes the setup right in the first place.",
+      "references": [
+        "marketplace/plugins/governance-git/hooks/write-locus-gate.sh"
+      ],
+      "doc_path": "marketplace/plugins/governance-git/governance-git.md"
+    }
+  ]
+}

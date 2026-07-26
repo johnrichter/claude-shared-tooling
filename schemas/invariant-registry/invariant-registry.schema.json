@@ -1,0 +1,549 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/johnrichter/claude-tooling/schemas/invariant-registry/invariant-registry.schema.json",
+  "title": "Enforcement-invariant registry",
+  "version": "1.0.0",
+  "description": "The one place every shipped enforcement invariant declares itself: what it holds, which rung of the enforcement ladder actually enforces it, which way it fails and what blast radius chose that direction, and - for any rung weaker than a deny gate - why the stronger rung is unreachable. INPUTS: this schema plus one registry document per repository family. OUTPUTS, each read by a named consumer: the rung-2 entries (declared trigger + owning gate) feed the gate library's declared-vs-actual firing verification; the rung-1 entries (file:symbol) and rung-3 entries (test id) feed the invariant linter, which resolves the symbol in its source file and asserts the test both exists and runs; the rung-4 entries feed compliance measurement, which writes measured rates back and opens a release-pause entry against the owner when a rate is below its floor. INVARIANTS: (1) Three of the five rungs have a machine consumer; rungs 4 and 5 have none and are checked for schema-completeness ONLY - that limit is declared here per rung in `x-verification-model` and per field in `x-verification`, so a complete rung-4 or rung-5 entry is never mistaken for a verified one. (2) `reason_lower_rung` is prose a reviewer judges; no consumer checks it, and it is annotated reviewer-checked so a green run never reads as having validated it. (3) An invariant is declared once. A weaker rung covering ground a stronger rung already holds REFERENCES that stronger rung's target by path in `references`; a second entry restating the same statement instead of referencing it fails the registry lint. (4) A consumer asserts an entry only while its `status` is `shipped`; a `planned` entry's consumer field is a declaration of intent whose target need not resolve yet, and a `retired` entry's target need not still exist - both MUST be reported as unasserted, never as passing. (5) Every path is repo-qualified from the platform root, so its first segment names the checkout it resolves in and no entry depends on which repository the reader happens to sit in. (6) A rung-4 floor VALUE is null until the behavioral tier's first calibration run sets it; a floor may only be non-null once `measurement_status` is `measured`, at which point a measured rate is required for every model that declares a floor. (7) A missing or unreadable registry document is a packaging defect: a consumer says so loudly and drives no verdict in either direction.",
+  "x-verification-model": {
+    "note": "What is actually checked, per rung. A consumer reads this rather than inferring enforcement strength from the presence of an entry. `consumer` names what ASSERTS the invariant's declaration against reality; null means nothing does, and `completeness_checked_by` then names what reads the entry for shape alone.",
+    "rung_1": {
+      "mechanism": "impossible in code - a fail-fast in the path that produces the value",
+      "consumer": "ai-shared-lib/tooling/invariant-lint",
+      "asserted": "the declared file:symbol resolves in the named source file",
+      "verification": "machine-checked"
+    },
+    "rung_2": {
+      "mechanism": "deny gate - the tool call is refused",
+      "consumer": "ai-shared-lib/go/gate",
+      "asserted": "the declared trigger is exposed by the gate library and compared against the gate's actual firing by bandcheck's overfire precision check - declared-vs-actual, never a single-shot probe",
+      "verification": "machine-checked"
+    },
+    "rung_3": {
+      "mechanism": "a check in the shipped suite",
+      "consumer": "ai-shared-lib/tooling/invariant-lint",
+      "asserted": "the declared test id exists in the shipped suite and is observed to run, not skipped",
+      "verification": "machine-checked"
+    },
+    "rung_4": {
+      "mechanism": "advisory with a measured compliance rate",
+      "consumer": null,
+      "completeness_checked_by": [
+        "ai-shared-lib/go/gate",
+        "ai-shared-lib/schemas/invariant-registry/check.py"
+      ],
+      "asserted": "nothing beyond the presence and shape of owner, per-model floors, measurement status and register entry id",
+      "verification": "completeness-only"
+    },
+    "rung_5": {
+      "mechanism": "documentation that shapes the approach before any gated call",
+      "consumer": null,
+      "completeness_checked_by": [
+        "ai-shared-lib/go/gate",
+        "ai-shared-lib/schemas/invariant-registry/check.py"
+      ],
+      "asserted": "nothing beyond the presence and shape of the doc path, and that the path resolves",
+      "verification": "completeness-only"
+    }
+  },
+  "type": "object",
+  "required": [
+    "schema",
+    "discovery",
+    "gates",
+    "invariants"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "description": "This registry schema's version.",
+      "const": "invariant-registry@1.0.0"
+    },
+    "discovery": {
+      "$ref": "#/$defs/discovery"
+    },
+    "gates": {
+      "description": "Every gate an entry may name, keyed by `gate_id`: where the gate lives and who owns it. This is what turns completeness into a checkable property - a discovered gate absent from this map is named by the registry lint, so a shipped gate cannot quietly carry no declaration.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/gate"
+      }
+    },
+    "invariants": {
+      "description": "The entries. Order carries no meaning; `id` is the key.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/invariant"
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$",
+      "description": "Dotted lowercase id: owner, then artifact, then the specific case."
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*(/[^\\s]+)+$",
+      "description": "Repo-qualified path from the platform root - the first segment names the checkout it resolves in (`marketplace/plugins/...`, `ai-shared-lib/go/...`). A checkout-relative path would resolve differently for each reader."
+    },
+    "modelId": {
+      "type": "string",
+      "pattern": "^claude-[a-z][a-z0-9]*(-[0-9]{1,3})+$",
+      "description": "Pinned full model ID, keyed as it appears in the model roster."
+    },
+    "discovery": {
+      "type": "object",
+      "description": "Where the registry lint looks for shipped gates, so completeness is discovered rather than asserted. A root whose checkout is not present is reported as unresolved and drives no verdict - absence of a sibling repository is a checkout condition, not a signal.",
+      "required": [
+        "roots"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "type": "string",
+          "minLength": 1
+        },
+        "roots": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "repo",
+              "strategy",
+              "globs",
+              "in_scope_owners"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "repo": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._-]*$",
+                "description": "Checkout name - the first segment of every path resolving inside it."
+              },
+              "strategy": {
+                "enum": [
+                  "claude-plugin-hooks",
+                  "ci-wired-guard"
+                ],
+                "description": "How a gate is recognised. `claude-plugin-hooks` reads each hooks.json and takes the command of every PreToolUse hook - the only event that can deny. `ci-wired-guard` takes each guard entrypoint referenced by a workflow file; a guard no workflow runs gates nothing."
+              },
+              "globs": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "Checkout-relative glob(s) naming the registration sources the strategy reads - never the gate files themselves, so a gate is discovered through the thing that actually runs it."
+              },
+              "in_scope_owners": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "Owners whose gates must carry a declaration. A discovered gate outside this set is reported as unclaimed and does not fail the lint - the incumbent surface stays visible without an unbounded retroactive backfill."
+              }
+            }
+          }
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "required": [
+        "path",
+        "owner",
+        "kind",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/path"
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Plugin or CLI that ships the gate."
+        },
+        "kind": {
+          "enum": [
+            "pretooluse-hook",
+            "ci-guard",
+            "release-gate"
+          ],
+          "description": "Where the refusal happens: a tool call, a required CI check, or the release transaction."
+        },
+        "status": {
+          "enum": [
+            "planned",
+            "active",
+            "retired"
+          ],
+          "description": "`active` - the path must resolve. `planned` - the gate is specified and its path is where it will land. `retired` - withdrawn, retained so its entries stay readable."
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "invariant": {
+      "type": "object",
+      "required": [
+        "id",
+        "statement",
+        "rung",
+        "fail_direction",
+        "blast_radius",
+        "owner",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "statement": {
+          "description": "What holds, in one sentence, stated as the property - not as the mechanism that enforces it. Two entries whose statements are restatements of each other fail the registry lint unless the weaker one references the stronger one's target by path.",
+          "type": "string",
+          "minLength": 20
+        },
+        "rung": {
+          "description": "Rung of the enforcement ladder that actually enforces this invariant, strongest first: 1 impossible in code, 2 deny gate, 3 check in the shipped suite, 4 advisory with a measured compliance rate, 5 doc. The strongest rung the invariant can reach, never the strongest one it would be nice to claim.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "fail_direction": {
+          "description": "What happens when the invariant's own signal cannot be resolved. `closed` denies on uncertainty; `open` degrades to an advisory. Neither is a default: the direction is chosen per invariant by `blast_radius`. An escalation to the operator counts as `open` - it does not block the call.",
+          "enum": [
+            "open",
+            "closed"
+          ]
+        },
+        "blast_radius": {
+          "description": "The cost that chose the fail direction, both ways: what a false enforcement costs, and what a missed one costs. Fail closed when the wrong answer costs work that cannot be reconstructed; fail open when it costs a re-run.",
+          "type": "string",
+          "minLength": 20,
+          "x-verification": "reviewer-checked"
+        },
+        "owner": {
+          "description": "Plugin or CLI that owns the invariant - the module whose next release a below-floor rung-4 rate pauses, and the module a completeness gap is reported against.",
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "description": "`shipped` - the target exists and consumers assert it. `planned` - the invariant is specified and its consumer field names the intended target, which need not resolve yet; a consumer reports it unasserted, never passing. `retired` - the target has been withdrawn or superseded and is retained for history.",
+          "enum": [
+            "planned",
+            "shipped",
+            "retired"
+          ]
+        },
+        "reason_lower_rung": {
+          "description": "Why the stronger rung is unreachable. Required for every rung weaker than a deny gate. PROSE, judged by a reviewer: no consumer checks it and none can, which is the honest limit of this mechanism - its value is that the reason is queryable in one place rather than buried in a script header.",
+          "type": "string",
+          "minLength": 20,
+          "x-verification": "reviewer-checked"
+        },
+        "references": {
+          "description": "Paths of the stronger-rung targets this entry defers to, so an invariant is declared once and covered at several rungs by reference rather than by restatement. A path, never a restatement of the other entry's statement.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/path"
+          }
+        },
+        "superseded_by": {
+          "description": "Path of the artifact that replaces this entry's target. Present while a replacement is shipping and the incumbent has not yet been retired - the one case where two entries legitimately cover the same axis.",
+          "$ref": "#/$defs/path"
+        },
+        "notes": {
+          "description": "Context a field cannot carry (a staged rollout, a planned migration of the target, evidence behind a floor). Non-load-bearing: no consumer reads it.",
+          "type": "string",
+          "minLength": 1
+        },
+        "fail_fast_symbol": {
+          "description": "RUNG 1 consumer field: `<repo-qualified file>:<symbol>` of the fail-fast that makes the bad state unrepresentable. May name any writer symbol in a library, not only a gate - the point is that the value cannot be produced, not that a hook catches it later. The linter resolves the symbol in that file; a rename, move or deletion fails.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*(/[^\\s:]+)+\\.[A-Za-z0-9]+:[A-Za-z_][A-Za-z0-9_.]*$",
+          "x-verification": "machine-checked",
+          "x-verification-by": "ai-shared-lib/tooling/invariant-lint"
+        },
+        "trigger": {
+          "description": "RUNG 2 consumer field: the declared firing surface, as event plus tools plus path scope. Compared against the gate's actual firing; a trigger wider or narrower than reality is the drift this closes.",
+          "type": "string",
+          "minLength": 10,
+          "x-verification": "machine-checked",
+          "x-verification-by": "ai-shared-lib/go/gate"
+        },
+        "gate_id": {
+          "description": "Key of the enforcing gate in this document's `gates` map. Required at rung 2, where it names the gate whose firing is verified against `trigger`; allowed at any rung, because a required CI check is also a gate and a declared gate with no entry naming it is a completeness gap.",
+          "$ref": "#/$defs/identifier",
+          "x-verification": "machine-checked",
+          "x-verification-by": "ai-shared-lib/go/gate"
+        },
+        "condition": {
+          "description": "RUNG 2: the predicate the gate evaluates once triggered - what makes this call a violation rather than a pass. Optional; a gate that publishes its own declaration block carries it.",
+          "type": "string",
+          "minLength": 10
+        },
+        "test_id": {
+          "description": "RUNG 3 consumer field: `<repo-qualified test file>::<selector>` naming the check in the shipped suite. The linter asserts it exists AND runs - a skipped or filtered-out test is not enforcement.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*(/[^\\s:]+)+::[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)?$",
+          "x-verification": "machine-checked",
+          "x-verification-by": "ai-shared-lib/tooling/invariant-lint"
+        },
+        "compliance_floors": {
+          "description": "RUNG 4 consumer field: the minimum honored rate per model. A floor is per-model because compliance is - one spike measured 8/8 on one model and 2/8 on another for the same rule. The VALUE is null until the behavioral tier's first calibration run sets it; declaring the floor at ship time with a null value is the specified interim state, not an omission.",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/modelId"
+          },
+          "additionalProperties": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1
+          },
+          "x-verification": "completeness-only"
+        },
+        "measurement_status": {
+          "description": "RUNG 4 consumer field: `declared-unmeasured` until the behavioral tier has measured this invariant; `measured` once it has, which requires a non-null floor and a measured rate for every model declared. An advisory still unmeasured at its owner's next release is not counted as enforcement.",
+          "enum": [
+            "declared-unmeasured",
+            "measured"
+          ],
+          "x-verification": "completeness-only"
+        },
+        "measured_rates": {
+          "description": "RUNG 4: the rates measurement wrote back, per model. Absent while `declared-unmeasured`.",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/modelId"
+          },
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "x-verification": "completeness-only"
+        },
+        "measured_at": {
+          "description": "RUNG 4: when the rates were measured, RFC 3339.",
+          "type": "string",
+          "format": "date-time",
+          "x-verification": "completeness-only"
+        },
+        "register_entry_id": {
+          "description": "RUNG 4 consumer field: the `defect_id` this invariant is tracked under in the release-pause register (ai-shared-lib/schemas/release-transaction/release-pause-register.schema.json), whose matching entry carries this entry's `id` as its `invariant_id`. Minted here at declaration - in an `rp-` namespace that cannot collide with a feedback-register defect id - so an unmeasured advisory is already visible to the release gate and measurement writes back against a stable key.",
+          "type": "string",
+          "pattern": "^rp-[a-z0-9][a-z0-9-]*$",
+          "x-verification": "completeness-only"
+        },
+        "doc_path": {
+          "description": "RUNG 5 consumer field: repo-qualified path of the document that states the invariant where the author reads it.",
+          "$ref": "#/$defs/path",
+          "x-verification": "completeness-only"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "rung": {
+                "minimum": 3
+              }
+            },
+            "required": [
+              "rung"
+            ]
+          },
+          "then": {
+            "required": [
+              "reason_lower_rung"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rung": {
+                "const": 1
+              }
+            },
+            "required": [
+              "rung"
+            ]
+          },
+          "then": {
+            "required": [
+              "fail_fast_symbol"
+            ],
+            "properties": {
+              "trigger": false,
+              "condition": false,
+              "test_id": false,
+              "compliance_floors": false,
+              "measurement_status": false,
+              "measured_rates": false,
+              "measured_at": false,
+              "register_entry_id": false,
+              "doc_path": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rung": {
+                "const": 2
+              }
+            },
+            "required": [
+              "rung"
+            ]
+          },
+          "then": {
+            "required": [
+              "trigger",
+              "gate_id"
+            ],
+            "properties": {
+              "fail_fast_symbol": false,
+              "test_id": false,
+              "compliance_floors": false,
+              "measurement_status": false,
+              "measured_rates": false,
+              "measured_at": false,
+              "register_entry_id": false,
+              "doc_path": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rung": {
+                "const": 3
+              }
+            },
+            "required": [
+              "rung"
+            ]
+          },
+          "then": {
+            "required": [
+              "test_id"
+            ],
+            "properties": {
+              "fail_fast_symbol": false,
+              "trigger": false,
+              "condition": false,
+              "compliance_floors": false,
+              "measurement_status": false,
+              "measured_rates": false,
+              "measured_at": false,
+              "register_entry_id": false,
+              "doc_path": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rung": {
+                "const": 4
+              }
+            },
+            "required": [
+              "rung"
+            ]
+          },
+          "then": {
+            "required": [
+              "compliance_floors",
+              "measurement_status",
+              "register_entry_id"
+            ],
+            "properties": {
+              "fail_fast_symbol": false,
+              "trigger": false,
+              "condition": false,
+              "test_id": false,
+              "doc_path": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rung": {
+                "const": 5
+              }
+            },
+            "required": [
+              "rung"
+            ]
+          },
+          "then": {
+            "required": [
+              "doc_path"
+            ],
+            "properties": {
+              "fail_fast_symbol": false,
+              "trigger": false,
+              "condition": false,
+              "test_id": false,
+              "compliance_floors": false,
+              "measurement_status": false,
+              "measured_rates": false,
+              "measured_at": false,
+              "register_entry_id": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "measurement_status": {
+                "const": "measured"
+              }
+            },
+            "required": [
+              "measurement_status"
+            ]
+          },
+          "then": {
+            "required": [
+              "measured_rates",
+              "measured_at"
+            ],
+            "properties": {
+              "compliance_floors": {
+                "additionalProperties": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
