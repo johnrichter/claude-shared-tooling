@@ -1,0 +1,150 @@
+{
+  "kind": "logkit-contract",
+  "version": "logkit@1.0.0",
+  "description": "The data half of the logkit logging standard: everything an implementation must agree on that the record schema cannot express. Declares the canonical serialization (so three languages produce the same bytes), the timestamp derivation, the inbound level-alias map (so a native record maps to a canonical level deterministically or fails by name), the per-writer key configuration and the documented non-equivalences that make each native library's own output NOT a logkit record, the reserved `fields` keys, the human rendering's tokens, and the stream defaults. Record shape lives in log-record.schema.json; the normative prose standard is logkit-logging.spec.md. INVARIANTS: every `level_normalization.map` target is a member of the schema's level enum; `reserved_field_keys` is the complete set of `fields` keys with a meaning fixed by this contract; iteration order is declared array order everywhere, so identical input yields identical bytes.",
+  "record_schema": {
+    "$id": "https://github.com/johnrichter/claude-shared-tooling/schemas/logkit/log-record.schema.json",
+    "version": "1.0.0",
+    "schema_version": 1
+  },
+  "inbound_key_map_notation": "Each `native_writers[].inbound_key_map` entry reads source-path -> destination-path, both dotted from the root of their own object. A destination outside the record's root field set (`fields.target`) names the nested destination exactly; a source key absent from the map has no canonical home and is carried verbatim into `fields`.",
+  "native_writers_note": "Each entry describes that library's own default JSON output, which is a property of the library version in use, not of this contract. An implementation pins the exact version it was written against and the conformance suite re-checks these key maps against it; a map that no longer matches the pinned version is a defect to fix here, not to work around in the implementation.",
+  "canonical_json": {
+    "standard": "RFC 8785 JSON Canonicalization Scheme (JCS)",
+    "why": "A published canonicalization is the only way three independent emitters produce identical bytes; the alternative is three hand-rolled serializers that agree until the first float or non-ASCII string. Each implementation uses an established JCS library for its language where one clears the dependency policy.",
+    "scope": "`key_order`, `numbers`, `strings`, `encoding` and `whitespace` are RFC 8785 itself. `duplicate_keys`, `empty_containers`, `line_framing` and `write_atomicity` are logkit rules layered on top: JCS canonicalizes one JSON value and says nothing about how records are framed into a stream.",
+    "key_order": "Lexicographic by UTF-16 code unit, at every object depth. Array element order is data and is preserved.",
+    "numbers": "ECMA-262 shortest round-trip form, no exponent for magnitudes JCS renders without one; an integral float serializes as an integer (1.0 -> 1). NaN and the infinities are not JSON and are rejected at the API boundary, never coerced.",
+    "strings": "Minimal JSON escaping: only the control characters, quotation mark and reverse solidus are escaped; every other character is emitted literally as UTF-8.",
+    "encoding": "UTF-8, no byte-order mark.",
+    "whitespace": "None. No space after a colon or comma, no indentation, no trailing newline inside the record.",
+    "duplicate_keys": "Impossible in the output: a key written twice on one record resolves last-write-wins before serialization, so the record carries one entry per key.",
+    "empty_containers": "Omitted, not emitted. An absent optional field is absent - never {}, never [], never null.",
+    "line_framing": "Exactly one record per line, terminated by a single LF (U+000A). The record contains no unescaped control character, so a line break can only be a record boundary.",
+    "write_atomicity": "Each rendered line is handed to the sink in one write, so concurrent emitters never interleave partial lines."
+  },
+  "timestamp": {
+    "source": "The emitter's wall clock at the moment the event is recorded, not at the moment it is written.",
+    "timezone": "UTC. A local-time or offset-bearing reading is converted; a reading with no timezone is rejected, never assumed to be local or UTC.",
+    "precision": "millisecond",
+    "fractional_digits": 3,
+    "rounding": "truncate-toward-zero",
+    "layout": "YYYY-MM-DDTHH:MM:SS.sssZ",
+    "example": "2026-07-26T09:41:07.480Z",
+    "note": "Fixed width and zero-padded, so lexicographic order equals chronological order. Language runtimes that carry a monotonic reading alongside the wall clock (Go) format the wall clock."
+  },
+  "level_normalization": {
+    "procedure": [
+      "Trim leading and trailing whitespace from the source token.",
+      "ASCII-lowercase it (only A-Z; never a locale-sensitive lowercase, which under a Turkish locale maps I to the dotless i and leaves INFO unequal to info).",
+      "Look the result up in `map`.",
+      "A token absent from `map` is a normalization failure naming the token and the source - never a default, never `info`."
+    ],
+    "map": [
+      { "token": "trace", "level": "debug", "equivalent": false, "note": "logkit has no trace level; the source token is preserved in fields.native_level." },
+      { "token": "debug", "level": "debug", "equivalent": true },
+      { "token": "info", "level": "info", "equivalent": true },
+      { "token": "warn", "level": "warn", "equivalent": true },
+      { "token": "warning", "level": "warn", "equivalent": true },
+      { "token": "error", "level": "error", "equivalent": true },
+      { "token": "fatal", "level": "fatal", "equivalent": true },
+      { "token": "critical", "level": "fatal", "equivalent": true, "note": "Python's standard library defines FATAL as an alias of CRITICAL, both ordinal 50; a rename, not a demotion." },
+      { "token": "panic", "level": "fatal", "equivalent": false, "note": "Ranks above fatal in zerolog and carries a distinct side effect; the source token is preserved in fields.native_level." }
+    ],
+    "lossy_token_field": "native_level",
+    "not_levels": [
+      "A numeric level from a foreign scale is mapped by severity ordinal (see the schema's $defs/severity), and a value between two ordinals is a failure, not a rounding.",
+      "`off`, `disabled`, `notset` and `none` are writer configuration, not levels; a record carrying one fails normalization."
+    ]
+  },
+  "native_writers": [
+    {
+      "language": "go",
+      "library": "zerolog",
+      "role": "byte writer only - logkit owns the record, the level set, the timestamp and the field names",
+      "writer_configuration": {
+        "note": "logkit SETS these names on the writer rather than relying on the library's defaults, so a default change upstream cannot drift the wire format.",
+        "timestamp_field": "timestamp",
+        "level_field": "level",
+        "message_field": "message"
+      },
+      "inbound_key_map": { "time": "timestamp", "level": "level", "message": "message", "caller": "caller" },
+      "non_equivalences": [
+        "Nine `zerolog.Level` constants - trace, debug, info, warn, error, fatal, panic, no-level and disabled - against logkit's five; trace, panic, no-level and disabled have no logkit counterpart.",
+        "Fatal terminates the process and Panic panics; logkit's fatal has no side effect - it writes, flushes and returns, and the caller exits through the clikit taxonomy so exit codes stay in one place.",
+        "Fields are appended without de-duplication, so a key written twice appears twice in the output.",
+        "Insertion order, not sorted key order.",
+        "The default timestamp key is `time`, not `timestamp` (the default level and message keys already match the canonical ones, which is why this map renames only `time`).",
+        "`TimeFieldFormat` is a package-level global, so any dependency can change every logger's timestamp layout in-process; its default is second precision carrying the host's offset, not UTC milliseconds."
+      ]
+    },
+    {
+      "language": "rust",
+      "library": "tracing + tracing-subscriber",
+      "role": "byte writer only - logkit owns the record, the level set, the timestamp and the field names",
+      "writer_configuration": {
+        "note": "The JSON subscriber is configured to emit the canonical keys at the record root; event fields are not left nested under the subscriber's own `fields` envelope.",
+        "timestamp_field": "timestamp",
+        "level_field": "level",
+        "message_field": "message"
+      },
+      "inbound_key_map": { "timestamp": "timestamp", "level": "level", "fields.message": "message", "target": "fields.target", "filename": "caller.file", "line_number": "caller.line" },
+      "non_equivalences": [
+        "Five levels, but TRACE..ERROR - there is no fatal, so logkit's fatal has no native counterpart and is carried as the record's own level.",
+        "Level tokens are uppercase.",
+        "The event message arrives as a field named `message` nested under `fields`, not as a root key.",
+        "Span context (`span`, `spans`) and `target` have no canonical home; they are carried verbatim into logkit's `fields`.",
+        "It is a tracing facade, not a logger: with no subscriber installed the same call emits nothing at all."
+      ]
+    },
+    {
+      "language": "python",
+      "library": "structlog",
+      "role": "byte writer only - logkit owns the record, the level set, the timestamp and the field names",
+      "phase": "B",
+      "writer_configuration": {
+        "note": "The processor chain is pinned by logkit: canonical renaming, UTC millisecond timestamping and canonical JSON serialization are logkit's processors, not the library's defaults.",
+        "timestamp_field": "timestamp",
+        "level_field": "level",
+        "message_field": "message"
+      },
+      "inbound_key_map": { "timestamp": "timestamp", "level": "level", "event": "message" },
+      "non_equivalences": [
+        "The message key is `event`, not `message`.",
+        "There is no timestamp at all unless a `TimeStamper` processor is in the chain; its default output is a Unix epoch float, and its ISO form carries microseconds, not the canonical three digits.",
+        "There is no level key at all unless an `add_log_level` processor is in the chain.",
+        "The standard-library level set it bridges is DEBUG..CRITICAL with no distinct fatal and with `warning` spelled in full.",
+        "Rendering is a processor chain, so two applications of the same library agree on nothing that the chain does not pin."
+      ]
+    }
+  ],
+  "reserved_field_keys": [
+    { "key": "native_level", "type": "string", "written_by": "the normalization pass only", "meaning": "The source's own level token, kept when the mapping was not an equivalence." }
+  ],
+  "human_rendering": {
+    "purpose": "A person reading a terminal. It is a rendering of the same record, never a second source of truth, and no consumer parses it.",
+    "header_order": ["timestamp", "level", "service", "message"],
+    "attribute_order": "The record's own canonical key order for every key not in the header, with `fields` expanded in place and `schema_version` omitted.",
+    "separator": " ",
+    "assignment": "=",
+    "level_token": { "case": "upper", "pad_to": 5, "pad_char": " ", "pad_side": "right" },
+    "value_quoting": {
+      "bare_when": "^[^\\s\"=\\u0000-\\u001F\\u007F]+$",
+      "otherwise": "JSON string form, with JCS escaping",
+      "non_scalar": "The value's canonical JSON form, verbatim"
+    },
+    "error": { "message_key": "error", "kind_key": "error_kind", "stack_frame_indent": "  ", "stack_position": "one frame per line, after the record's own line" },
+    "caller": { "location_key": "caller", "location_form": "<file>:<line>", "function_key": "caller_function" },
+    "color": {
+      "enabled_when": "the sink is a TTY, the NO_COLOR environment variable is unset, and the configuration has not disabled it",
+      "scope": "the level token only",
+      "sgr": { "debug": "90", "info": "36", "warn": "33", "error": "31", "fatal": "1;31" },
+      "invariant": "Color adds SGR sequences and changes no other character, so the colorless rendering is recovered by stripping them."
+    }
+  },
+  "streams": {
+    "default": "stderr",
+    "why": "stdout carries the CLI's structured result under the clikit contract; a log line on stdout corrupts a caller parsing that result.",
+    "concurrent_renderings": "Both renderings may be enabled at once, each to its own sink - never two renderings interleaved on one stream. They are produced from a single record, so their field values are identical by construction."
+  }
+}

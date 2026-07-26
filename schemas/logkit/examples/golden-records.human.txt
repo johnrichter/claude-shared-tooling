@@ -1,0 +1,6 @@
+2026-07-26T09:41:07.480Z INFO  navigator index rebuilt
+2026-07-26T09:41:07.612Z DEBUG navigator index segment written caller=rust/bm25/src/index.rs:312 caller_function=OkapiIndex::rebuild documents=1284 dry_run=false duration_ms=812.5 index_path=var/index/navigator.bm25 tags=["frontmatter","bm25"] window={"from":"2026-07-01","to":"2026-07-26"} service_version=0.4.2
+2026-07-26T09:44:12.007Z ERROR git-tools worktree create refused error="fatal: 'feat/x' is already checked out at '/w/a'" error_kind=git.ExitError branch=feat/x exit_code=128
+  git/worktree.go:88 Create
+  git/cmd.go:41 run
+2026-07-26T09:45:00.000Z FATAL anoikis-tools state store unreadable error="unexpected end of JSON input" error_kind=*json.SyntaxError native_level=panic path=.anoikis/state.json
