@@ -62,3 +62,5 @@ go-isatty,https://github.com/mattn/go-isatty,MIT,Yasuhiro MATSUMOTO
 go-colorable,https://github.com/mattn/go-colorable,MIT,Yasuhiro Matsumoto
 x/sys,https://cs.opensource.google/go/x/sys,BSD-3-Clause,The Go Authors
 renameio,https://github.com/google/renameio,Apache-2.0,Google Inc.
+santhosh-tekuri/jsonschema,https://github.com/santhosh-tekuri/jsonschema,Apache-2.0,Santhosh Kumar Tekuri
+x/text,https://cs.opensource.google/go/x/text,BSD-3-Clause,The Go Authors

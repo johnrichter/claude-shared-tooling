@@ -1,0 +1,1 @@
+{"type":"assistant","sessionId":"sess-0001-sub-nested1","isSidechain":true,"message":{"role":"assistant","model":"claude-opus-4-8","usage":{"input_tokens":30,"output_tokens":3}}}
