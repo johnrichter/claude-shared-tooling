@@ -8,6 +8,7 @@ Scope:
 - Go side (`go/build-helpers`): one third-party dependency, `doublestar` (glob matching in `bh/surface.go`), statically linked into the distributed `go/.bin/build-helpers-*` binaries.
 - Go side (`go/logkit`): `zerolog` (the JSON stream's byte writer) and `jcs` (RFC 8785 canonicalization), plus zerolog's own `go-isatty`, `go-colorable` and `golang.org/x/sys` dependencies, statically linked into any binary that imports `go/logkit`.
 - Go side (`go/fsx`): `renameio` (crash-safe atomic writes) and `doublestar` (glob-based path classification), statically linked into any binary that imports `go/fsx`.
+- Go side (`go/schema`): `santhosh-tekuri/jsonschema` (draft-2020-12 validation), plus its own `golang.org/x/text` dependency (localized error strings), statically linked into any binary that imports `go/schema`.
 - All other third-party code is the 50 Rust crates below, statically linked into the distributed binary.
 
 The MIT, BSD-3-Clause, Zlib, Unicode-3.0, and Apache-2.0 licenses relied on below each require their copyright notice and permission/license text to travel with any binary that includes the licensed code. This file reproduces that attribution and license text for the statically-linked components, satisfying those obligations.
@@ -23,10 +24,10 @@ Working through all 50 Rust crates plus the Go modules above under this rule, th
 | License | How it applies |
 | --- | --- |
 | MIT | Elected for every crate whose SPDX expression offers it — the large majority; also `zerolog`, `go-isatty` and `go-colorable` on the Go side, each MIT with no `OR` alternative. |
-| BSD-3-Clause | Mandatory `AND` term on `encoding_rs` = `(Apache-2.0 OR MIT) AND BSD-3-Clause`. We elect MIT for the `OR`; BSD-3-Clause still applies. Also `golang.org/x/sys`, BSD-3-Clause with no `OR` alternative — a different copyright holder and text from the `encoding_rs` one, kept as its own section below. |
+| BSD-3-Clause | Mandatory `AND` term on `encoding_rs` = `(Apache-2.0 OR MIT) AND BSD-3-Clause`. We elect MIT for the `OR`; BSD-3-Clause still applies. Also `golang.org/x/sys` and `golang.org/x/text`, both BSD-3-Clause with no `OR` alternative and the same Go-Authors copyright and text — a different holder and text from the `encoding_rs` one, kept as its own section below. |
 | Zlib | `foldhash` = `Zlib` with no `OR` alternative — no election, Zlib is the only license. |
 | Unicode-3.0 | Mandatory `AND` term on `unicode-ident` = `(MIT OR Apache-2.0) AND Unicode-3.0`. We elect MIT for the `OR`; Unicode-3.0 still applies. |
-| Apache-2.0 | Three components, none offering MIT: `jcs` (Go side) and `renameio` (Go side), each `Apache-2.0` with no `OR` alternative, so this obligation is unconditional; and `ryu-js` (a Rust `serde_jcs` dependency) = `Apache-2.0 OR BSL-1.0`, the one crate where the MIT-first election rule has no MIT branch to take. We elect Apache-2.0 over BSL-1.0 (Boost) for `ryu-js` because `jcs` already obliges this file to carry the Apache-2.0 text, so the election adds no new obligation. |
+| Apache-2.0 | Four components, none offering MIT: `jcs`, `renameio` and `santhosh-tekuri/jsonschema` (all Go side), each `Apache-2.0` with no `OR` alternative, so this obligation is unconditional; and `ryu-js` (a Rust `serde_jcs` dependency) = `Apache-2.0 OR BSL-1.0`, the one crate where the MIT-first election rule has no MIT branch to take. We elect Apache-2.0 over BSL-1.0 (Boost) for `ryu-js` because `jcs` already obliges this file to carry the Apache-2.0 text, so the election adds no new obligation. |
 
 Unlicense and BSL-1.0 appear in the source CSV as `OR` alternatives but are never elected — every crate offering either one also offers a license from the table above, which we elect instead. Their license texts are not bundled here because we do not rely on them.
 
@@ -91,6 +92,8 @@ Unlicense and BSL-1.0 appear in the source CSV as `OR` alternatives but are neve
 | go-colorable | https://github.com/mattn/go-colorable | MIT | MIT |
 | x/sys | https://cs.opensource.google/go/x/sys | BSD-3-Clause | BSD-3-Clause |
 | renameio | https://github.com/google/renameio | Apache-2.0 | Apache-2.0 |
+| santhosh-tekuri/jsonschema | https://github.com/santhosh-tekuri/jsonschema | Apache-2.0 | Apache-2.0 |
+| x/text | https://cs.opensource.google/go/x/text | BSD-3-Clause | BSD-3-Clause |
 
 ## License texts
 
@@ -242,9 +245,9 @@ the following restrictions:
 3. This notice may not be removed or altered from any source distribution.
 ```
 
-### BSD-3-Clause (golang.org/x/sys)
+### BSD-3-Clause (golang.org/x/sys, golang.org/x/text)
 
-Applies to `x/sys`, a transitive dependency of `zerolog` (via `go-isatty`). Distinct copyright and text from the `encoding_rs`/WHATWG BSD-3-Clause above.
+Applies to `x/sys`, a transitive dependency of `zerolog` (via `go-isatty`), and `x/text`, a transitive dependency of `santhosh-tekuri/jsonschema`. Both are Go-Authors modules sharing this copyright and text, distinct from the `encoding_rs`/WHATWG BSD-3-Clause above.
 
 License text:
 
