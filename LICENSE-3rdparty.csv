@@ -41,3 +41,8 @@ jsonschema-specifications,https://github.com/python-jsonschema/jsonschema-specif
 referencing,https://github.com/python-jsonschema/referencing,MIT,Julian Berman <Julian+referencing@GrayVines.com>
 rpds-py,https://github.com/crate-py/rpds,MIT,Julian Berman <Julian+rpds@GrayVines.com>
 attrs,https://github.com/python-attrs/attrs,MIT,Hynek Schlawack <hs@ox.cx>
+zerolog,https://github.com/rs/zerolog,MIT,Olivier Poitrey
+jcs,https://github.com/gowebpki/jcs,Apache-2.0,gowebpki contributors
+go-isatty,https://github.com/mattn/go-isatty,MIT,Yasuhiro MATSUMOTO
+go-colorable,https://github.com/mattn/go-colorable,MIT,Yasuhiro Matsumoto
+x/sys,https://cs.opensource.google/go/x/sys,BSD-3-Clause,The Go Authors
