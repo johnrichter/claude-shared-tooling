@@ -47,7 +47,11 @@ jobs:
     name: security-guardrail
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 so the SC-FREEZE guard can diff HEAD against the PR base
+      # SHA (base..HEAD) — a shallow clone lacks that ancestor.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -70,6 +74,42 @@ jobs:
             fi
           done < <(git ls-files -z -- '*go.mod')
           exit "$fail"
+      # SC-FREEZE guardrail: deny writes to frozen plugin/corpus homes
+      # (single source of record: tooling/freeze-guard/frozen-homes.json).
+      # Diff the committed surface HEAD vs the PR base (or the push's before SHA);
+      # the clean CI checkout has no uncommitted state to inspect otherwise.
+      - name: SC-FREEZE (no writes to frozen plugin/corpus homes)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            python3 tooling/freeze-guard/check.py --base "$BASE_SHA"
+          else
+            python3 tooling/freeze-guard/check.py
+          fi
+      # Planted-violation test: prove the guard actually rejects frozen-home writes.
+      # Creates a test file in a frozen home, runs the guard (expecting failure),
+      # then reverts to clean state. This proves the guard's exit code and
+      # violation reporting are correct.
+      - name: SC-FREEZE planted-violation test (proves guard fails as designed)
+        run: |
+          # Plant a violation: touch a file in a frozen home.
+          mkdir -p plugin-homes/datadog-docs-agent
+          touch plugin-homes/datadog-docs-agent/planted-violation-test.txt
+          # Run the guard in working-tree mode (no --base, so it sees uncommitted changes).
+          set +e
+          python3 tooling/freeze-guard/check.py
+          exit_code=$?
+          set -e
+          # Clean up the planted violation before checking the exit code.
+          rm -rf plugin-homes
+          # Verify the guard failed (exit 1) as designed.
+          if [ "$exit_code" -eq 1 ]; then
+            echo "✓ Guard correctly rejected frozen-home write (exit 1)"
+          else
+            echo "✗ Guard did not fail on frozen-home violation (exit $exit_code, expected 1)"
+            exit 1
+          fi
 
   unit-tests:
     name: unit-tests
