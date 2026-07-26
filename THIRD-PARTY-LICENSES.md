@@ -10,6 +10,7 @@ Scope:
 - Go side (`go/fsx`): `renameio` (crash-safe atomic writes) and `doublestar` (glob-based path classification), statically linked into any binary that imports `go/fsx`.
 - Go side (`go/schema`): `santhosh-tekuri/jsonschema` (draft-2020-12 validation), plus its own `golang.org/x/text` dependency (localized error strings), statically linked into any binary that imports `go/schema`.
 - Go side (`go/webfetch`): `golang.org/x/net` (tolerant HTML5 parsing for article metadata scraping), statically linked into any binary that imports `go/webfetch`.
+- Go side (`go/cost`): `modernc.org/sqlite` (cgo-free SQLite driver backing the cost store), pulling in `modernc.org/libc`, `modernc.org/mathutil`, `modernc.org/memory`, `github.com/google/uuid`, `github.com/remyoudompheng/bigfft`, `github.com/ncruces/go-strftime` and `github.com/dustin/go-humanize`, statically linked into any binary that imports `go/cost`. See `go/docs/dependency-selection/sqlite.md` for the selection rationale, including SQLite's own public-domain C engine bundled unmodified inside `modernc.org/sqlite`.
 - All other third-party code is the 50 Rust crates below, statically linked into the distributed binary.
 
 The MIT, BSD-3-Clause, Zlib, Unicode-3.0, and Apache-2.0 licenses relied on below each require their copyright notice and permission/license text to travel with any binary that includes the licensed code. This file reproduces that attribution and license text for the statically-linked components, satisfying those obligations.
@@ -96,6 +97,14 @@ Unlicense and BSL-1.0 appear in the source CSV as `OR` alternatives but are neve
 | santhosh-tekuri/jsonschema | https://github.com/santhosh-tekuri/jsonschema | Apache-2.0 | Apache-2.0 |
 | x/text | https://cs.opensource.google/go/x/text | BSD-3-Clause | BSD-3-Clause |
 | x/net | https://cs.opensource.google/go/x/net | BSD-3-Clause | BSD-3-Clause |
+| sqlite | https://gitlab.com/cznic/sqlite | BSD-3-Clause | BSD-3-Clause |
+| libc | https://gitlab.com/cznic/libc | BSD-3-Clause | BSD-3-Clause |
+| mathutil | https://gitlab.com/cznic/mathutil | BSD-3-Clause | BSD-3-Clause |
+| memory | https://gitlab.com/cznic/memory | BSD-3-Clause | BSD-3-Clause |
+| uuid | https://github.com/google/uuid | BSD-3-Clause | BSD-3-Clause |
+| bigfft | https://github.com/remyoudompheng/bigfft | BSD-3-Clause | BSD-3-Clause |
+| go-strftime | https://github.com/ncruces/go-strftime | MIT | MIT |
+| go-humanize | https://github.com/dustin/go-humanize | MIT | MIT |
 
 ## License texts
 
@@ -155,6 +164,8 @@ Applies to the components below, used under MIT. Copyright holder per component,
 - zerolog — Olivier Poitrey
 - go-isatty — Yasuhiro MATSUMOTO
 - go-colorable — Yasuhiro Matsumoto
+- go-strftime — Nuno Cruces
+- go-humanize — Dustin Sallings
 
 License text:
 
@@ -267,6 +278,113 @@ copyright notice, this list of conditions and the following disclaimer
 in the documentation and/or other materials provided with the
 distribution.
    * Neither the name of Google LLC nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### BSD-3-Clause (modernc.org/sqlite)
+
+Applies to `sqlite`, the cgo-free SQLite driver `go/cost`'s store uses. Governs the Go driver/wrapper code; the SQLite C engine it transpiles is bundled unmodified and is itself dedicated to the public domain by its authors (see `go/docs/dependency-selection/sqlite.md`), so it carries no separate license obligation. Copyright per the CSV: The Sqlite Authors.
+
+License text:
+
+```
+Copyright (c) 2017 The Sqlite Authors. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+this list of conditions and the following disclaimer in the documentation
+and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+may be used to endorse or promote products derived from this software without
+specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### BSD-3-Clause (modernc.org/libc, modernc.org/mathutil, modernc.org/memory)
+
+Applies to `libc` (the pure-Go C-runtime shim `sqlite` transpiles against), `mathutil` and `memory` (its big-integer and manual memory-pooling helpers) — all three `modernc.org/sqlite` transitive dependencies from the same project. All three carry this project's standard BSD-3-Clause text, differing only in the entity name on the copyright line. Copyright per the CSV: libc — The Libc Authors; mathutil — The mathutil Authors; memory — The Memory Authors.
+
+License text (libc's copy shown; mathutil's and memory's are byte-identical but for the substituted entity name and year):
+
+```
+Copyright (c) 2017 The Libc Authors. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * Neither the names of the authors nor the names of the
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### BSD-3-Clause (github.com/google/uuid, github.com/remyoudompheng/bigfft)
+
+Applies to `uuid` (a `modernc.org/libc` transitive dependency, used for random ID generation) and `bigfft` (`modernc.org/sqlite`'s big-integer multiplication helper, adapted from the Go standard library). Both share the same Google-authored BSD-3-Clause text, differing only in the copyright line. Copyright per the CSV: uuid — Google Inc. (2009, 2014); bigfft — The Go Authors (2012).
+
+License text (uuid's copy shown; bigfft's is byte-identical but for the copyright line):
+
+```
+Copyright (c) 2009,2014 Google Inc. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * Neither the name of Google Inc. nor the names of its
 contributors may be used to endorse or promote products derived from
 this software without specific prior written permission.
 
