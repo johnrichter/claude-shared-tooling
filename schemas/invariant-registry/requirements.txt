@@ -1,0 +1,6 @@
+# Pinned per SC-DEPPOLICY: robustness-first pick (python-jsonschema — the reference
+# Python implementation of JSON Schema, actively maintained, draft 2020-12 support),
+# license cleared (MIT, recorded with its transitive set in LICENSE-3rdparty.csv),
+# exact version pinned. Install into an isolated venv — never the system/global
+# interpreter (see schemas/invariant-registry/README.md).
+jsonschema==4.26.0

@@ -66,8 +66,8 @@ python3 tooling/version-guard/check.py commands --module go/git --version 1.2.0
   `pyproject.toml`) directly inside it, or — for schema modules, which carry no manifest —
   by being an immediate child of `schemas/`. The top-level module is the repo root itself,
   recognized by its `pyproject.toml`.
-- **Today's known violation:** `rust/frontmatter`'s dependency on `facetquery` is a
-  workspace-internal `path = "../facetquery"` dependency (both are unpublished workspace
-  members released together). `check-deps` correctly flags it under the letter of this
-  rule; migrating it to a git-tag dependency, or codifying a workspace-internal exception,
-  is a decision for whoever wires this gate into required CI — not made here.
+- **`rust/frontmatter`'s dependency on `facetquery`** is a git-tag dependency
+  (`rust/facetquery/v0.1.0`), not a `path = ...` dependency — both crates are workspace
+  members released together, so `rust/Cargo.toml` carries a `[patch]` entry redirecting
+  that git source back to the in-tree member for local builds and CI, while the manifest
+  itself stays git-tag-only per this rule.

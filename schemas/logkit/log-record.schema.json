@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/johnrichter/claude-shared-tooling/schemas/logkit/log-record.schema.json",
+  "title": "logkit normalized log record",
+  "version": "1.0.0",
+  "description": "One log event in its normalized form: the cross-language wire record every logkit implementation emits and every consumer reads. This schema is the source of truth for the record's field names, types and required-vs-optional status; logkit-logging.spec.md is the normative standard around it (level semantics, timestamp derivation, canonical serialization, dual machine+human rendering, normalization of native library output) and logkit.contract.json carries the normalization data those rules key on. The root object is CLOSED: `fields` is the only extension point, so a consumer can validate strictly without a later addition breaking it. Nothing here is a rendering: a record is data, and both the one-line JSON and the human line are renderings of the same record.",
+  "type": "object",
+  "required": [
+    "level",
+    "message",
+    "schema_version",
+    "service",
+    "timestamp"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "MAJOR version of this record contract. A consumer built against version N refuses a record declaring more than N rather than reading unknown semantics; the top-level field set is frozen for the life of a MAJOR, so a consumer built against N reads every N record."
+    },
+    "timestamp": {
+      "$ref": "#/$defs/timestamp",
+      "description": "When the event happened, from the emitter's wall clock. Always UTC, always exactly three fractional digits."
+    },
+    "level": {
+      "$ref": "#/$defs/level",
+      "description": "Severity of the event. Closed set; see $defs/severity for the ordinal each name carries."
+    },
+    "service": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$",
+      "description": "Logical emitter the record belongs to - the CLI, daemon or job name, fixed at logger construction. Identifies WHO logged; a sub-component within it belongs in `fields`."
+    },
+    "message": {
+      "$ref": "#/$defs/line",
+      "description": "What happened, as a short constant phrase. Variable data belongs in `fields`, never interpolated here - an interpolated message cannot be grouped or counted across events. Single line: control characters, including newline, are excluded so both renderings stay one line."
+    },
+    "service_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+      "description": "Version of the emitting build, when it knows one. Free-form (a semver, a git describe, a build id) because not every build has a released version. Absent, never null, when unknown."
+    },
+    "fields": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Structured context for this event: the variable data that would otherwise be interpolated into `message`. The ONLY extension point of the record - a key not defined here is legal, a new top-level record field is not. Omitted entirely when empty; never emitted as {} or null.",
+      "propertyNames": {
+        "allOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\u0000-\\u001F\\u007F]+$"
+          },
+          {
+            "not": {
+              "$ref": "#/$defs/root_field_name"
+            }
+          }
+        ],
+        "description": "A key may not collide with a root field name: consumers that flatten a record into one namespace would silently shadow the root field. Authored keys are snake_case by convention; keys carried in verbatim from a foreign producer keep their original spelling, since any case transformation would be ambiguous and therefore non-deterministic."
+      },
+      "properties": {
+        "native_level": {
+          "type": "string",
+          "minLength": 1,
+          "description": "RESERVED, set only by the normalization pass: the source's own level token, preserved when it mapped to a canonical level that is not its equivalent (`trace` -> `debug`, `panic` -> `fatal`). Absent for a pure alias and for anything logkit emitted itself."
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "description": "The failure that caused this event, when one did. Independent of `level`: an error-level record need not carry it, and a warn-level record may - never infer one from the other. This is logkit's log-side view of a failure and is NOT clikit's Error contract; how a clikit error maps onto these keys is fixed by the clikit contract, not here.",
+      "required": [
+        "message"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "$ref": "#/$defs/line",
+          "description": "The failure's own message, verbatim from the error value. Single line: when the error's text spans lines, its first line is carried here and the full text belongs in `fields` under a key the caller chooses."
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+          "description": "The error's type as the emitting language names it (Go concrete type, Rust type path, Python exception class). Absent when the language cannot name one."
+        },
+        "stack": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Stack frames, outermost-call first, one frame per element. Omitted when no stack was captured; never an empty array.",
+          "items": {
+            "$ref": "#/$defs/line"
+          }
+        }
+      }
+    },
+    "caller": {
+      "type": "object",
+      "description": "Source location of the log call. Optional because capturing it costs a stack walk; when captured it is always complete enough to open the file.",
+      "required": [
+        "file",
+        "line"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^/\\\\\\u0000-\\u001F\\u007F][^\\u0000-\\u001F\\u007F]*$",
+          "description": "Path from the module root, never absolute - an absolute path embeds the build machine's directory layout, which differs per builder and breaks byte-identity across languages and hosts."
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-based line number of the log call."
+        },
+        "function": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+          "description": "Enclosing function or method as the language names it. Absent when the runtime cannot resolve one."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "root_field_name": {
+      "description": "Every root field name, in one place: the root `properties` keys are exactly this set, and `fields` keys are checked against it so a context key can never shadow a record field.",
+      "enum": [
+        "caller",
+        "error",
+        "fields",
+        "level",
+        "message",
+        "schema_version",
+        "service",
+        "service_version",
+        "timestamp"
+      ]
+    },
+    "level": {
+      "description": "The closed level set. Exactly five members, lowercase, no aliases and no `trace`/`panic`/`off` - a level outside this set is a normalization failure, never a default. Adding or removing a member is a MAJOR change, because downstream matches on it are exhaustive.",
+      "enum": [
+        "debug",
+        "info",
+        "warn",
+        "error",
+        "fatal"
+      ]
+    },
+    "severity": {
+      "description": "Normative severity ordinal per level, carried beside the enum it keys so the two cannot drift. Not a record field and never serialized: it exists so every implementation compares levels identically (a record is emitted when severity(level) >= severity(threshold)) and so a foreign scale can be mapped onto this one by number. Ordinals are spaced by ten to leave room for a future MAJOR to interleave a level without renumbering.",
+      "type": "object",
+      "const": {
+        "debug": 10,
+        "info": 20,
+        "warn": 30,
+        "error": 40,
+        "fatal": 50
+      }
+    },
+    "timestamp": {
+      "description": "RFC 3339 date-time in UTC with the `Z` offset and exactly three fractional digits (milliseconds), always present even when zero. Fixed width (24 characters), so records sort lexicographically in the same order they sort chronologically. A finer clock reading is TRUNCATED toward zero, never rounded: rounding can order an event after one that happened later.",
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "line": {
+      "description": "A non-empty single-line string: no control characters, so it survives both the one-line JSON rendering and the human rendering unchanged.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^[^\\u0000-\\u001F\\u007F]+$"
+    }
+  }
+}
