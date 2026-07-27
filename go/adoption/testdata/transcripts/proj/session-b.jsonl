@@ -1,0 +1,5 @@
+{"type":"assistant","sessionId":"session-b","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"gh-tools pr create --title \"add feature\""}}]}}
+{"type":"assistant","sessionId":"session-b","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"gh pr view 123"}}]}}
+{"type":"assistant","sessionId":"session-b","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"gh pr list"}}]}}
+{"type":"assistant","sessionId":"session-b","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"gh issue list"}}]}}
+{"type":"assistant","sessionId":"session-b","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"gh repo clone foo/bar"}}]}}

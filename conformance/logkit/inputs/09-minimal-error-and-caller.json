@@ -1,0 +1,16 @@
+{
+  "id": "09-minimal-error-and-caller",
+  "purpose": "The optional members of error and caller left out: an error with only a message, a caller with only a file and a line, and an empty stack array that must be omitted rather than emitted.",
+  "level_token": "error",
+  "timestamp": "2026-07-26T09:48:00.042Z",
+  "service": "navigator",
+  "message": "index shard unreadable",
+  "error": {
+    "message": "permission denied",
+    "stack": []
+  },
+  "caller": {
+    "file": "rust/frontmatter/src/parse.rs",
+    "line": 1
+  }
+}

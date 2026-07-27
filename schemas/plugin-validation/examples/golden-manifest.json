@@ -1,0 +1,77 @@
+{
+  "schema": "plugin-validation.capability-manifest@1.0.0",
+  "plugin": {
+    "name": "example-plugin",
+    "path": "marketplace-public/plugins/example-plugin",
+    "marketplace": "jr-claude-plugins",
+    "commit": "a1b2c3d4e5f6789012345678901234567890abcd",
+    "declared_version": "0.4.0"
+  },
+  "generated_at": "2026-07-27T00:00:00Z",
+  "generator": {
+    "tool": "hand-authored",
+    "version": "1.0.0"
+  },
+  "surfaces": [
+    {
+      "id": "example-plugin.hook.pretooluse-write-deny",
+      "type": "hook",
+      "name": "PreToolUse deny-write-outside-scope",
+      "trigger": "PreToolUse on Write|Edit, matcher \"Write|Edit\", if:\"Write(scope/*)\"",
+      "citation": {
+        "path": "marketplace-public/plugins/example-plugin/hooks/hooks.json",
+        "lines": [4, 12],
+        "excerpt": "{ \"event\": \"PreToolUse\", \"matcher\": \"Write|Edit\", \"if\": \"Write(scope/*)\" }"
+      },
+      "weak_spots": [
+        {
+          "id": "example-plugin.hook.pretooluse-write-deny.unanchored-glob",
+          "description": "The if-pattern scopes to scope/* but is not anchored, so a path containing scope/ as a substring outside the intended root can also match.",
+          "basis": "The cited if-pattern has no leading ^ or path-boundary anchor before scope/, and the matching engine documented for this event type evaluates unanchored by default.",
+          "citation": {
+            "path": "marketplace-public/plugins/example-plugin/hooks/hooks.json",
+            "lines": [8, 8]
+          },
+          "severity": "medium"
+        }
+      ],
+      "case_ids": [
+        "example-plugin.case.hook-fires-in-scope",
+        "example-plugin.case.hook-silent-out-of-scope"
+      ]
+    },
+    {
+      "id": "example-plugin.skill.rate-lookup",
+      "type": "skill",
+      "name": "rate-lookup",
+      "trigger": "Description-based: invoked when the user asks about current model pricing or rate cards.",
+      "citation": {
+        "path": "marketplace-public/plugins/example-plugin/skills/rate-lookup/SKILL.md",
+        "lines": [1, 6],
+        "excerpt": "description: Use when the user asks about current Claude model pricing or rate cards."
+      },
+      "case_ids": [
+        "example-plugin.case.skill-fires-on-pricing-ask"
+      ]
+    }
+  ],
+  "could_not_determine": [
+    {
+      "id": "example-plugin.gap.mcp-server-trigger",
+      "area": "The example-plugin.mcp.internal-lookup server's actual invocation condition",
+      "reason": "The server's tool-exposure list is generated at runtime from a remote config the checkout does not carry, so no static file states which prompts route to it.",
+      "attempted_citation": {
+        "path": "marketplace-public/plugins/example-plugin/.mcp.json",
+        "lines": [1, 9]
+      }
+    }
+  ],
+  "coverage": {
+    "manifest_case_ids": [
+      "example-plugin.case.hook-fires-in-scope",
+      "example-plugin.case.hook-silent-out-of-scope",
+      "example-plugin.case.skill-fires-on-pricing-ask"
+    ],
+    "executed_case_ids": []
+  }
+}

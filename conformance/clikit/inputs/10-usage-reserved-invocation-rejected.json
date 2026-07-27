@@ -1,0 +1,20 @@
+{
+  "id": "10-usage-reserved-invocation-rejected",
+  "purpose": "The library-reserved usage code for an invocation the command framework rejected before the command ran, with its context keys given out of order so they must sort. The record names no framework: cobra and clap must produce the same bytes here.",
+  "command": ["git-tools", "worktree", "create"],
+  "status": "usage",
+  "errors": [
+    {
+      "code": "usage.clikit.invocation_rejected",
+      "message": "--branch and --detach cannot be combined",
+      "triage": {
+        "kind": "reinvoke",
+        "command": ["git-tools", "worktree", "create", "--branch", "feat/x"]
+      },
+      "context": {
+        "flags": ["--branch", "--detach"],
+        "argv_index": 3
+      }
+    }
+  ]
+}

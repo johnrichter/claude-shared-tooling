@@ -1,0 +1,29 @@
+{
+  "id": "03-scalar-and-container-values",
+  "purpose": "Every JSON value kind a fields entry can hold: string, integer, float, boolean, explicit null, array, and a nested object whose own keys must sort at depth.",
+  "level_token": "debug",
+  "timestamp": "2026-07-26T09:41:07.612Z",
+  "service": "navigator",
+  "service_version": "0.4.2",
+  "message": "index segment written",
+  "fields": {
+    "documents": 1284,
+    "dry_run": false,
+    "duration_ms": 812.5,
+    "index_path": "var/index/navigator.bm25",
+    "previous_run": null,
+    "tags": [
+      "frontmatter",
+      "bm25"
+    ],
+    "window": {
+      "to": "2026-07-26",
+      "from": "2026-07-01"
+    }
+  },
+  "caller": {
+    "file": "rust/bm25/src/index.rs",
+    "line": 312,
+    "function": "OkapiIndex::rebuild"
+  }
+}

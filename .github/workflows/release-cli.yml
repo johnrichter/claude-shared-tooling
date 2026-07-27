@@ -1,0 +1,150 @@
+# Reusable SC-DISTRIBUTION release template — CLI track.
+#
+# A CLI releases as per-OS/arch archives + a checksums file, attached to the official platform
+# release; nothing is committed to git for this (dist-guard, tooling/dist-guard/, enforces
+# that). A plugin-side download-script fetches the pinned version and verifies the checksum
+# before ever running the binary.
+#
+# Build matrix mirrors this repo's own CI arch coverage (.github/workflows/ci.yml): the same
+# four Go GOOS/GOARCH cells. The archive/checksum/publish shape below is language-independent —
+# swap the build step for the module's actual toolchain if reused for a non-Go CLI.
+#
+# GitLab equivalent: the same four-cell `parallel:matrix` build job + a `release-cli create`
+# job attaching the same artifacts. No separate GitLab template exists in this repo; this file
+# is the GitHub Actions implementation of the SC-DISTRIBUTION CLI contract.
+
+name: SC-DISTRIBUTION release (CLI)
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Tag to cut, e.g. go/build-helpers/v1.2.3 (SC-VERSIONING: tag prefix == module path)."
+        required: true
+        type: string
+      module_dir:
+        description: "Directory the CLI builds from, relative to repo root (e.g. go/build-helpers)."
+        required: true
+        type: string
+      binary_name:
+        description: "Output binary name (e.g. build-helpers)."
+        required: true
+        type: string
+      dry_run:
+        description: "Build archives + checksums; skip the tag push and the platform release."
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      GH_TOKEN:
+        description: "Token with contents:write, for `gh release create`. Unused in dry-run."
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build-${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            goos: linux
+            goarch: amd64
+          - name: linux-arm64
+            goos: linux
+            goarch: arm64
+          - name: darwin-amd64
+            goos: darwin
+            goarch: amd64
+          - name: darwin-arm64
+            goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ inputs.module_dir }}/go.mod
+
+      # CGO_ENABLED=0 pinned explicitly: the host's ambient default can silently link a cgo
+      # runtime into a cross-compiled target. -buildvcs=false keeps the output reproducible
+      # (no stamped checkout revision/time/dirty state).
+      - name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+        working-directory: ${{ inputs.module_dir }}
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -buildvcs=false -ldflags='-s -w' -o "${{ inputs.binary_name }}" .
+
+      # Archive names must be flat: a release tag carries its module-path prefix
+      # (SC-VERSIONING, e.g. go/build-helpers/v1.2.3), so the filename uses the tag's
+      # leaf only — a slash in the name would send tar writing into a nonexistent dir.
+      # Inputs pass through env, never interpolated into the shell.
+      - name: Archive + checksum
+        working-directory: ${{ inputs.module_dir }}
+        env:
+          VERSION: ${{ inputs.version }}
+          BINARY: ${{ inputs.binary_name }}
+          CELL: ${{ matrix.name }}
+        run: |
+          ver="${VERSION##*/}"
+          archive="${BINARY}-${ver}-${CELL}.tar.gz"
+          tar -czf "$archive" "$BINARY"
+          sha256sum "$archive" > "$archive.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          path: |
+            ${{ inputs.module_dir }}/*.tar.gz
+            ${{ inputs.module_dir }}/*.sha256
+          if-no-files-found: error
+
+  publish:
+    name: tag-and-release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Combined checksums file
+        working-directory: dist
+        run: cat *.sha256 > SHA256SUMS
+
+      - name: Reject an existing tag (no overwrite)
+        run: |
+          if git rev-parse "${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "::error::tag ${{ inputs.version }} already exists - a release tag is never reused"
+            exit 1
+          fi
+
+      - name: Tag HEAD
+        if: ${{ !inputs.dry_run }}
+        run: |
+          git tag -a "${{ inputs.version }}" -m "${{ inputs.version }}"
+          git push origin "${{ inputs.version }}"
+
+      - name: Publish the official release (per-OS/arch archives + checksums)
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: gh release create "${{ inputs.version }}" --title "${{ inputs.version }}" --generate-notes dist/*.tar.gz dist/*.sha256 dist/SHA256SUMS
+
+      - name: Dry-run summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "dry-run: built archives + checksums for ${{ inputs.version }} across every OS/arch cell, publish skipped"
+          ls -la dist

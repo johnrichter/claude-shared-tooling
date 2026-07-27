@@ -1,0 +1,19 @@
+{
+  "id": "07-human-value-quoting",
+  "purpose": "Both sides of the human rendering's bare-or-quoted rule, and the JSON escaping that goes with it: whitespace, a quotation mark, an equals sign, a control character and an empty string force the quoted form; a backslash, a colon and HTML-significant characters do not.",
+  "level_token": "warn",
+  "timestamp": "2026-07-26T09:46:10.500Z",
+  "service": "resign-commits",
+  "message": "commit message carried unexpected characters",
+  "fields": {
+    "a_bare": "no-spaces/ok:1",
+    "b_space": "two words",
+    "c_equals": "key=value",
+    "d_quote": "say \"hi\"",
+    "e_backslash": "C:\\logs\\run",
+    "f_tab": "before\tafter",
+    "g_html": "a<b>&c",
+    "h_empty": "",
+    "i_trailing_space": "trailing "
+  }
+}

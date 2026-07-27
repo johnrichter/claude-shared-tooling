@@ -4,7 +4,9 @@ members = [
     "bm25",
     "frontmatter",
     "facetquery",
-    # M2.*: navigator symbol crate (tree-sitter-based) joins here as a fourth member.
+    "logkit",
+    "clikit",
+    # M2.*: navigator symbol crate (tree-sitter-based) joins here as a sixth member.
 ]
 
 # Shared lints enforced across every workspace member — each member's
@@ -17,3 +19,12 @@ missing_docs = "warn"
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
+
+# frontmatter depends on facetquery, and clikit depends on logkit, both by git
+# tag (SC-VERSIONING) — but every crate here lives in this one workspace and
+# releases together, so both git sources redirect to their in-tree member: a
+# local checkout builds against its own sibling crate, never a network fetch
+# of a tag that may not exist yet for the commit in hand.
+[patch."https://github.com/johnrichter/claude-shared-tooling.git"]
+facetquery = { path = "facetquery" }
+logkit = { path = "logkit" }

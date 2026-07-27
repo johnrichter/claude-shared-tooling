@@ -1,0 +1,2 @@
+{"session_id":"session-b","tool_name":"Bash","operation":"gh","outcome":"fired","denies_tool_exists":true}
+{"session_id":"session-b","tool_name":"Bash","operation":"gh","outcome":"failed_open","denies_tool_exists":false}

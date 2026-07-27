@@ -1,0 +1,23 @@
+{
+  "id": "12-permission-unicode-and-escapes",
+  "purpose": "Canonical JSON escapes only what JSON requires - a quotation mark and a backslash - and emits every other character as literal UTF-8, including one above the Basic Multilingual Plane. Exercised in a message, an instruction and a context value at once.",
+  "command": ["claude-tools", "fs", "write"],
+  "status": "permission",
+  "errors": [
+    {
+      "code": "permission.fs.write_denied",
+      "message": "write denied on '/w/notes/café \"draft\".md'",
+      "triage": {
+        "kind": "manual",
+        "instruction": "grant write access to '/w/notes/café \"draft\".md', or choose a path this user owns"
+      },
+      "context": {
+        "marker": "🚫 denied",
+        "mode": "0444",
+        "owner": "café-user",
+        "path": "/w/notes/café \"draft\".md",
+        "pattern": "^\\w+$"
+      }
+    }
+  ]
+}

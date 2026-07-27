@@ -1,0 +1,29 @@
+{
+  "operations": [
+    {
+      "name": "list-open-prs",
+      "cli": {
+        "invocation_prefix": "widget-cli pr list",
+        "bin_name": "widget-cli",
+        "bin_env": "WIDGET_CLI_BIN",
+        "usage_hint": "widget-cli pr list [--state open]"
+      },
+      "raw": {
+        "tool_name": "Bash",
+        "command_prefixes": ["gh pr list"]
+      }
+    },
+    {
+      "name": "read-service-manifest",
+      "cli": {
+        "invocation_prefix": "widget-cli manifest show",
+        "bin_name": "widget-cli",
+        "bin_env": "WIDGET_CLI_BIN",
+        "usage_hint": "widget-cli manifest show <service>"
+      },
+      "raw": {
+        "tool_name": "Read"
+      }
+    }
+  ]
+}

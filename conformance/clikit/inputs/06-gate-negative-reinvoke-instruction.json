@@ -1,0 +1,24 @@
+{
+  "id": "06-gate-negative-reinvoke-instruction",
+  "purpose": "An expected negative: the gate ran, the answer is no, and the record carries the finding in errors like any failure class - the class, not the presence of the array, is what says the tool itself did not fail. The directive is a reinvoke with both a command and an instruction.",
+  "command": ["git-tools", "worktree", "gate"],
+  "status": "gate_negative",
+  "data": {
+    "allowed": false,
+    "task_worktree": "/w/task/M2.P4.T4"
+  },
+  "errors": [
+    {
+      "code": "gate_negative.worktree.write_outside_worktree",
+      "message": "the write target is outside the task worktree",
+      "triage": {
+        "kind": "reinvoke",
+        "command": ["git-tools", "worktree", "gate", "--path", "/w/task/M2.P4.T4/README.md"],
+        "instruction": "write to the task worktree instead of the primary checkout"
+      },
+      "context": {
+        "path": "/w/main/README.md"
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "id": "08-not-found-two-segment-code",
+  "purpose": "A diagnostic code at the minimum two segments - the class and one condition - and a bare reinvoke: a command with no instruction, because the message already says what the reinvocation will show.",
+  "command": ["git-tools", "worktree", "remove"],
+  "status": "not_found",
+  "errors": [
+    {
+      "code": "not_found.worktree",
+      "message": "no worktree named 'feat/y'",
+      "triage": {
+        "kind": "reinvoke",
+        "command": ["git-tools", "worktree", "list"]
+      },
+      "context": {
+        "name": "feat/y"
+      }
+    }
+  ]
+}

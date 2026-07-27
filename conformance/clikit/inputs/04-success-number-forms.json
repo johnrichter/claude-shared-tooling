@@ -1,0 +1,15 @@
+{
+  "id": "04-success-number-forms",
+  "purpose": "Number rendering, where the canonical form is interesting: an integral float collapses to an integer, a fractional value keeps its shortest round-trip form, and a magnitude large enough to need an exponent gets one. Magnitudes stay at or below the exact-integer limit of a double and at or above 1, the range where the canonical form is unambiguous.",
+  "command": ["bm25", "params", "show"],
+  "status": "success",
+  "data": {
+    "exact_integer_limit": 9007199254740992,
+    "exponent_magnitude": 1e21,
+    "integral_float": 1.0,
+    "negative": -42,
+    "repeating": 0.30000000000000004,
+    "scale": 812.5,
+    "zero": 0
+  }
+}

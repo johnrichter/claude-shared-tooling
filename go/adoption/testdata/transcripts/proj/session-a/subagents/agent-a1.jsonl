@@ -1,0 +1,2 @@
+{"type":"assistant","sessionId":"session-a","isSidechain":true,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"git-tools commit --amend"}}]}}
+{"type":"assistant","sessionId":"session-a","isSidechain":true,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"git-tools push"}}]}}

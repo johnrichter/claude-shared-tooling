@@ -1,0 +1,3 @@
+{"session_id":"session-a","tool_name":"Bash","operation":"git","outcome":"fired","denies_tool_exists":false}
+{"session_id":"session-a","tool_name":"Bash","operation":"git","outcome":"failed_open","denies_tool_exists":false}
+{"session_id":"session-b","tool_name":"Bash","operation":"gh","outcome":"not_applicable","denies_tool_exists":false}

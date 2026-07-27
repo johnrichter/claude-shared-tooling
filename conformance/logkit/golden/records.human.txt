@@ -1,0 +1,14 @@
+2026-07-26T09:41:07.480Z INFO  navigator index rebuilt
+2026-07-26T09:44:12.007Z ERROR git-tools worktree create refused caller=bh/worktree.go:88 caller_function=Create error="fatal: 'feat/x' is already checked out at '/w/a'" error_kind=git.ExitError branch=feat/x exit_code=128 service_version=1.4.0
+  git/worktree:88 Create
+  git/cmd:41 run
+2026-07-26T09:41:07.612Z DEBUG navigator index segment written caller=rust/bm25/src/index.rs:312 caller_function=OkapiIndex::rebuild documents=1284 dry_run=false duration_ms=812.5 index_path=var/index/navigator.bm25 previous_run=null tags=["frontmatter","bm25"] window={"from":"2026-07-01","to":"2026-07-26"} service_version=0.4.2
+2026-07-26T09:44:30.999Z WARN  sitemap-parser sitemap window filtered every url
+2026-07-26T09:45:00.000Z FATAL anoikis-tools state store unreadable error="unexpected end of JSON input" error_kind=*json.SyntaxError native_level=PANIC path=.anoikis/state.json
+2026-07-26T09:45:01.250Z DEBUG article-meta candidate metadata block rejected block=json-ld native_level=trace native_reason="no published date" zone=head
+2026-07-26T09:46:10.500Z WARN  resign-commits commit message carried unexpected characters a_bare=no-spaces/ok:1 b_space="two words" c_equals="key=value" d_quote="say \"hi\"" e_backslash=C:\logs\run f_tab="before\tafter" g_html=a<b>&c h_empty="" i_trailing_space="trailing "
+2026-07-26T09:47:00.001Z INFO  navigator frontmatter tag vocabulary loaded a_ascii=plain café=naïve rocket="🚀 shipped" Übersicht="zwei wörter" 日本={"あ":1,"ア":2}
+2026-07-26T09:48:00.042Z ERROR navigator index shard unreadable caller=rust/frontmatter/src/parse.rs:1 error="permission denied"
+2026-07-26T09:49:00.000Z DEBUG navigator facet query parsed 0_first=0 A=1 Z=4 _leading=3 aa=2 zz=5
+2026-07-26T09:50:00.000Z INFO  bm25 scoring parameters resolved exact_integer_limit=9007199254740992 exponent_magnitude=1e+21 integral_float=1 negative=-42 repeating=0.30000000000000004 scale=812.5 zero=0
+2026-07-26T09:51:59.999Z FATAL clikit configuration root is not writable root=/var/lib/clikit service_version=0.1.0-dev
