@@ -555,6 +555,26 @@
         "marketplace/plugins/governance-git/hooks/write-locus-gate.sh"
       ],
       "doc_path": "marketplace/plugins/governance-git/governance-git.md"
+    },
+    {
+      "id": "anoikis-tools.policy.roster-routing-fires-for-request-class",
+      "statement": "A dispatch aimed at one of the injected roster's declared request classes is routed to the brief whose description/triggers name that class, at or above a per-model floor.",
+      "rung": 4,
+      "fail_direction": "open",
+      "blast_radius": "Below-floor routing misdispatches one request to the wrong roster role; the driver observes a mismatched return shape or an out-of-scope action and re-dispatches, which is recoverable. Denying a dispatch on an unmeasured routing rate would block every legitimate build on a floor nobody has calibrated yet, which is the fail-closed default turned against work that has not failed.",
+      "owner": "anoikis-tools",
+      "status": "planned",
+      "reason_lower_rung": "Whether a routing description fires for its request class is a rate over a model's dispatch behavior, not a property any single tool call or diff carries; no PreToolUse gate or CI check can decide it, which is the class the advisory tier exists for.",
+      "references": [
+        "anoikis-tools/policy/agents"
+      ],
+      "compliance_floors": {
+        "claude-opus-5": null,
+        "claude-sonnet-5": null,
+        "claude-haiku-4-5": null
+      },
+      "measurement_status": "declared-unmeasured",
+      "register_entry_id": "rp-anoikis-roster-routing-rate"
     }
   ]
 }
