@@ -1,0 +1,3 @@
+{"session_id":"session-a","tool_name":"Bash","operation":"status","outcome":"fired","denies_tool_exists":false}
+{"session_id":"session-a","tool_name":"Read","operation":"config","outcome":"failed_open","denies_tool_exists":false}
+{"session_id":"session-a","tool_name":"Bash","operation":"status","outcome":"not_applicable","denies_tool_exists":false}

@@ -1,0 +1,29 @@
+{
+  "operations": [
+    {
+      "name": "status",
+      "cli": {
+        "invocation_prefix": "example-cli status",
+        "bin_name": "example-cli",
+        "bin_env": "EXAMPLE_CLI_BIN",
+        "usage_hint": "example-cli status [--json|--short|--branch]"
+      },
+      "raw": {
+        "tool_name": "Bash",
+        "command_prefixes": ["git status"]
+      }
+    },
+    {
+      "name": "config",
+      "cli": {
+        "invocation_prefix": "example-cli config get",
+        "bin_name": "example-cli",
+        "bin_env": "EXAMPLE_CLI_BIN",
+        "usage_hint": "example-cli config get [key]"
+      },
+      "raw": {
+        "tool_name": "Read"
+      }
+    }
+  ]
+}
