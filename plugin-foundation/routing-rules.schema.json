@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/johnrichter/claude-shared-tooling/plugin-foundation/routing-rules.schema.json",
+  "title": "Plugin-foundation routing rules",
+  "description": "One govern-now CLI plugin's routing-rules.json: the ordered list of operations it forces Claude toward its CLI for. Read by two independent consumers that must never disagree: BuildRegistry (Go) turns it into the adoption library's registry for CI-time adoption measurement, and forced-use-hook.sh applies the identical CLI-before-raw precedence live, in-session. Authoring one file instead of two keeps the live decision and the measured decision from drifting apart.",
+  "type": "object",
+  "required": ["operations"],
+  "additionalProperties": false,
+  "properties": {
+    "operations": {
+      "type": "array",
+      "description": "Governed operations in match precedence order: for a given invocation, the first operation whose CLI or raw route matches wins. Two operations should not declare overlapping raw or CLI patterns; nothing enforces that today beyond order.",
+      "items": { "$ref": "#/$defs/operation" }
+    }
+  },
+  "$defs": {
+    "operation": {
+      "type": "object",
+      "required": ["name", "cli", "raw"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Operation identifier, carried through to every adoption.Classification and adoption.CLIAdoption this operation produces. Unique within the document."
+        },
+        "cli": { "$ref": "#/$defs/cliRoute" },
+        "raw": { "$ref": "#/$defs/rawRoute" }
+      }
+    },
+    "cliRoute": {
+      "type": "object",
+      "required": ["invocation_prefix", "bin_name", "usage_hint"],
+      "additionalProperties": false,
+      "properties": {
+        "invocation_prefix": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Bash command prefix that marks an invocation as using this operation's CLI: the command equals this string, or starts with it followed by a space. Never a glob or regex."
+        },
+        "bin_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Governed CLI's executable name. forced-use-hook.sh falls back to `command -v` on this name when bin_env is unset or does not resolve to an executable file."
+        },
+        "bin_env": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Environment variable download-script.sh exports the verified, checksummed binary's absolute path under. Omit when the operation has no such variable — forced-use-hook.sh then relies on bin_name alone."
+        },
+        "usage_hint": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact invocation forced-use-hook.sh's deny-and-redirect message names."
+        }
+      }
+    },
+    "rawRoute": {
+      "type": "object",
+      "required": ["tool_name"],
+      "additionalProperties": false,
+      "properties": {
+        "tool_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Claude Code tool name a raw invocation used (e.g. \"Bash\", \"Read\")."
+        },
+        "command_prefixes": {
+          "type": "array",
+          "description": "When tool_name is \"Bash\", the command prefixes (same matching rule as cli.invocation_prefix) that count as a raw invocation of this operation. Omit or leave empty to match every Bash invocation regardless of command text — the only sensible shape for a non-Bash raw route.",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

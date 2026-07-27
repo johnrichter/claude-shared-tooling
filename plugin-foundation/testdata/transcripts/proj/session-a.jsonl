@@ -1,0 +1,12 @@
+{"type":"user","sessionId":"session-a","isSidechain":false,"message":{"role":"user","content":[{"type":"text","text":"check the current status and confirm the timeout config"}]}}
+{"type":"assistant","sessionId":"session-a","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"example-cli status"}}]}}
+{"type":"assistant","sessionId":"session-a","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"example-cli status --json"}}]}}
+{"type":"assistant","sessionId":"session-a","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"example-cli status --short"}}]}}
+{"type":"assistant","sessionId":"session-a","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"example-cli status --branch"}}]}}
+{"type":"assistant","sessionId":"session-a","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"git status --short"}}]}}
+{"type":"assistant","sessionId":"session-a","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"example-cli config get timeout"}}]}}
+{"type":"assistant","sessionId":"session-a","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"example-cli config get retries"}}]}}
+{"type":"assistant","sessionId":"session-a","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"example-cli config get"}}]}}
+{"type":"assistant","sessionId":"session-a","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"example-cli config get --all"}}]}}
+{"type":"assistant","sessionId":"session-a","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"/etc/example/config.yaml"}}]}}
+{"type":"assistant","sessionId":"session-a","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Grep","input":{"pattern":"TODO"}}]}}
