@@ -1,0 +1,5 @@
+{
+  "name": "valid-plugin",
+  "version": "0.1.0",
+  "description": "Frozen fixture for plugin-conform's own sanity test -- not a real plugin."
+}
