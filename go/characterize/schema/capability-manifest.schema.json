@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/johnrichter/claude-tooling/schemas/plugin-validation/capability-manifest.schema.json",
+  "title": "Plugin capability manifest",
+  "version": "1.0.0",
+  "description": "The output of plugin-validation's Phase-1 (deep characterization): one document per characterized plugin. INPUTS: an agent-driven read of that plugin's actual files. OUTPUTS, each read by a named downstream consumer: `surfaces` (every contributed surface plus its declared trigger, cited to a real file) feeds Phase 2 (deterministic conform) and Phase 3 (behavioral) case derivation; `could_not_determine` names what the read could not establish, so a downstream tier treats it as an open gap rather than a silent pass; `coverage.manifest_case_ids` is the manifest side of `coverage = manifest - executed` (set difference), the executed side (`coverage.executed_case_ids`) being written back by the tier(s) that ran cases against this manifest. INVARIANTS: (1) Every surface entry carries a `citation` into the plugin's own files - a surface asserted with no citation is not characterization, it is a guess. (2) A could-not-determine gap is first-class: an aspect the read could not establish is named here, never omitted and never asserted as a surface anyway. (3) A weak spot is analytically derived: its `basis` states the reasoning that produced it, not just the conclusion. (4) `coverage.manifest_case_ids` and `coverage.executed_case_ids` are disjoint tracking sets belonging to one document so a downstream consumer can compute the set difference without a second document; neither field is itself the computed coverage. (5) A missing or unreadable manifest is a packaging defect for its consumer, never a signal that the plugin has no surfaces.",
+  "type": "object",
+  "required": [
+    "schema",
+    "plugin",
+    "generated_at",
+    "surfaces",
+    "could_not_determine",
+    "coverage"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "description": "This manifest schema's version, pinned so a consumer can refuse a document from a schema it does not yet support.",
+      "const": "plugin-validation.capability-manifest@1.0.0"
+    },
+    "plugin": {
+      "$ref": "#/$defs/pluginIdentity"
+    },
+    "generated_at": {
+      "description": "When this manifest was produced, RFC 3339.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "generator": {
+      "description": "What produced this manifest. Optional: a manifest hand-authored for a fixture or golden example carries no generator.",
+      "$ref": "#/$defs/generator"
+    },
+    "surfaces": {
+      "description": "Every surface the plugin contributes, one entry per surface. An empty array is a claim (this plugin contributes nothing), not the absence of characterization - a plugin with unexamined surfaces reports them in `could_not_determine` instead.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/surface"
+      }
+    },
+    "could_not_determine": {
+      "description": "Every aspect the characterization read could not establish - about a candidate surface, a trigger, or a weak spot. Required and explicit: absence of an entry here is a claim that nothing was left undetermined, never the default silence.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/gap"
+      }
+    },
+    "coverage": {
+      "$ref": "#/$defs/coverage"
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$",
+      "description": "Dotted lowercase id, stable within one manifest document."
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*(/[^\\s]+)+$",
+      "description": "Repo-qualified path from the platform root - the first segment names the checkout it resolves in (e.g. `marketplace/plugins/...`). A checkout-relative path would resolve differently for each reader."
+    },
+    "pluginIdentity": {
+      "type": "object",
+      "description": "The plugin this manifest characterizes.",
+      "required": [
+        "name",
+        "path"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The plugin's declared name (its `.claude-plugin/plugin.json` `name` field)."
+        },
+        "path": {
+          "$ref": "#/$defs/path",
+          "description": "Repo-qualified path to the plugin's root directory. Every `citation.path` in this document must resolve inside this path."
+        },
+        "marketplace": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The marketplace catalog this plugin is registered in, if any."
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$",
+          "description": "The plugin repo commit this manifest was read against, when known."
+        },
+        "declared_version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The plugin's own `plugin.json` `version` at the cited commit, when known."
+        }
+      }
+    },
+    "generator": {
+      "type": "object",
+      "required": [
+        "tool"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "tool": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The characterization engine or author that produced this manifest, e.g. `anthropic-tools/validate-characterize` or `hand-authored`."
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Pinned model ID that ran the characterizing read, when the generator is agent-driven."
+        }
+      }
+    },
+    "citation": {
+      "type": "object",
+      "description": "The evidence for a claim: a real file inside the characterized plugin. Every surface and every weak spot carries one; a gap carries the citation of where the read looked, if it looked anywhere, under `attempted_citation`.",
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/path",
+          "description": "Repo-qualified path to the plugin file backing this claim."
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "[start, end], 1-indexed, inclusive. Omitted when the claim is about the whole file (e.g. an entire SKILL.md is the skill's trigger description)."
+        },
+        "excerpt": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A short verbatim quote from the cited lines, when quoting the exact text materially supports the claim (e.g. a hook `matcher` or a skill's trigger phrase)."
+        }
+      }
+    },
+    "surface": {
+      "type": "object",
+      "description": "One capability the plugin contributes: what it is, what invokes it, and the file that proves both.",
+      "required": [
+        "id",
+        "type",
+        "trigger",
+        "citation"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "type": {
+          "description": "The kind of surface, per Claude Code's plugin component model.",
+          "enum": [
+            "command",
+            "agent",
+            "skill",
+            "hook",
+            "mcp-server",
+            "statusline",
+            "output-style",
+            "other"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The surface's own declared name (a command name, a skill name, a hook event, an agent id). Required in practice for every type except `other`; left absent only when the plugin's own file gives the surface no name to cite."
+        },
+        "trigger": {
+          "type": "string",
+          "minLength": 10,
+          "description": "What invokes this surface, stated as the declared condition: a hook's event plus matcher, a skill's description-based trigger class, a command's invocation name, an agent's routing description. Read from the plugin's own files, never inferred from the surface's name alone."
+        },
+        "citation": {
+          "$ref": "#/$defs/citation"
+        },
+        "weak_spots": {
+          "description": "Analytically-derived concerns about this surface: where its trigger is ambiguous, narrower or wider than intended, unreachable, or otherwise likely to misfire - derived from reading the surface, never from running it (that is Phase 2/3's job).",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/weakSpot"
+          }
+        },
+        "case_ids": {
+          "description": "Ids of the validation cases downstream tiers derive from this surface. Empty at manifest-authoring time before case derivation runs; each id, once minted, is also carried in `coverage.manifest_case_ids`.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/identifier"
+          },
+          "uniqueItems": true
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "weakSpot": {
+      "type": "object",
+      "description": "A concern derived from reading a surface, not from observing it run.",
+      "required": [
+        "id",
+        "description",
+        "basis",
+        "citation"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 10,
+          "description": "What could go wrong, stated as the concrete failure mode (e.g. \"matcher regex is unanchored and over-broad\"), not just \"trigger is unclear\"."
+        },
+        "basis": {
+          "type": "string",
+          "minLength": 10,
+          "description": "The analytical reasoning that produced this finding - what in the cited text supports it. A conclusion with no basis is an assertion, not analysis."
+        },
+        "citation": {
+          "$ref": "#/$defs/citation"
+        },
+        "severity": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    "gap": {
+      "type": "object",
+      "description": "An aspect the characterizing read could not establish. First-class: named here rather than folded into a surface as a guess, or silently dropped.",
+      "required": [
+        "id",
+        "area",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "area": {
+          "type": "string",
+          "minLength": 5,
+          "description": "What the gap is about: a candidate surface, a specific surface's real trigger condition, or a suspected weak spot - named concretely enough that a later tier knows what to re-examine."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 10,
+          "description": "Why a static read could not settle it, e.g. runtime-dependent behavior, an ambiguous matcher pattern with no static resolution, or a referenced file absent from the checkout. Never \"unclear\" alone."
+        },
+        "attempted_citation": {
+          "description": "Where the read looked before concluding it could not determine the answer, when it looked anywhere.",
+          "$ref": "#/$defs/citation"
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "description": "The two case-id sets whose difference is coverage. `coverage = manifest_case_ids - executed_case_ids` (set difference) is computed by whichever downstream consumer needs it; this document stores both sides, never the computed result.",
+      "required": [
+        "manifest_case_ids",
+        "executed_case_ids"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "manifest_case_ids": {
+          "description": "Every case id named in any surface's `case_ids`, at the time this manifest was last written. The manifest side of the coverage difference.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/identifier"
+          },
+          "uniqueItems": true
+        },
+        "executed_case_ids": {
+          "description": "Case ids a downstream tier (deterministic conform or behavioral) has reported as executed against this manifest. Empty at manifest-generation time; written back as later phases run. Every id here is expected to also appear in `manifest_case_ids` - an executed id absent from the manifest side names a case that outran its own manifest entry.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/identifier"
+          },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}
