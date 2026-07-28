@@ -1,0 +1,43 @@
+{
+  "operations": [
+    {
+      "name": "status",
+      "cli": {
+        "invocation_prefix": "example-cli status",
+        "bin_name": "example-cli",
+        "bin_env": "EXAMPLE_CLI_BIN",
+        "usage_hint": "example-cli status [--json|--short|--branch]"
+      },
+      "raw": {
+        "tool_name": "Bash",
+        "command_prefixes": ["git status"]
+      }
+    },
+    {
+      "name": "log",
+      "cli": {
+        "invocation_prefix": "example-cli log",
+        "bin_name": "example-cli",
+        "bin_env": "EXAMPLE_CLI_BIN",
+        "usage_hint": "example-cli log [--oneline]"
+      },
+      "raw": {
+        "tool_name": "Bash",
+        "command_prefixes": ["git log"]
+      }
+    },
+    {
+      "name": "diff",
+      "cli": {
+        "invocation_prefix": "example-cli diff",
+        "bin_name": "example-cli",
+        "bin_env": "EXAMPLE_CLI_BIN",
+        "usage_hint": "example-cli diff [--stat]"
+      },
+      "raw": {
+        "tool_name": "Bash",
+        "command_prefixes": ["git diff"]
+      }
+    }
+  ]
+}

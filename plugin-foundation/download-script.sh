@@ -5,19 +5,19 @@
 # dir, and release host.
 #
 # Ladder: (1) a cached binary for the pinned version that still matches its
-# own recorded sha256 -- no network; (2) download the per-arch artifact +
-# its .sha256 sidecar from the release host, verify, cache. Anything short
-# of a verified binary is a soft failure (no crash): the caller (typically
-# forced-use-hook.sh, indirectly, via CLI-availability probing) treats an
-# unresolved binary the same as a CLI that was never installed and fails
-# open to the raw OS tool.
+# own recorded sha256 -- no network; (2) download the per-arch archive, verify
+# it against the release's checksums, extract the binary, cache it and its
+# own digest. Anything short of a verified binary is a soft failure (no
+# crash): the caller (typically forced-use-hook.sh, indirectly, via
+# CLI-availability probing) treats an unresolved binary the same as a CLI
+# that was never installed and fails open to the raw OS tool.
 #
 # Inputs (env):
 #   PF_CLI_NAME          required -- the governed CLI's name. Used to build
-#                        the cached binary's filename and the artifact URL,
-#                        and (unless PF_BIN_ENV overrides it) the exported
-#                        env var name: PF_CLI_NAME with '-' -> '_', upper-
-#                        cased, suffixed "_BIN".
+#                        the cached binary's filename and the archive's
+#                        filename, and (unless PF_BIN_ENV overrides it) the
+#                        exported env var name: PF_CLI_NAME with '-' -> '_',
+#                        uppercased, suffixed "_BIN".
 #   PF_PLUGIN_DATA       required -- persistent per-plugin data directory
 #                        (Claude Code's CLAUDE_PLUGIN_DATA). The version-
 #                        keyed binary cache lives at "$PF_PLUGIN_DATA/bin".
@@ -33,19 +33,28 @@
 #   PF_ENV_FILE          file to append `export $PF_BIN_ENV=...` to
 #                        (Claude Code's CLAUDE_ENV_FILE). Unset: skip export,
 #                        the resolved path still prints to stdout.
-#   PF_ARCH_OVERRIDE     test-only: skip uname resolution, use this arch id.
+#   PF_ARCH_OVERRIDE     test-only: skip uname resolution, use this "os/arch"
+#                        pair verbatim (e.g. "linux/amd64").
 #
 # Release layout expected under PF_RELEASE_BASE_URL:
-#   <name>-v<version>/<name>-<version>-<arch>          the binary artifact
-#   <name>-v<version>/<name>-<version>-<arch>.sha256    its sha256 (accepts
-#                                                        either a bare hex
-#                                                        digest or a
-#                                                        `sha256sum`-style
-#                                                        "<hash>  <name>" line)
+#   v<version>/<name>_<version>_<os>_<arch>.tar.gz   the archive, containing
+#                                                     exactly one file: the
+#                                                     binary.
+#   v<version>/checksums.txt                         one shared digest list
+#                                                     for every archive in the
+#                                                     tag, "<sha256>  <archive
+#                                                     filename>" per line.
+#   v<version>/<archive filename>.sha256              per-artifact fallback,
+#                                                      only when a repo still
+#                                                      publishes one; used
+#                                                      when checksums.txt is
+#                                                      unreachable or lacks
+#                                                      this archive.
 #
 # Outputs:
 #   "$PF_PLUGIN_DATA/bin/<name>-<version>"          the verified binary
-#   "$PF_PLUGIN_DATA/bin/<name>-<version>.sha256"   its verified digest
+#   "$PF_PLUGIN_DATA/bin/<name>-<version>.sha256"   its own digest, recorded
+#                                                    for the cache fast path
 #   stdout: the verified binary's absolute path (success only)
 #   $PF_ENV_FILE: `export $PF_BIN_ENV=<path>` (success only, when set)
 #
@@ -84,7 +93,17 @@ sha256_sidecar_value() {
   awk '{print $1; exit}' "$1" 2>/dev/null
 }
 
-resolve_arch() {
+# checksum_for_artifact CHECKSUMS_FILE ARCHIVE_NAME -- prints the digest
+# CHECKSUMS_FILE records for ARCHIVE_NAME (one "<sha256>  <filename>" line
+# per archive the tag ships), or nothing if that filename isn't listed.
+checksum_for_artifact() {
+  awk -v f="$2" '$2 == f { print $1; exit }' "$1" 2>/dev/null
+}
+
+# resolve_os_arch -- prints "<os>/<arch>" using Go's GOOS/GOARCH vocabulary
+# (this ecosystem's build matrices, and so its release archive names, are
+# keyed on it), from PF_ARCH_OVERRIDE verbatim or from uname otherwise.
+resolve_os_arch() {
   if [ -n "${PF_ARCH_OVERRIDE:-}" ]; then
     echo "${PF_ARCH_OVERRIDE}"
     return
@@ -93,21 +112,21 @@ resolve_arch() {
   machine="$(uname -m)"
   case "${kernel}" in
   Linux) os="linux" ;;
-  Darwin) os="macos" ;;
+  Darwin) os="darwin" ;;
   *)
     warn "unsupported kernel '${kernel}'"
     return 1
     ;;
   esac
   case "${machine}" in
-  x86_64 | amd64) arch="x86_64" ;;
-  arm64 | aarch64) arch="aarch64" ;;
+  x86_64 | amd64) arch="amd64" ;;
+  arm64 | aarch64) arch="arm64" ;;
   *)
     warn "unsupported machine type '${machine}'"
     return 1
     ;;
   esac
-  echo "${os}-${arch}"
+  echo "${os}/${arch}"
 }
 
 # read_version -- prints the pinned version: PF_VERSION verbatim, or the
@@ -173,13 +192,13 @@ fi
 
 bin_dir="${PF_PLUGIN_DATA}/bin"
 bin_path="${bin_dir}/${PF_CLI_NAME}-${version}"
-sha_sidecar="${bin_path}.sha256"
+bin_sidecar="${bin_path}.sha256"
 verified=0
 
 # Idempotent cache fast path: bytes already on disk that still match their
 # own recorded digest need no network round trip at all.
-if [ -f "${bin_path}" ] && [ -f "${sha_sidecar}" ]; then
-  recorded="$(sha256_sidecar_value "${sha_sidecar}" || true)"
+if [ -f "${bin_path}" ] && [ -f "${bin_sidecar}" ]; then
+  recorded="$(sha256_sidecar_value "${bin_sidecar}" || true)"
   actual="$(sha256_of "${bin_path}" 2>/dev/null || true)"
   if [ -n "${recorded}" ] && [ "${recorded}" = "${actual}" ]; then
     verified=1
@@ -189,33 +208,56 @@ if [ -f "${bin_path}" ] && [ -f "${sha_sidecar}" ]; then
 fi
 
 if [ "${verified}" -eq 0 ]; then
-  arch="$(resolve_arch || true)"
-  if [ -z "${arch}" ]; then
+  os_arch="$(resolve_os_arch || true)"
+  if [ -z "${os_arch}" ]; then
     exit 1
   fi
+  os="${os_arch%%/*}"
+  arch="${os_arch#*/}"
 
-  artifact_url="${PF_RELEASE_BASE_URL}/${PF_CLI_NAME}-v${version}/${PF_CLI_NAME}-${version}-${arch}"
-  sha_url="${artifact_url}.sha256"
+  tag_dir="v${version}"
+  archive_name="${PF_CLI_NAME}_${version}_${os}_${arch}.tar.gz"
+  release_dir_url="${PF_RELEASE_BASE_URL}/${tag_dir}"
+  archive_url="${release_dir_url}/${archive_name}"
 
   mkdir -p "${bin_dir}"
-  sha_tmp="$(mktemp "${bin_dir}/.sha256.XXXXXX")"
-  artifact_tmp="$(mktemp "${bin_dir}/.download.XXXXXX")"
+  checksums_tmp="$(mktemp "${bin_dir}/.checksums.XXXXXX")"
+  sidecar_tmp="$(mktemp "${bin_dir}/.sha256.XXXXXX")"
+  archive_tmp="$(mktemp "${bin_dir}/.download.XXXXXX")"
 
-  if fetch "${sha_url}" "${sha_tmp}" && fetch "${artifact_url}" "${artifact_tmp}"; then
-    expected="$(sha256_sidecar_value "${sha_tmp}" || true)"
-    actual="$(sha256_of "${artifact_tmp}" 2>/dev/null || true)"
-    if [ -n "${expected}" ] && [ "${expected}" = "${actual}" ]; then
-      chmod +x "${artifact_tmp}"
-      mv "${artifact_tmp}" "${bin_path}"
-      echo "${actual}" >"${sha_sidecar}"
-      verified=1
+  expected=""
+  if fetch "${release_dir_url}/checksums.txt" "${checksums_tmp}" 2>/dev/null; then
+    expected="$(checksum_for_artifact "${checksums_tmp}" "${archive_name}" || true)"
+  fi
+  if [ -z "${expected}" ] && fetch "${archive_url}.sha256" "${sidecar_tmp}" 2>/dev/null; then
+    expected="$(sha256_sidecar_value "${sidecar_tmp}" || true)"
+  fi
+
+  if [ -n "${expected}" ] && fetch "${archive_url}" "${archive_tmp}"; then
+    actual="$(sha256_of "${archive_tmp}" 2>/dev/null || true)"
+    if [ -n "${actual}" ] && [ "${expected}" = "${actual}" ]; then
+      extract_dir="$(mktemp -d "${bin_dir}/.extract.XXXXXX")"
+      if tar -xzf "${archive_tmp}" -C "${extract_dir}" 2>/dev/null; then
+        entry="$(find "${extract_dir}" -type f | head -n1)"
+        if [ -n "${entry}" ]; then
+          chmod +x "${entry}"
+          mv "${entry}" "${bin_path}"
+          sha256_of "${bin_path}" >"${bin_sidecar}"
+          verified=1
+        else
+          warn "archive ${archive_name} contained no extractable file"
+        fi
+      else
+        warn "failed to extract archive ${archive_name}"
+      fi
+      rm -rf "${extract_dir}"
     else
-      warn "sha256 mismatch for ${PF_CLI_NAME}-${version}-${arch} -- expected ${expected:-<none>}, got ${actual:-<none>}"
+      warn "sha256 mismatch for ${archive_name} -- expected ${expected:-<none>}, got ${actual:-<none>}"
     fi
   else
-    warn "failed to fetch ${artifact_url} (or its .sha256 sidecar)"
+    warn "failed to fetch ${archive_url} (or resolve its expected digest from checksums.txt/sidecar)"
   fi
-  rm -f "${sha_tmp}" "${artifact_tmp}"
+  rm -f "${checksums_tmp}" "${sidecar_tmp}" "${archive_tmp}"
 fi
 
 if [ "${verified}" -ne 1 ]; then
