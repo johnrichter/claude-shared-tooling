@@ -53,6 +53,15 @@ name, and command prefix comes from that plugin's own `routing-rules.json`. This
 foundation reused rather than copied: the same `download-script.sh` and `forced-use-hook.sh` files,
 byte-identical, install into every govern-now CLI's plugin.
 
+## Recording provenance so a fork can't silently reappear
+
+A vendored copy that quietly drifts from this canonical source is a fork, whether or not anyone
+meant it as one. Each consuming plugin records the sha256 of the two files it copied from here and
+owns a test asserting its vendored copies still match that digest — so a hand-edit, a stale copy,
+or a merge that reintroduces old bytes fails that plugin's own CI instead of surfacing later as a
+mismatched routing decision. Re-sync from this directory and update the recorded digest together
+whenever either script changes here.
+
 ## Files
 
 - `routing-rules.schema.json` — JSON Schema for `routing-rules.json`.
