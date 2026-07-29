@@ -1,0 +1,2 @@
+3d4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d  example-cli_1.0.0_darwin_arm64.tar.gz
+fe921a0c422d84dbf98f9443d6eeee146e2926eb99709fcbe900d398ddfaa719  example-cli_1.0.0_linux_amd64.tar.gz

@@ -9,6 +9,7 @@ set -euo pipefail
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly HOOK="${SCRIPT_DIR}/forced-use-hook.sh"
 readonly ROUTING_RULES="${SCRIPT_DIR}/testdata/routing-rules.json"
+readonly ROUTING_RULES_MULTI_BASH="${SCRIPT_DIR}/testdata/routing-rules-multi-bash.json"
 
 TESTS_RUN=0
 TESTS_FAILED=0
@@ -123,6 +124,24 @@ if [[ -z "${out6}" && ! -s "${log_file}" ]]; then
   pass "missing_routing_rules_is_silent_no_op"
 else
   fail "missing_routing_rules_is_silent_no_op (out='${out6}', log: $(cat "${log_file}"))"
+fi
+
+# Test 7: a rules file with two or more Bash operations whose command_prefixes
+# all fail to match the payload terminates within a bounded timeout and emits
+# no decision -- every non-matching op is logged not_applicable, in order.
+: >"${log_file}"
+if out7="$(
+  printf '%s' '{"session_id":"s1","tool_name":"Bash","tool_input":{"command":"git push origin main"}}' \
+    | timeout 5 env PF_ROUTING_RULES="${ROUTING_RULES_MULTI_BASH}" PF_HOOKEVAL_LOG="${log_file}" "${HOOK}"
+)"; then
+  if [[ -z "${out7}" ]] \
+    && jq -es 'map(select(.outcome == "not_applicable") | .operation) == ["status", "log", "diff"]' "${log_file}" | grep -q true; then
+    pass "multi_bash_op_non_match_terminates_within_timeout"
+  else
+    fail "multi_bash_op_non_match_terminates_within_timeout (out='${out7}', log: $(cat "${log_file}"))"
+  fi
+else
+  fail "multi_bash_op_non_match_terminates_within_timeout (timed out or errored, rc=$?)"
 fi
 
 rm -f "${log_file}"

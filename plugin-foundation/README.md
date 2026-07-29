@@ -9,7 +9,7 @@ tags:
   - status:published
 links:
   - go/adoption
-updated: 2026-07-27T00:00:00Z
+updated: 2026-07-28T00:00:00Z
 ---
 
 # plugin-foundation
@@ -53,13 +53,23 @@ name, and command prefix comes from that plugin's own `routing-rules.json`. This
 foundation reused rather than copied: the same `download-script.sh` and `forced-use-hook.sh` files,
 byte-identical, install into every govern-now CLI's plugin.
 
+## Recording provenance so a fork can't silently reappear
+
+A vendored copy that quietly drifts from this canonical source is a fork, whether or not anyone
+meant it as one. Each consuming plugin records the sha256 of the two files it copied from here and
+owns a test asserting its vendored copies still match that digest — so a hand-edit, a stale copy,
+or a merge that reintroduces old bytes fails that plugin's own CI instead of surfacing later as a
+mismatched routing decision. Re-sync from this directory and update the recorded digest together
+whenever either script changes here.
+
 ## Files
 
 - `routing-rules.schema.json` — JSON Schema for `routing-rules.json`.
 - `routing-rules.example.json` — a worked example for documentation purposes (not a test fixture).
 - `download-script.sh` + `download-script.test.sh` — provisioning (SC-DISTRIBUTION): reads the
-  pinned version, downloads the matching per-OS/arch binary, verifies its checksum against a
-  sidecar, caches idempotently, exports the verified path.
+  pinned version, downloads the matching per-OS/arch release archive, verifies its checksum
+  against the tag's shared checksums file, extracts the binary, caches it (and its own digest)
+  idempotently, exports the verified path.
 - `forced-use-hook.sh` + `forced-use-hook.test.sh` — the PreToolUse hook (SC-FORCEDUSE):
   deny-and-redirects a raw invocation when the CLI is available, fails open (allows, silently) when
   it is not, and never denies a raw tool call by claiming the tool doesn't exist.

@@ -1,0 +1,5 @@
+{
+  "name": "fixture-plugin",
+  "version": "0.1.0",
+  "description": "Frozen fixture for characterize's own sanity test -- not a real plugin."
+}
