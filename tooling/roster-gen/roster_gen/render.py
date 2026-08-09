@@ -54,6 +54,7 @@ def _rate_row(table: dict[str, float]) -> dict[str, float | int]:
 def render_specs(roster: dict[str, Any], tag: str) -> str:
     models = roster["models"]
     ids = order.capability_order(select(models, lambda r: priced(r) is not None), models)
+    variant_ids = [mid for mid in ids if "1m" in models[mid].get("context_variants", {})]
 
     model_dim: dict[str, Any] = {}
     pricing_list: dict[str, Any] = {}
@@ -73,6 +74,27 @@ def render_specs(roster: dict[str, Any], tag: str) -> str:
             pricing_list[mid] = _rate_row(row["price"]["list"])
         if row["price"]["contract"] is not None:
             pricing_contract[mid] = _rate_row(row["price"]["contract"])
+
+    # Suffixed 1M-window pins, tailed after every base entry (rank order preserved, never
+    # interleaved with their base row) so a plan pinned to `<id>[1m]` resolves here too.
+    # Every other model-dim field is unchanged from the base row; only window and price shift.
+    for mid in variant_ids:
+        row = models[mid]
+        variant = row["context_variants"]["1m"]
+        vid = f"{mid}[1m]"
+        model_dim[vid] = {
+            "max_output_tokens": row["max_output_tokens"],
+            "context_window": variant["context_window"],
+            "knowledge_cutoff": row["knowledge_cutoff"],
+            "min_cacheable_prefix": row["min_cacheable_prefix"],
+            "batch_discount": row["batch_discount"],
+            "status": row["lifecycle"],
+            "deprecation_date": row["deprecation_date"],
+        }
+        if variant["price"]["list"] is not None:
+            pricing_list[vid] = _rate_row(variant["price"]["list"])
+        if variant["price"]["contract"] is not None:
+            pricing_contract[vid] = _rate_row(variant["price"]["contract"])
 
     doc = {
         "_schema_version": 1,
@@ -99,7 +121,12 @@ def patch_plan_schema(existing_text: str, roster: dict[str, Any], tag: str) -> s
     sentinels = list(roster["effort_exempt_sentinels"])
 
     new_work = select(models, lambda r: r["selectable"] == "new-work")
-    enum = order.sequence(new_work, order.PLAN_ENUM_ORDER) + sentinels
+    # A `<id>[1m]` pin for every new-work row that declares a `1m` context variant — projected
+    # from that row's own variant data, never hand-added. Unlisted in PLAN_ENUM_ORDER, so the
+    # sequencer tail rule places every one of them after the fixed-order block and before the
+    # sentinels, as a block of its own (never interleaved with its base id).
+    variant_ids = [f"{mid}[1m]" for mid in new_work if "1m" in models[mid].get("context_variants", {})]
+    enum = order.sequence(new_work + variant_ids, order.PLAN_ENUM_ORDER) + sentinels
     missing = [s for s in REQUIRED_SENTINELS if s not in enum]
     if missing:
         raise ValueError(f"generated plan-schema enum is missing required sentinel(s): {missing}")
@@ -111,7 +138,8 @@ def patch_plan_schema(existing_text: str, roster: dict[str, Any], tag: str) -> s
     )
     model_prop["$comment"] = (
         GENERATED_BY.format(tag=tag)
-        + " Every selectable=='new-work' roster row (fixed display order), plus the roster's effort_exempt_sentinels."
+        + " Every selectable=='new-work' roster row (fixed display order) plus its <id>[1m] pin"
+        + " where the row declares a 1m context variant, plus the roster's effort_exempt_sentinels."
     )
     return json.dumps(doc, indent=2, ensure_ascii=True) + "\n"
 
@@ -195,6 +223,8 @@ def _capability_table(roster: dict[str, Any], tag: str) -> str:
         price = priced(row)
         price_cell = f"${price['input']:g} / ${price['output']:g}" if price else "n/a"
         ctx = row["context_window"] if row["context_window"] is not None else "n/a"
+        if "1m" in row.get("context_variants", {}):
+            ctx = f"{ctx} (1M variant)"
         out = row["max_output_tokens"] if row["max_output_tokens"] is not None else "n/a"
         effort = ", ".join(row["effort_available"]) if row["effort_available"] else "n/a"
         if row["effort_exempt"]:

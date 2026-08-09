@@ -296,6 +296,95 @@ class PlantedRowChangeScopingTests(unittest.TestCase):
         self.assertEqual(rates_before, rates_after)  # selectable is not a build-engine input
 
 
+def _with_1m_variant(model: dict, *, list_output: float, window: int = 1000000) -> dict:
+    """`model` given a `context_variants['1m']` block, its own window and list price (distinct
+    from the base row's, so a test can prove the projection reads the variant, not the base)."""
+    return {
+        **model,
+        "context_variants": {
+            "1m": {
+                "context_window": window,
+                "premium_applies_above_input_tokens": 200000,
+                "price": {"contract": None, "list": _price(list_output)},
+            }
+        },
+    }
+
+
+class ContextVariantProjectionTests(unittest.TestCase):
+    """The `<id>[1m]` window-variant projection: emitted for every row that declares a `1m`
+    context variant, from that row's own variant data, never hand-added; appended as a trailing
+    block (never interleaved with base rows); the base row keeps its own window."""
+
+    def test_specs_project_suffixed_entry_from_variant_data(self) -> None:
+        models = {"claude-sonnet-5": _with_1m_variant(_model(list_output=15.0), list_output=99.0)}
+        doc = json.loads(render.render_specs(_roster(models), "v1"))
+        self.assertIn("claude-sonnet-5[1m]", doc["model"])
+        self.assertEqual(doc["model"]["claude-sonnet-5[1m]"]["context_window"], 1000000)
+        self.assertEqual(doc["model"]["claude-sonnet-5"]["context_window"], 200000)  # base untouched
+        # The variant's own price is projected, not the base row's.
+        self.assertEqual(doc["pricing"]["list"]["claude-sonnet-5[1m]"]["output"], 99.0)
+        self.assertEqual(doc["pricing"]["list"]["claude-sonnet-5"]["output"], 15.0)
+
+    def test_specs_row_without_variant_gets_no_suffixed_entry(self) -> None:
+        models = {"claude-sonnet-5": _model(list_output=15.0)}
+        doc = json.loads(render.render_specs(_roster(models), "v1"))
+        self.assertNotIn("claude-sonnet-5[1m]", doc["model"])
+        self.assertNotIn("claude-sonnet-5[1m]", doc["pricing"]["list"])
+
+    def test_specs_variants_are_a_trailing_block_never_interleaved(self) -> None:
+        models = {
+            "claude-opus-5": _with_1m_variant(_model(family="opus", cross_family_rank=9), list_output=25.0),
+            "claude-sonnet-5": _model(family="sonnet", cross_family_rank=5),  # no variant, mid-rank
+            "claude-haiku-4-5": _with_1m_variant(
+                _model(family="haiku", cross_family_rank=0, generation=(4, 5)), list_output=5.0
+            ),
+        }
+        keys = list(json.loads(render.render_specs(_roster(models), "v1"))["model"].keys())
+        first_variant = next(i for i, k in enumerate(keys) if k.endswith("[1m]"))
+        # Every key before the first variant is a base id (no base row follows any variant).
+        self.assertTrue(all(not keys[i].endswith("[1m]") for i in range(first_variant)))
+        self.assertTrue(all(keys[i].endswith("[1m]") for i in range(first_variant, len(keys))))
+        # The mid-rank no-variant row still precedes the whole variant block.
+        self.assertLess(keys.index("claude-sonnet-5"), first_variant)
+
+    def test_specs_render_is_idempotent_with_variants(self) -> None:
+        models = {"claude-sonnet-5": _with_1m_variant(_model(list_output=15.0), list_output=15.0)}
+        self.assertEqual(render.render_specs(_roster(models), "v1"), render.render_specs(_roster(models), "v1"))
+
+    def test_plan_enum_carries_suffixed_pin_after_fixed_block_before_sentinels(self) -> None:
+        models = {
+            "claude-sonnet-5": _with_1m_variant(_model(), list_output=15.0),
+            "claude-haiku-4-5": _model(family="haiku", cross_family_rank=0, generation=(4, 5)),  # no variant
+        }
+        out = render.patch_plan_schema(_BOOTSTRAP_PLAN_SCHEMA, _roster(models), "v1")
+        enum = json.loads(out)["$defs"]["task"]["properties"]["model"]["enum"]
+        self.assertIn("claude-sonnet-5[1m]", enum)
+        self.assertNotIn("claude-haiku-4-5[1m]", enum)  # row declares no 1m variant
+        first_variant = next(i for i, e in enumerate(enum) if e.endswith("[1m]"))
+        # Suffixed pins render after the fixed-order block (no base id follows a variant) and
+        # before the trailing sentinel — never interleaved with their base id.
+        self.assertTrue(all(not enum[i].endswith("[1m]") for i in range(first_variant)))
+        self.assertLess(enum.index("claude-sonnet-5[1m]"), enum.index("inherit"))
+
+    def test_plan_enum_comment_accounts_for_variant_pin(self) -> None:
+        out = render.patch_plan_schema(
+            _BOOTSTRAP_PLAN_SCHEMA, _roster({"claude-sonnet-5": _with_1m_variant(_model(), list_output=15.0)}), "v1"
+        )
+        comment = json.loads(out)["$defs"]["task"]["properties"]["model"]["$comment"]
+        self.assertIn("[1m]", comment)
+        # The stale claim that the enum is only new-work rows + sentinels must be gone.
+        self.assertNotIn("row (fixed display order), plus the roster", comment)
+
+    def test_tiering_table_marks_a_row_with_a_1m_variant(self) -> None:
+        with_variant = render.patch_tiering_doc(
+            _BOOTSTRAP_TIERING_DOC, _roster({"claude-sonnet-5": _with_1m_variant(_model(), list_output=15.0)}), "v1"
+        )
+        self.assertIn("(1M variant)", with_variant)
+        without = render.patch_tiering_doc(_BOOTSTRAP_TIERING_DOC, _roster({"claude-sonnet-5": _model()}), "v1")
+        self.assertNotIn("(1M variant)", without)
+
+
 class RosterLoadTests(unittest.TestCase):
     def _write(self, tmp: Path, document: dict) -> Path:
         path = tmp / "model-roster.json"
