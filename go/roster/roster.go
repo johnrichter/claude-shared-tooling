@@ -28,7 +28,7 @@ import (
 )
 
 // builtSchemaVersion is the model-roster schema MAJOR this package was built against
-// (model-roster.schema.json's "version" is 1.0.0). A document declaring a higher
+// (model-roster.schema.json's "version" is 1.1.0). A document declaring a higher
 // _schema_version is forward-refused as a packaging defect rather than read with guessed
 // semantics for fields this build has never seen.
 const builtSchemaVersion = 1

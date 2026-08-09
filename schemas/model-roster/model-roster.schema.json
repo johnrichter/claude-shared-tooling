@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/johnrichter/claude-shared-tooling/schemas/model-roster/model-roster.schema.json",
   "title": "Claude model roster — source of record",
-  "version": "1.0.0",
-  "description": "Canonical source of record for the selectable Claude model set: one row per pinned full model ID, keyed by that ID, carrying the vendor facts (context window, output cap, knowledge cutoff, minimum cacheable prefix, batch discount, price) together with the fields that let every consumer be a runtime read or a generated artifact instead of a hand-maintained copy (family, generation, effort availability, effort exemption, lifecycle, selectability, cross-family ordering). INPUTS: this schema plus the authored roster document; a consumer additionally supplies a lookup key — a pinned full model ID that MAY carry a trailing `-YYYYMMDD` snapshot suffix and/or a `[1m]` window selector, both of which MUST be stripped before lookup, since neither ever appears in a row key. OUTPUTS, each a projection of the rows and never a hand-kept list: the plan-schema model enum = ids with `selectable == \"new-work\"` plus every `effort_exempt_sentinels` entry; the model-authoring gate's allowlist = ids with `selectable != \"retired\"` and no sentinels (a sentinel is not a model); an effort-availability table = ids whose `effort_available` contains that level; the effort-check exemption list = ids with `effort_exempt == true` plus every `effort_exempt_sentinels` entry; the rate table = rows with a non-null price, a consumer preferring `price.contract` over `price.list` whenever the former is present; and a capability comparison between two ids. INVARIANTS: (1) a lookup key with no row resolves to the distinct `roster-stale` outcome naming the refresh action — never to \"below floor\", \"unsupported\", or a deny-all; a missing or unreadable roster document is itself roster-stale, never an implicit deny. (2) Ordering WITHIN a family is DERIVED by comparing `generation` element-wise — the first differing element decides, and a prefix ranks below its extension, so [5] outranks [4,8] and [5,1] outranks [5] — and is never stored. (3) Ordering ACROSS families comes only from `cross_family_rank` (higher is more capable), is defined only when BOTH rows declare one, and an undeclared pair is a roster-stale-class error: never a default, a guess, or a fallback to any other field. (4) Among rows that declare one, `cross_family_rank` is unique, and within a family it increases with `generation`. (5) A same-family comparison ignores `cross_family_rank` entirely. (6) `lifecycle` and `selectable` are INDEPENDENT axes — lifecycle is the vendor's active/deprecated state, selectable is this workspace's new-work/legacy-pin-only/retired policy — so no consumer derives one from the other; the enum projection and the allowlist projection are required to be able to disagree, and today do. (7) `effort_exempt_sentinels` contains `inherit`: it is a dispatch sentinel, not a model, and never gets a row; a generated exemption list narrower than the one this document projects is a failure. (8) A row's `family` and `generation` agree with the segments of its key. (9) A null vendor-fact field means \"no vendor value sourced in this refresh\" — never zero, unlimited, or free; a consumer that needs the value resolves roster-stale. (10) `_schema_version` is this schema's MAJOR: a consumer refuses a document whose `_schema_version` exceeds the version it was built against, and within a MAJOR only additive optional fields appear. (11) The document is canonical JSON — keys sorted, two-space indent, LF endings, one trailing newline — so re-emitting a parsed roster is byte-identical to the file on disk.",
+  "version": "1.1.0",
+  "description": "Canonical source of record for the selectable Claude model set: one row per pinned full model ID, keyed by that ID, carrying the vendor facts (context window, output cap, knowledge cutoff, minimum cacheable prefix, batch discount, price) together with the fields that let every consumer be a runtime read or a generated artifact instead of a hand-maintained copy (family, generation, effort availability, effort exemption, lifecycle, selectability, cross-family ordering). INPUTS: this schema plus the authored roster document; a consumer additionally supplies a lookup key — a pinned full model ID that MAY carry a trailing `-YYYYMMDD` snapshot suffix and/or a `[1m]` window selector, both of which MUST be stripped before lookup, since neither ever appears in a row key. OUTPUTS, each a projection of the rows and never a hand-kept list: the plan-schema model enum = ids with `selectable == \"new-work\"`, plus the `<id>[1m]` suffixed form of each such id that declares a `1m` entry in `context_variants`, plus every `effort_exempt_sentinels` entry; the model-authoring gate's allowlist = ids with `selectable != \"retired\"` and no sentinels (a sentinel is not a model); an effort-availability table = ids whose `effort_available` contains that level; the effort-check exemption list = ids with `effort_exempt == true` plus every `effort_exempt_sentinels` entry; the rate table = rows with a non-null price, a consumer preferring `price.contract` over `price.list` whenever the former is present; and a capability comparison between two ids. INVARIANTS: (1) a lookup key with no row resolves to the distinct `roster-stale` outcome naming the refresh action — never to \"below floor\", \"unsupported\", or a deny-all; a missing or unreadable roster document is itself roster-stale, never an implicit deny. (2) Ordering WITHIN a family is DERIVED by comparing `generation` element-wise — the first differing element decides, and a prefix ranks below its extension, so [5] outranks [4,8] and [5,1] outranks [5] — and is never stored. (3) Ordering ACROSS families comes only from `cross_family_rank` (higher is more capable), is defined only when BOTH rows declare one, and an undeclared pair is a roster-stale-class error: never a default, a guess, or a fallback to any other field. (4) Among rows that declare one, `cross_family_rank` is unique, and within a family it increases with `generation`. (5) A same-family comparison ignores `cross_family_rank` entirely. (6) `lifecycle` and `selectable` are INDEPENDENT axes — lifecycle is the vendor's active/deprecated state, selectable is this workspace's new-work/legacy-pin-only/retired policy — so no consumer derives one from the other; the enum projection and the allowlist projection are required to be able to disagree, and today do. (7) `effort_exempt_sentinels` contains `inherit`: it is a dispatch sentinel, not a model, and never gets a row; a generated exemption list narrower than the one this document projects is a failure. (8) A row's `family` and `generation` agree with the segments of its key. (9) A null vendor-fact field means \"no vendor value sourced in this refresh\" — never zero, unlimited, or free; a consumer that needs the value resolves roster-stale. (10) `_schema_version` is this schema's MAJOR: a consumer refuses a document whose `_schema_version` exceeds the version it was built against, and within a MAJOR only additive optional fields appear. (11) The document is canonical JSON — keys sorted, two-space indent, LF endings, one trailing newline — so re-emitting a parsed roster is byte-identical to the file on disk.",
   "type": "object",
   "required": [
     "_as_of",
@@ -108,6 +108,44 @@
         "cache_read": { "type": "number", "minimum": 0 }
       }
     },
+    "price": {
+      "type": "object",
+      "description": "Both price bases together. A consumer prefers `contract` over `list` whenever `contract` is non-null.",
+      "required": ["contract", "list"],
+      "additionalProperties": false,
+      "properties": {
+        "list": {
+          "oneOf": [{ "$ref": "#/$defs/priceTable" }, { "type": "null" }],
+          "description": "Public list rates, or null when none is sourced."
+        },
+        "contract": {
+          "oneOf": [{ "$ref": "#/$defs/priceTable" }, { "type": "null" }],
+          "description": "Negotiated rates. Reserved: null until a contract rate exists."
+        }
+      }
+    },
+    "contextVariant": {
+      "type": "object",
+      "description": "A larger context window sold as a distinct price point, reached by the `[1m]` selector on a pinned ID. Carries only its own window, price, and premium threshold — the base row remains the source for identity, lifecycle, and ranking.",
+      "required": ["context_window", "premium_applies_above_input_tokens", "price"],
+      "additionalProperties": false,
+      "properties": {
+        "context_window": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum input tokens accepted under this variant."
+        },
+        "premium_applies_above_input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Request input token count above which this variant's `price` applies; at or below it, the base row's rate applies instead."
+        },
+        "price": {
+          "$ref": "#/$defs/price",
+          "description": "Rates that apply once request input exceeds `premium_applies_above_input_tokens`."
+        }
+      }
+    },
     "modelRow": {
       "type": "object",
       "required": [
@@ -171,20 +209,8 @@
           "description": "Multiplier applied to every rate when the request runs through the Batches API (0.5 = half price)."
         },
         "price": {
-          "type": "object",
-          "description": "Both price bases for this row. A consumer prefers `contract` over `list` whenever `contract` is non-null; a row with both null has no sourced rate and costing it resolves roster-stale.",
-          "required": ["contract", "list"],
-          "additionalProperties": false,
-          "properties": {
-            "list": {
-              "oneOf": [{ "$ref": "#/$defs/priceTable" }, { "type": "null" }],
-              "description": "Public list rates, or null when none is sourced for this row."
-            },
-            "contract": {
-              "oneOf": [{ "$ref": "#/$defs/priceTable" }, { "type": "null" }],
-              "description": "Negotiated rates. Reserved: null on every row until a contract rate exists."
-            }
-          }
+          "$ref": "#/$defs/price",
+          "description": "Both price bases for this row. A consumer prefers `contract` over `list` whenever `contract` is non-null; a row with both null has no sourced rate and costing it resolves roster-stale."
         },
         "effort_available": {
           "type": "array",
@@ -218,6 +244,14 @@
           "type": "string",
           "minLength": 1,
           "description": "Row-level vendor caveat a field cannot carry (an introductory rate window, a dated full ID, why a field is null). Non-load-bearing: no projection reads it."
+        },
+        "context_variants": {
+          "type": "object",
+          "description": "Larger-window variants of this row, keyed by window selector (`1m`) and reached only through the suffixed pin `<id>[1m]`. `cross_family_rank` and every other row-level fact stay on the base row; a variant carries only its own context window, price, and the input-token threshold above which that price applies.",
+          "additionalProperties": false,
+          "properties": {
+            "1m": { "$ref": "#/$defs/contextVariant" }
+          }
         }
       },
       "allOf": [
