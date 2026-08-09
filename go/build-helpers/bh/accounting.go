@@ -539,6 +539,13 @@ func (a *Accounting) recompute(rates RateTable) {
 // applies that preference, so this only translates its PriceTable into the local Rate shape.
 // ok is false for anything the roster can't price (unrecognized id, a sentinel, or a row sourced
 // on neither basis): the caller records that as unpriced rather than guessing a rate.
+//
+// CONTEXT-VARIANT-CONTRACT: a [1m]-suffixed model key resolves to that context variant's rate for
+// its ENTIRE aggregated ModelBuckets entry — Price has no per-turn token count to test against
+// the variant's declared premium threshold, and ModelBuckets sums turns by model string with no
+// token-count-vs-threshold split retained. Every turn folded into a [1m] key is therefore billed
+// at the variant rate, including any that individually stayed under the threshold: a deliberate
+// over-estimate, accepted here rather than re-deriving per-turn pricing at the aggregate layer.
 func rosterRate(model string) (rate Rate, ok bool) {
 	pt, err := roster.Price(model)
 	if err != nil {

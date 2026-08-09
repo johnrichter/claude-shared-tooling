@@ -22,10 +22,16 @@ type PriceSnapshot struct {
 }
 
 // resolvePrice resolves modelID's current roster rate. modelID may carry the roster's documented
-// dated-snapshot suffix or its "[1m]" long-context-window selector (e.g. claude-sonnet-5[1m],
-// claude-sonnet-5-20260724) — roster.Price normalizes both before lookup, so a transcript's
-// literal model string prices identically to its bare pinned form; this function never strips
-// or reinterprets the id itself. A model roster.Price cannot resolve (unknown id, no sourced
+// dated-snapshot suffix (e.g. claude-sonnet-5-20260724) or its "[1m]" long-context-window
+// selector (e.g. claude-sonnet-5[1m]) — roster.Price normalizes both before lookup; this
+// function never strips or reinterprets the id itself.
+//
+// CONTEXT-VARIANT-CONTRACT: roster.Price resolves a [1m]-suffixed id to that variant's rate
+// table for the whole turn, with no token count to test against the variant's declared
+// premium-applies-above-input-tokens threshold. A turn recorded under a [1m] model id whose
+// actual input stayed under that threshold is therefore still billed at the variant rate here —
+// a deliberate over-estimate, accepted rather than threading a per-turn token count through
+// roster.Price for every consumer. A model roster.Price cannot resolve (unknown id, no sourced
 // rate) fails loudly here rather than pricing the turn at zero or a guessed rate.
 func resolvePrice(modelID string) (PriceSnapshot, error) {
 	t, err := roster.Price(modelID)

@@ -15,12 +15,21 @@ var dateSnapshotSuffix = regexp.MustCompile(`-[0-9]{8}$`)
 // full model ID (e.g. claude-sonnet-5[1m]).
 const windowSelectorSuffix = "[1m]"
 
-// normalize reduces a transcript-supplied model ID to the bare pinned form used as a roster
-// row key: strip a trailing [1m] window selector, then a trailing -YYYYMMDD snapshot date.
-// This is the library's single normalization point — every exported function routes an id
-// through here before touching roster data, so the reduction happens exactly once.
-func normalize(id string) string {
-	id = strings.TrimSuffix(id, windowSelectorSuffix)
+// windowVariant is the context_variants map key windowSelectorSuffix reaches. It doubles as
+// normalize's variant return value, so a caller never invents its own literal for it.
+const windowVariant = "1m"
+
+// normalize reduces a transcript-supplied model ID to the bare pinned form used as a roster row
+// key, and reports which context variant (if any) the id opted into: strip a trailing [1m]
+// window selector first — recording it as variant — then a trailing -YYYYMMDD snapshot date.
+// variant is "" for a bare id. This is the library's single normalization point — Lookup,
+// EffortAvailable, and Price each route an id through here before touching roster data, so the
+// reduction and the variant determination each happen exactly once.
+func normalize(id string) (bareID, variant string) {
+	if strings.HasSuffix(id, windowSelectorSuffix) {
+		variant = windowVariant
+		id = strings.TrimSuffix(id, windowSelectorSuffix)
+	}
 	id = dateSnapshotSuffix.ReplaceAllString(id, "")
-	return id
+	return id, variant
 }

@@ -24,22 +24,32 @@ func (d *document) isSentinel(id string) bool {
 
 // row is one entry of the roster's "models" map, decoded verbatim from its JSON keys.
 type row struct {
-	Family             string   `json:"family"`
-	Generation         []int    `json:"generation"`
-	ReleaseDate        *string  `json:"release_date"`
-	ContextWindow      *int     `json:"context_window"`
-	MaxOutputTokens    *int     `json:"max_output_tokens"`
-	KnowledgeCutoff    *string  `json:"knowledge_cutoff"`
-	MinCacheablePrefix *int     `json:"min_cacheable_prefix"`
-	BatchDiscount      *float64 `json:"batch_discount"`
-	Price              rowPrice `json:"price"`
-	EffortAvailable    []string `json:"effort_available"`
-	EffortExempt       bool     `json:"effort_exempt"`
-	Lifecycle          string   `json:"lifecycle"`
-	DeprecationDate    *string  `json:"deprecation_date"`
-	Selectable         string   `json:"selectable"`
-	CrossFamilyRank    *int     `json:"cross_family_rank"`
-	Notes              string   `json:"notes,omitempty"`
+	Family             string                    `json:"family"`
+	Generation         []int                     `json:"generation"`
+	ReleaseDate        *string                   `json:"release_date"`
+	ContextWindow      *int                      `json:"context_window"`
+	MaxOutputTokens    *int                      `json:"max_output_tokens"`
+	KnowledgeCutoff    *string                   `json:"knowledge_cutoff"`
+	MinCacheablePrefix *int                      `json:"min_cacheable_prefix"`
+	BatchDiscount      *float64                  `json:"batch_discount"`
+	Price              rowPrice                  `json:"price"`
+	EffortAvailable    []string                  `json:"effort_available"`
+	EffortExempt       bool                      `json:"effort_exempt"`
+	Lifecycle          string                    `json:"lifecycle"`
+	DeprecationDate    *string                   `json:"deprecation_date"`
+	Selectable         string                    `json:"selectable"`
+	CrossFamilyRank    *int                      `json:"cross_family_rank"`
+	Notes              string                    `json:"notes,omitempty"`
+	ContextVariants    map[string]contextVariant `json:"context_variants,omitempty"`
+}
+
+// contextVariant is one entry of a row's "context_variants" map (currently only "1m"), decoded
+// verbatim from its JSON keys. Only price is modeled: context_window and
+// premium_applies_above_input_tokens carry no decision any projection in this package reads
+// today — Price resolves the variant's rate table but has no token count to test the threshold
+// against (see CONTEXT-VARIANT-CONTRACT at Price's call sites).
+type contextVariant struct {
+	Price rowPrice `json:"price"`
 }
 
 type rowPrice struct {
@@ -112,6 +122,22 @@ func (p *priceRates) toTable(basis string) PriceTable {
 	}
 }
 
+// toBases converts one price object (both bases as authored) into the exported PriceBases shape.
+// Shared by a row's own price and each of its context_variants entries, so the two can never
+// diverge on how a basis becomes a *PriceTable.
+func (p rowPrice) toBases() PriceBases {
+	var bases PriceBases
+	if p.Contract != nil {
+		t := p.Contract.toTable("contract")
+		bases.Contract = &t
+	}
+	if p.List != nil {
+		t := p.List.toTable("list")
+		bases.List = &t
+	}
+	return bases
+}
+
 // PriceBases carries both price bases of a row exactly as authored, for a caller that needs to
 // know whether a contract rate exists rather than just the resolved rate. Either or both may
 // be nil.
@@ -140,6 +166,12 @@ type Model struct {
 	Selectable         Selectability
 	CrossFamilyRank    *int
 	Notes              string
+
+	// ContextVariants carries each declared window variant's price bases, keyed by selector
+	// ("1m"), for Price to resolve a suffixed id against instead of this row's own Price. Nil
+	// when the row declares no context_variants; a caller checks presence with the map's
+	// comma-ok form rather than assuming every model has one.
+	ContextVariants map[string]PriceBases
 }
 
 func (r *row) toModel(id string) Model {
@@ -147,14 +179,12 @@ func (r *row) toModel(id string) Model {
 	for i, e := range r.EffortAvailable {
 		efforts[i] = Effort(e)
 	}
-	var bases PriceBases
-	if r.Price.Contract != nil {
-		t := r.Price.Contract.toTable("contract")
-		bases.Contract = &t
-	}
-	if r.Price.List != nil {
-		t := r.Price.List.toTable("list")
-		bases.List = &t
+	var variants map[string]PriceBases
+	if len(r.ContextVariants) > 0 {
+		variants = make(map[string]PriceBases, len(r.ContextVariants))
+		for k, v := range r.ContextVariants {
+			variants[k] = v.Price.toBases()
+		}
 	}
 	return Model{
 		ID:                 id,
@@ -166,7 +196,7 @@ func (r *row) toModel(id string) Model {
 		KnowledgeCutoff:    r.KnowledgeCutoff,
 		MinCacheablePrefix: r.MinCacheablePrefix,
 		BatchDiscount:      r.BatchDiscount,
-		Price:              bases,
+		Price:              r.Price.toBases(),
 		EffortAvailable:    efforts,
 		EffortExempt:       r.EffortExempt,
 		Lifecycle:          LifecycleState(r.Lifecycle),
@@ -174,5 +204,6 @@ func (r *row) toModel(id string) Model {
 		Selectable:         Selectability(r.Selectable),
 		CrossFamilyRank:    r.CrossFamilyRank,
 		Notes:              r.Notes,
+		ContextVariants:    variants,
 	}
 }

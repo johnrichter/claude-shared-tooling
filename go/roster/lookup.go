@@ -15,7 +15,7 @@ func Lookup(id string) (Model, error) {
 	if err != nil {
 		return Model{}, err
 	}
-	norm := normalize(id)
+	norm, _ := normalize(id)
 	if doc.isSentinel(norm) {
 		return Model{}, &SentinelError{ID: norm}
 	}
@@ -35,7 +35,7 @@ func EffortAvailable(id string) ([]Effort, error) {
 	if err != nil {
 		return nil, err
 	}
-	norm := normalize(id)
+	norm, _ := normalize(id)
 	if doc.isSentinel(norm) {
 		return AllEfforts, nil
 	}
@@ -69,19 +69,35 @@ func Lifecycle(id string) (LifecycleState, error) {
 	return m.Lifecycle, nil
 }
 
-// Price returns id's resolved rate table, preferring the contract basis over list whenever a
-// contract rate is present. A row with neither basis sourced resolves StaleError: there is no
-// rate to cost it with, which is a roster-stale-class outcome, not a zero or free rate.
+// Price returns id's resolved rate table: a bare id resolves the row's own rates, an
+// <id>[1m]-suffixed id resolves that row's declared "1m" context-variant rates instead. Either
+// form prefers the contract basis over list whenever a contract rate is present.
+//
+// CONTEXT-VARIANT-CONTRACT: Price has no token count to test against the variant's declared
+// premium_applies_above_input_tokens threshold, so a [1m] id always resolves the variant rate —
+// a caller pricing a specific turn from this must treat that as a deliberate over-estimate for
+// any turn that actually stayed under the threshold, not as the exact rate that turn was billed
+// at. A row with neither price basis sourced, or a [1m] id whose row declares no "1m" variant,
+// resolves StaleError: there is no rate to cost it with, never a zero, free, or guessed rate.
 func Price(id string) (PriceTable, error) {
-	m, err := Lookup(id)
+	norm, variant := normalize(id)
+	m, err := Lookup(norm)
 	if err != nil {
 		return PriceTable{}, err
 	}
-	if m.Price.Contract != nil {
-		return *m.Price.Contract, nil
+	bases := m.Price
+	if variant != "" {
+		v, ok := m.ContextVariants[variant]
+		if !ok {
+			return PriceTable{}, &StaleError{Query: id, Reason: fmt.Sprintf("%q declares no %q context variant", m.ID, variant)}
+		}
+		bases = v
 	}
-	if m.Price.List != nil {
-		return *m.Price.List, nil
+	if bases.Contract != nil {
+		return *bases.Contract, nil
+	}
+	if bases.List != nil {
+		return *bases.List, nil
 	}
 	return PriceTable{}, &StaleError{Query: m.ID, Reason: fmt.Sprintf("%q has no sourced price (contract and list are both null)", m.ID)}
 }

@@ -287,6 +287,134 @@ func TestNormalizeDatedIDPrecedingWindowSelectorOrder(t *testing.T) {
 	}
 }
 
+func TestPriceWindowSelectorWithNoDeclaredVariantIsRosterStale(t *testing.T) {
+	// claude-haiku-4-5 declares no context_variants at all: requesting the [1m] selector for it
+	// must not silently fall back to the base rate — there is no variant to resolve, and
+	// guessing one would misprice a call this model was never priced to make.
+	_, err := Price("claude-haiku-4-5[1m]")
+	var stale *StaleError
+	if !errors.As(err, &stale) {
+		t.Fatalf("Price(haiku-4-5[1m]) error = %v, want *StaleError", err)
+	}
+}
+
+// TestWindowSelectorCaseSensitiveNoMatch guards normalize's exact-literal match: the schema
+// documents "[1m]" lowercase only, so a differently-cased or malformed selector must not be
+// stripped — it is part of the model ID string and, since no such row exists, must resolve
+// *StaleError rather than silently being treated as the window selector.
+func TestWindowSelectorCaseSensitiveNoMatch(t *testing.T) {
+	for _, id := range []string{"claude-sonnet-5[1M]", "claude-sonnet-5[1m", "claude-sonnet-51m]"} {
+		_, err := Lookup(id)
+		var stale *StaleError
+		if !errors.As(err, &stale) {
+			t.Errorf("Lookup(%q) error = %v, want *StaleError (malformed/miscased selector must not normalize)", id, err)
+		}
+	}
+}
+
+// TestEffortAvailableDiscardsWindowVariant guards that EffortAvailable, the second of the three
+// normalize() callers, resolves a [1m]-suffixed id identically to its bare form: effort
+// availability is a row-level fact, not a per-context-variant one, so the variant must be
+// discarded rather than accidentally threaded into a variant-specific effort lookup.
+func TestEffortAvailableDiscardsWindowVariant(t *testing.T) {
+	bare, err := EffortAvailable("claude-sonnet-5")
+	if err != nil {
+		t.Fatalf("EffortAvailable(bare): %v", err)
+	}
+	windowed, err := EffortAvailable("claude-sonnet-5[1m]")
+	if err != nil {
+		t.Fatalf("EffortAvailable([1m]): %v", err)
+	}
+	if len(bare) != len(windowed) {
+		t.Fatalf("EffortAvailable(bare)=%v, EffortAvailable([1m])=%v; want identical (variant is not effort-scoped)", bare, windowed)
+	}
+	for i := range bare {
+		if bare[i] != windowed[i] {
+			t.Errorf("EffortAvailable(bare)[%d]=%v != EffortAvailable([1m])[%d]=%v", i, bare[i], i, windowed[i])
+		}
+	}
+}
+
+// TestLookupExposesContextVariantsOnRealRow is a structural check against the live embedded
+// roster (not a hand-built doc): a row that declares context_variants in model-roster.json must
+// surface it on Model.ContextVariants, keyed by the schema's "1m" selector, so Price's resolution
+// path (Lookup -> m.ContextVariants[variant]) has real data to read outside the synthetic-doc
+// tests.
+func TestLookupExposesContextVariantsOnRealRow(t *testing.T) {
+	m, err := Lookup("claude-sonnet-5")
+	if err != nil {
+		t.Fatalf("Lookup(claude-sonnet-5): %v", err)
+	}
+	variant, ok := m.ContextVariants["1m"]
+	if !ok {
+		t.Fatalf("Model(claude-sonnet-5).ContextVariants has no %q entry; want one from model-roster.json's context_variants", "1m")
+	}
+	if variant.List == nil {
+		t.Errorf("ContextVariants[1m].List = nil, want the variant's declared list rate")
+	}
+}
+
+// TestPriceTableDiffersForIdenticalTokenCounts is the test_strategy's table-test form directly:
+// for each of several distinct rate pairs, an identical token count billed at the bare rate and
+// at the [1m] rate must total differently, and a bare unknown-variant ID must fall back to the
+// row's own base rates rather than erroring or zeroing.
+func TestPriceTableDiffersForIdenticalTokenCounts(t *testing.T) {
+	doc, err := parseRoster([]byte(`{
+		"_schema_version":1,
+		"effort_exempt_sentinels":["inherit"],
+		"models":{
+			"claude-a-1":{
+				"family":"a","generation":[1],"selectable":"new-work","lifecycle":"active",
+				"price":{"contract":null,"list":{"input":2,"output":10,"cache_write_5m":0,"cache_write_1h":0,"cache_read":0}},
+				"context_variants":{"1m":{"price":{"contract":null,"list":{"input":4,"output":20,"cache_write_5m":0,"cache_write_1h":0,"cache_read":0}}}}
+			},
+			"claude-b-1":{
+				"family":"b","generation":[1],"selectable":"new-work","lifecycle":"active",
+				"price":{"contract":null,"list":{"input":1,"output":5,"cache_write_5m":0,"cache_write_1h":0,"cache_read":0}}
+			}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("parseRoster: %v", err)
+	}
+	origDoc, origErr := rosterDoc, rosterLoadErr
+	defer func() { rosterDoc, rosterLoadErr = origDoc, origErr }()
+	rosterDoc, rosterLoadErr = doc, nil
+
+	const tokens = 500_000.0
+	cases := []struct {
+		name        string
+		bareID      string
+		windowedID  string
+		windowedErr bool // true if the [1m] form is expected to error (no declared variant)
+	}{
+		{name: "declared variant diverges", bareID: "claude-a-1", windowedID: "claude-a-1[1m]"},
+		{name: "no declared variant errors, bare still prices", bareID: "claude-b-1", windowedID: "claude-b-1[1m]", windowedErr: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			base, err := Price(c.bareID)
+			if err != nil {
+				t.Fatalf("Price(%q): %v", c.bareID, err)
+			}
+			windowed, err := Price(c.windowedID)
+			if c.windowedErr {
+				var stale *StaleError
+				if !errors.As(err, &stale) {
+					t.Fatalf("Price(%q) error = %v, want *StaleError (no declared 1m variant)", c.windowedID, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Price(%q): %v", c.windowedID, err)
+			}
+			if base.Input*tokens == windowed.Input*tokens {
+				t.Errorf("Price(%q) and Price(%q) bill %v tokens identically (%v); want the variant rate to diverge", c.bareID, c.windowedID, tokens, base.Input*tokens)
+			}
+		})
+	}
+}
+
 func TestNormalizeWindowThenDateOrderDoesNotResolve(t *testing.T) {
 	// Adversarial, informational: the opposite ordering (id[1m]-YYYYMMDD, window selector
 	// BEFORE the date suffix) is not stripped by a single trim-then-regex pass, since

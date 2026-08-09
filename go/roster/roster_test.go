@@ -94,6 +94,76 @@ func TestWindowSelectorNormalizes(t *testing.T) {
 	}
 }
 
+// TestPriceWindowVariantResolvesDifferentRatesForIdenticalTokenCounts guards
+// CONTEXT-VARIANT-CONTRACT's premise directly: a [1m]-suffixed id must resolve a genuinely
+// different rate table than its bare form, not the same rate re-labeled. Today's live embedded
+// roster happens to price every "1m" variant identically to its base row (rate identity — no
+// premium is currently charged above the threshold), so this uses a hand-built document with a
+// deliberately distinct variant rate, the only way to prove the two projections CAN diverge.
+func TestPriceWindowVariantResolvesDifferentRatesForIdenticalTokenCounts(t *testing.T) {
+	doc, err := parseRoster([]byte(`{
+		"_schema_version":1,
+		"effort_exempt_sentinels":["inherit"],
+		"models":{
+			"claude-x-1":{
+				"family":"x","generation":[1],"selectable":"new-work","lifecycle":"active",
+				"price":{
+					"contract":null,
+					"list":{"input":3,"output":15,"cache_write_5m":0,"cache_write_1h":0,"cache_read":0}
+				},
+				"context_variants":{
+					"1m":{
+						"price":{
+							"contract":null,
+							"list":{"input":6,"output":30,"cache_write_5m":0,"cache_write_1h":0,"cache_read":0}
+						}
+					}
+				}
+			}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("parseRoster: %v", err)
+	}
+	origDoc, origErr := rosterDoc, rosterLoadErr
+	defer func() { rosterDoc, rosterLoadErr = origDoc, origErr }()
+	rosterDoc, rosterLoadErr = doc, nil
+
+	base, err := Price("claude-x-1")
+	if err != nil {
+		t.Fatalf("Price(bare): %v", err)
+	}
+	windowed, err := Price("claude-x-1[1m]")
+	if err != nil {
+		t.Fatalf("Price([1m]): %v", err)
+	}
+	if base == windowed {
+		t.Fatalf("Price(bare) and Price([1m]) resolved identically (%+v); want the variant's distinct rates", base)
+	}
+
+	// The same token count billed against each resolved rate table must diverge — this is the
+	// dollar figure a caller actually pays, not just an internal struct comparison.
+	const tokens = 1_000_000.0
+	baseTotal := tokens * base.Input
+	windowedTotal := tokens * windowed.Input
+	if baseTotal == windowedTotal {
+		t.Errorf("identical token count priced identically across bare/[1m] (%v == %v), want the variant rate to differ", baseTotal, windowedTotal)
+	}
+}
+
+// TestPriceBareIDWithNoContextVariantFallsBackToBaseRates guards the common case against a
+// regression from adding ContextVariants: a model that declares no context_variants at all must
+// still price its bare id exactly as before that field existed.
+func TestPriceBareIDWithNoContextVariantFallsBackToBaseRates(t *testing.T) {
+	price, err := Price("claude-haiku-4-5")
+	if err != nil {
+		t.Fatalf("Price(haiku-4-5): %v", err)
+	}
+	if price.Basis != "list" || price.Input != 1.0 {
+		t.Errorf("Price(haiku-4-5) = %+v, want basis list, input 1.0 (base rate, unaffected by context_variants)", price)
+	}
+}
+
 func TestCompareWithinFamilyOrdersNewGeneration(t *testing.T) {
 	// claude-opus-5 (generation [5]) outranks claude-opus-4-8 (generation [4,8]): the first
 	// differing element decides regardless of length.
