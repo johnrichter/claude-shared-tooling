@@ -211,12 +211,148 @@ func TestBatchGroundsAreExhaustiveOnFallback(t *testing.T) {
 // the default exact comparison would wrongly call disjoint.
 func TestNamespaceFoldMergesSpellings(t *testing.T) {
 	exact := NamespaceDomain("pkg")
-	if got := exact.Relate(Claim{NameExact, "Orders"}, Claim{NameExact, "orders"}); got != RelationDisjoint {
+	if got := exact.Relate(Claim{Kind: NameExact, Value: "Orders"}, Claim{Kind: NameExact, Value: "orders"}); got != RelationDisjoint {
 		t.Fatalf("exact NamespaceDomain merged spellings: got %s", got)
 	}
 	folded := NamespaceDomain("pkg", WithNamespaceFold(strings.ToLower))
-	if got := folded.Relate(Claim{NameExact, "Orders"}, Claim{NameExact, "orders"}); got != RelationOverlap {
+	if got := folded.Relate(Claim{Kind: NameExact, Value: "Orders"}, Claim{Kind: NameExact, Value: "orders"}); got != RelationOverlap {
 		t.Fatalf("folded NamespaceDomain = %s, want overlap on equated spellings", got)
+	}
+}
+
+// TestPathRootTakesPrecedenceOverValue confirms the workspace/the-work vs
+// the-work pair: two claims for the identical value are disjoint the instant
+// their roots differ, and overlap once rooted the same way — the root
+// decides before any path-text rule runs, matching the doc comment's claim
+// that a root difference is checked "regardless of path text".
+func TestPathRootTakesPrecedenceOverValue(t *testing.T) {
+	d := PathDomain("path")
+	workspaceWork := Claim{Kind: PathDir, Value: "the-work", Root: "workspace"}
+	otherWork := Claim{Kind: PathDir, Value: "the-work", Root: "the-work"}
+	sameRootWork := Claim{Kind: PathDir, Value: "the-work", Root: "workspace"}
+
+	if got := d.Relate(workspaceWork, otherWork); got != RelationDisjoint {
+		t.Fatalf("Relate(%s, %s) = %s, want %s: different roots must win over an identical value", workspaceWork, otherWork, got, RelationDisjoint)
+	}
+	if got := d.Relate(workspaceWork, sameRootWork); got != RelationOverlap {
+		t.Fatalf("Relate(%s, %s) = %s, want %s: identical root and value must overlap", workspaceWork, sameRootWork, got, RelationOverlap)
+	}
+	// A root difference must also beat a claim shape that would otherwise be
+	// undecidable (mismatched abs/relative), proving root is checked first.
+	absWork := Claim{Kind: PathFile, Value: "/the-work", Root: "workspace"}
+	relWork := Claim{Kind: PathFile, Value: "the-work", Root: "other"}
+	if got := d.Relate(absWork, relWork); got != RelationDisjoint {
+		t.Fatalf("Relate(%s, %s) = %s, want %s: differing roots must be decided before the abs/relative mismatch", absWork, relWork, got, RelationDisjoint)
+	}
+}
+
+// TestPathRootDefaultsAreAdditive confirms the zero-value Root reproduces
+// exactly today's rootless behaviour (no domain default, no per-claim root):
+// two equal-valued claims overlap and two different-valued claims are judged
+// purely on the pre-existing path rules, so the new field cannot regress a
+// caller who never sets it.
+func TestPathRootDefaultsAreAdditive(t *testing.T) {
+	d := PathDomain("path")
+	a := Claim{Kind: PathFile, Value: "svc/a.go"}
+	b := Claim{Kind: PathFile, Value: "svc/a.go"}
+	if got := d.Relate(a, b); got != RelationOverlap {
+		t.Fatalf("Relate(%s, %s) with zero-value Root = %s, want %s", a, b, got, RelationOverlap)
+	}
+	c := Claim{Kind: PathFile, Value: "svc/b.go"}
+	if got := d.Relate(a, c); got != RelationDisjoint {
+		t.Fatalf("Relate(%s, %s) with zero-value Root = %s, want %s", a, c, got, RelationDisjoint)
+	}
+}
+
+// TestWithPathRootDefaultsUnrootedClaims confirms WithPathRoot only fills in
+// for a claim that leaves its own Root empty: an explicit domain default
+// makes two otherwise-unrooted claims agree with an explicitly rooted one,
+// but never overrides a claim that set its own, different root.
+func TestWithPathRootDefaultsUnrootedClaims(t *testing.T) {
+	d := PathDomain("path", WithPathRoot("workspace"))
+	unrooted := Claim{Kind: PathFile, Value: "the-work/a.go"}
+	explicitSameRoot := Claim{Kind: PathFile, Value: "the-work/a.go", Root: "workspace"}
+	if got := d.Relate(unrooted, explicitSameRoot); got != RelationOverlap {
+		t.Fatalf("Relate(%s, %s) = %s, want %s: domain default root must equate an unrooted claim with one naming it explicitly", unrooted, explicitSameRoot, got, RelationOverlap)
+	}
+	explicitOtherRoot := Claim{Kind: PathFile, Value: "the-work/a.go", Root: "the-work"}
+	if got := d.Relate(unrooted, explicitOtherRoot); got != RelationDisjoint {
+		t.Fatalf("Relate(%s, %s) = %s, want %s: a claim's own root must not be overridden by the domain default", unrooted, explicitOtherRoot, got, RelationDisjoint)
+	}
+}
+
+// TestPathRootRespectsCaseFold confirms a root is subject to the same case
+// fold as a value, so a caller relying on the default fold does not get a
+// root comparison that is silently exact while the value comparison beside
+// it is not.
+func TestPathRootRespectsCaseFold(t *testing.T) {
+	folded := PathDomain("path")
+	a := Claim{Kind: PathFile, Value: "a.go", Root: "Workspace"}
+	b := Claim{Kind: PathFile, Value: "a.go", Root: "workspace"}
+	if got := folded.Relate(a, b); got != RelationOverlap {
+		t.Fatalf("Relate(%s, %s) under default fold = %s, want %s: roots differing only by case must fold together", a, b, got, RelationOverlap)
+	}
+	exact := PathDomain("path", WithPathFold(nil))
+	if got := exact.Relate(a, b); got != RelationDisjoint {
+		t.Fatalf("Relate(%s, %s) under exact comparison = %s, want %s: roots must not be folded when folding is off", a, b, got, RelationDisjoint)
+	}
+}
+
+// TestPathDomainRootSoundness runs the falsification hook over claims that mix
+// two roots with the same values and directory nesting, using an oracle that
+// scopes every resource to its claim's root (so "workspace:the-work/a.go" and
+// "the-work:the-work/a.go" are different resources). This is what would catch
+// a comparator that let a shared value leak across roots.
+func TestPathDomainRootSoundness(t *testing.T) {
+	values := []string{"the-work", "the-work/a.go", "the-work/sub", "the-work/sub/b.go", "other"}
+	roots := []string{"", "workspace", "the-work"}
+	var claims []Claim
+	for _, r := range roots {
+		for _, v := range values {
+			claims = append(claims,
+				Claim{Kind: PathFile, Value: v, Root: r},
+				Claim{Kind: PathDir, Value: v, Root: r},
+				Claim{Kind: PathGlob, Value: v + "/*", Root: r})
+		}
+	}
+	extent := func(c Claim) []string {
+		var out []string
+		for _, v := range values {
+			hit := false
+			switch c.Kind {
+			case PathFile:
+				hit = v == c.Value
+			case PathDir:
+				hit = v == c.Value || strings.HasPrefix(v, c.Value+"/")
+			case PathGlob:
+				prefix := strings.TrimSuffix(c.Value, "*")
+				hit = strings.HasPrefix(v, prefix) && !strings.Contains(strings.TrimPrefix(v, prefix), "/")
+			}
+			if hit {
+				out = append(out, c.Root+":"+v)
+			}
+		}
+		return out
+	}
+	d := PathDomain("path")
+	bad := CheckDomainSoundness(d, claims, extent)
+	for i, u := range bad {
+		if i == 10 {
+			t.Fatalf("... %d counterexamples in total", len(bad))
+		}
+		t.Errorf("unsound root disjointness: %s", u)
+	}
+}
+
+// TestRootedClaimAndVariadicDomainCompile is a compile-time and behavioural
+// check that a keyed Claim literal naming Root, and a PathDomain built with
+// several variadic options including WithPathRoot, still build and combine —
+// the two call shapes the reasoning cue requires to keep compiling.
+func TestRootedClaimAndVariadicDomainCompile(t *testing.T) {
+	claim := Claim{Kind: PathFile, Value: "the-work/a.go", Root: "workspace"}
+	d := PathDomain("path", WithPathFold(strings.ToLower), WithPathRoot("workspace"), WithPathMatcher(globstarMatch))
+	if got := d.Relate(claim, claim); got != RelationOverlap {
+		t.Fatalf("Relate(claim, claim) = %s, want %s", got, RelationOverlap)
 	}
 }
 

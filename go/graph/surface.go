@@ -78,11 +78,19 @@ func (gr Ground) Valid() bool {
 // carry no meaning here — the owning Domain interprets both — which is what
 // lets one Surface type describe files, directories, globs, package paths,
 // lock names, queue topics, or anything else a caller can write a rule for.
-// Both are plain strings so a surface survives a round trip through the JSON a
-// plan is usually stored in.
+// All three fields are plain strings so a surface survives a round trip
+// through the JSON a plan is usually stored in.
+//
+// Root is optional and, like Kind and Value, means whatever the owning Domain
+// decides: a domain that understands it can use it to scope a claim to one
+// tree among several — a repository, a worktree, a tenant — so that two
+// claims naming the same value in different roots are never confused for one
+// another. Its zero value is the claim's own domain's ordinary behavior:
+// every claim is implicitly in the same, single root.
 type Claim struct {
 	Kind  string `json:"kind,omitempty"`
 	Value string `json:"value"`
+	Root  string `json:"root,omitempty"`
 }
 
 // String renders a claim as "kind:value", or just the value when the domain

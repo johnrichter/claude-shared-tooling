@@ -27,6 +27,7 @@ type pathConfig struct {
 	fold    func(string) string                      // nil means compare paths exactly as written
 	custom  bool                                     // the fold came from a caller, so its behaviour is unknown here
 	matcher func(pattern, name string) (bool, error) // nil means use the built-in segment-wise dialect
+	root    string                                   // default root for a claim that declares none of its own
 }
 
 // WithPathFold replaces the default case folding with fold, which is applied
@@ -62,6 +63,16 @@ func WithPathMatcher(match func(pattern, name string) (bool, error)) PathOption 
 	return func(c *pathConfig) { c.matcher = match }
 }
 
+// WithPathRoot sets the root a claim is scoped to when its own Claim.Root is
+// empty. It does not affect a claim that sets Root itself, so a domain built
+// with a default root can still hold claims explicitly scoped elsewhere.
+// Leaving this unset — the zero value, an empty root — is today's behaviour:
+// every claim shares the one implicit root and the comparator's disjointness
+// rules run exactly as they did before Root existed.
+func WithPathRoot(root string) PathOption {
+	return func(c *pathConfig) { c.root = root }
+}
+
 // PathDomain returns a resource domain over slash-separated paths, registered
 // under name. It is the file-shaped instance of the resource-surface
 // abstraction, not a privileged one: it decides claims of kind PathFile,
@@ -74,6 +85,13 @@ func WithPathMatcher(match func(pattern, name string) (bool, error)) PathOption 
 // cannot be placed; so is a pair mixing an absolute value with a relative one,
 // since nothing here knows the root the relative one hangs off. A PathDir
 // value of "." or "/" is the whole tree and overlaps every path beside it.
+//
+// A claim's Root — its own if set, else the domain's WithPathRoot default —
+// is compared first and takes precedence over everything else: two claims
+// with different roots are disjoint no matter what their values say, since a
+// root names which tree the value is read in and two different trees never
+// share a resource. Only claims with the same root reach the value rules
+// below.
 //
 // Literal claims compare directly: two files by equality, a file against a
 // directory and two directories by containment. Glob claims are proven
@@ -133,13 +151,20 @@ type pathClaim struct {
 	value string
 	segs  []string
 	abs   bool
+	root  string
 }
 
 // relate decides how two path claims stand to one another.
 func (c pathConfig) relate(a, b Claim) Relation {
 	pa, okA := c.resolve(a)
 	pb, okB := c.resolve(b)
-	if !okA || !okB || pa.abs != pb.abs {
+	if !okA || !okB {
+		return RelationUnknown
+	}
+	if pa.root != pb.root {
+		return RelationDisjoint
+	}
+	if pa.abs != pb.abs {
 		return RelationUnknown
 	}
 	switch {
@@ -186,7 +211,14 @@ func (c pathConfig) resolve(cl Claim) (pathClaim, bool) {
 	if kind == PathGlob && !strings.ContainsAny(v, globMeta) {
 		kind = PathFile
 	}
-	return pathClaim{kind: kind, value: v, segs: strings.Split(strings.TrimPrefix(v, "/"), "/"), abs: abs}, true
+	root := strings.TrimSpace(cl.Root)
+	if root == "" {
+		root = c.root
+	}
+	if c.fold != nil {
+		root = c.fold(root)
+	}
+	return pathClaim{kind: kind, value: v, segs: strings.Split(strings.TrimPrefix(v, "/"), "/"), abs: abs, root: root}, true
 }
 
 // isRoot reports whether a claim names the top of the tree, which as a

@@ -441,7 +441,7 @@ func TestNamespaceProofIsSound(t *testing.T) {
 	universe := []string{"a", "b", "ab", "a/b", "a/bc", "a/b/c", "a/b/c/d", "b/a"}
 	var claims []Claim
 	for _, v := range []string{"a", "b", "ab", "a/b", "a/bc", "a/b/c", "a/"} {
-		claims = append(claims, Claim{NameExact, v}, Claim{NamePrefix, v})
+		claims = append(claims, Claim{Kind: NameExact, Value: v}, Claim{Kind: NamePrefix, Value: v})
 	}
 	extent := func(c Claim) []string {
 		v := strings.TrimSuffix(c.Value, "/")
@@ -466,21 +466,21 @@ func TestPathProofIsUseful(t *testing.T) {
 		a, b Claim
 		want Relation
 	}{
-		{Claim{PathFile, "svc/a.go"}, Claim{PathFile, "svc/b.go"}, RelationDisjoint},
-		{Claim{PathFile, "svc/a.go"}, Claim{PathFile, "SVC/A.go"}, RelationOverlap},
-		{Claim{PathDir, "svc"}, Claim{PathDir, "svcx"}, RelationDisjoint},
-		{Claim{PathDir, "svc"}, Claim{PathFile, "svc/deep/a.go"}, RelationOverlap},
-		{Claim{PathGlob, "svc/*.go"}, Claim{PathGlob, "docs/*.md"}, RelationDisjoint},
-		{Claim{PathGlob, "svc/*.go"}, Claim{PathFile, "svc/a.go"}, RelationOverlap},
-		{Claim{PathGlob, "svc/*.go"}, Claim{PathFile, "svc/deep/a.go"}, RelationDisjoint},
-		{Claim{PathGlob, "svc/**"}, Claim{PathDir, "docs"}, RelationDisjoint},
-		{Claim{PathGlob, "svc/**"}, Claim{PathFile, "svc/deep/a.go"}, RelationOverlap},
-		{Claim{PathDir, "."}, Claim{PathFile, "anything.txt"}, RelationOverlap},
-		{Claim{PathFile, "svc/a.go"}, Claim{PathFile, "/svc/a.go"}, RelationUnknown},
-		{Claim{PathFile, "../escape.go"}, Claim{PathFile, "svc/a.go"}, RelationUnknown},
+		{Claim{Kind: PathFile, Value: "svc/a.go"}, Claim{Kind: PathFile, Value: "svc/b.go"}, RelationDisjoint},
+		{Claim{Kind: PathFile, Value: "svc/a.go"}, Claim{Kind: PathFile, Value: "SVC/A.go"}, RelationOverlap},
+		{Claim{Kind: PathDir, Value: "svc"}, Claim{Kind: PathDir, Value: "svcx"}, RelationDisjoint},
+		{Claim{Kind: PathDir, Value: "svc"}, Claim{Kind: PathFile, Value: "svc/deep/a.go"}, RelationOverlap},
+		{Claim{Kind: PathGlob, Value: "svc/*.go"}, Claim{Kind: PathGlob, Value: "docs/*.md"}, RelationDisjoint},
+		{Claim{Kind: PathGlob, Value: "svc/*.go"}, Claim{Kind: PathFile, Value: "svc/a.go"}, RelationOverlap},
+		{Claim{Kind: PathGlob, Value: "svc/*.go"}, Claim{Kind: PathFile, Value: "svc/deep/a.go"}, RelationDisjoint},
+		{Claim{Kind: PathGlob, Value: "svc/**"}, Claim{Kind: PathDir, Value: "docs"}, RelationDisjoint},
+		{Claim{Kind: PathGlob, Value: "svc/**"}, Claim{Kind: PathFile, Value: "svc/deep/a.go"}, RelationOverlap},
+		{Claim{Kind: PathDir, Value: "."}, Claim{Kind: PathFile, Value: "anything.txt"}, RelationOverlap},
+		{Claim{Kind: PathFile, Value: "svc/a.go"}, Claim{Kind: PathFile, Value: "/svc/a.go"}, RelationUnknown},
+		{Claim{Kind: PathFile, Value: "../escape.go"}, Claim{Kind: PathFile, Value: "svc/a.go"}, RelationUnknown},
 		// A character class cannot be case-folded without changing what it
 		// means, so under the default fold it falls back to the prefix rule.
-		{Claim{PathGlob, "[a-z]*.go"}, Claim{PathFile, "A.go"}, RelationOverlap},
+		{Claim{Kind: PathGlob, Value: "[a-z]*.go"}, Claim{Kind: PathFile, Value: "A.go"}, RelationOverlap},
 	} {
 		if got := d.Relate(tc.a, tc.b); got != tc.want {
 			t.Errorf("Relate(%s, %s) = %s, want %s", tc.a, tc.b, got, tc.want)
@@ -492,8 +492,8 @@ func TestPathProofIsUseful(t *testing.T) {
 // pattern against a file that the built-in dialect can only read
 // conservatively, without changing what either says elsewhere.
 func TestPathMatcherAddsPrecision(t *testing.T) {
-	pattern := Claim{PathGlob, "svc/**/*.go"}
-	other := Claim{PathFile, "svc/deep/notes.md"}
+	pattern := Claim{Kind: PathGlob, Value: "svc/**/*.go"}
+	other := Claim{Kind: PathFile, Value: "svc/deep/notes.md"}
 
 	if got := PathDomain("path").Relate(pattern, other); got != RelationOverlap {
 		t.Fatalf("built-in dialect = %s, want the conservative %s", got, RelationOverlap)
@@ -502,12 +502,12 @@ func TestPathMatcherAddsPrecision(t *testing.T) {
 	if got := precise.Relate(pattern, other); got != RelationDisjoint {
 		t.Fatalf("with a globstar matcher = %s, want %s", got, RelationDisjoint)
 	}
-	if got := precise.Relate(pattern, Claim{PathFile, "svc/deep/a.go"}); got != RelationOverlap {
+	if got := precise.Relate(pattern, Claim{Kind: PathFile, Value: "svc/deep/a.go"}); got != RelationOverlap {
 		t.Fatalf("matched file = %s, want %s", got, RelationOverlap)
 	}
 	// A directory is a set of paths, so the matcher is not consulted and the
 	// conservative rules still decide.
-	if got := precise.Relate(pattern, Claim{PathDir, "docs"}); got != RelationDisjoint {
+	if got := precise.Relate(pattern, Claim{Kind: PathDir, Value: "docs"}); got != RelationDisjoint {
 		t.Fatalf("pattern against an unrelated directory = %s, want %s", got, RelationDisjoint)
 	}
 }
@@ -563,16 +563,16 @@ func pathClaims() []Claim {
 	segs := []string{"a", "b", "A", "*", "?", "*.go", "a*", "**", "[ab]", "a.go"}
 	var out []Claim
 	for _, s := range segs {
-		out = append(out, Claim{PathGlob, s})
+		out = append(out, Claim{Kind: PathGlob, Value: s})
 		for _, t := range segs {
-			out = append(out, Claim{PathGlob, s + "/" + t})
+			out = append(out, Claim{Kind: PathGlob, Value: s + "/" + t})
 		}
 	}
 	for _, s := range []string{"a/*/a.go", "a/**/a.go", "*/*/*", "a/b/c", "**/a/*", "a/*/*"} {
-		out = append(out, Claim{PathGlob, s})
+		out = append(out, Claim{Kind: PathGlob, Value: s})
 	}
 	for _, l := range []string{"a", "b", "a/b", "A/b", "a/a.go", "a/b/a.go", "a.go", "ab/a"} {
-		out = append(out, Claim{PathFile, l}, Claim{PathDir, l})
+		out = append(out, Claim{Kind: PathFile, Value: l}, Claim{Kind: PathDir, Value: l})
 	}
 	return out
 }
