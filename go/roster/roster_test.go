@@ -106,12 +106,12 @@ func TestCompareWithinFamilyOrdersNewGeneration(t *testing.T) {
 }
 
 func TestCompareCrossFamilyMissingRankErrors(t *testing.T) {
-	// claude-opus-5 declares no cross_family_rank, so any cross-family pair involving it is
-	// roster-stale.
-	_, err := Compare("claude-opus-5", "claude-fable-5")
+	// claude-opus-4-5 declares no cross_family_rank, so any cross-family pair involving it is
+	// roster-stale even against a top-ranked, fully-declared counterpart.
+	_, err := Compare("claude-opus-4-5", "claude-fable-5")
 	var stale *StaleError
 	if !errors.As(err, &stale) {
-		t.Fatalf("Compare(opus-5, fable-5) error = %v, want *StaleError", err)
+		t.Fatalf("Compare(opus-4-5, fable-5) error = %v, want *StaleError", err)
 	}
 }
 

@@ -61,12 +61,12 @@ func TestCompareCrossFamilyBothUndeclaredErrors(t *testing.T) {
 }
 
 func TestCompareOneSideDeclaredOneUndeclaredErrors(t *testing.T) {
-	// claude-opus-5 has no cross_family_rank; claude-sonnet-5 does. One-sided declaration must
+	// claude-opus-4-5 has no cross_family_rank; claude-sonnet-5 does. One-sided declaration must
 	// still be roster-stale per invariant (3): "defined only when BOTH rows declare one".
-	_, err := Compare("claude-opus-5", "claude-sonnet-5")
+	_, err := Compare("claude-opus-4-5", "claude-sonnet-5")
 	var stale *StaleError
 	if !errors.As(err, &stale) {
-		t.Fatalf("Compare(opus-5, sonnet-5) error = %v, want *StaleError", err)
+		t.Fatalf("Compare(opus-4-5, sonnet-5) error = %v, want *StaleError", err)
 	}
 }
 

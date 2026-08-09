@@ -1,14 +1,14 @@
 {
-  "_as_of": "2026-07-24",
+  "_as_of": "2026-08-08",
   "_cross_family_order": {
-    "as_of": "2026-07-24",
+    "as_of": "2026-08-08",
     "inherited_pairs": [
       [
         "claude-sonnet-4-6",
         "claude-haiku-4-5"
       ]
     ],
-    "note": "claude-fable-5's top placement is vendor-stated on the source page as of as_of: Fable 5 is named Anthropic's most capable widely released model for workloads needing the highest available capability. Opus above Sonnet (claude-opus-4-6/4-7/4-8 above claude-sonnet-4-6 and claude-sonnet-5) is an operator ruling of the same date; within-family order needs no citation because it is derived from generation. claude-sonnet-4-6 above claude-haiku-4-5 is inherited from the previously shipped rank table and carries no citation. claude-opus-5 declares no rank: no published spec establishes its cross-family standing versus claude-fable-5, so that pair — and every other cross-family pair involving claude-opus-5 — is roster-stale until a rank is established. claude-opus-4-5 and claude-sonnet-4-5 likewise declare no rank at all, so every cross-family pair involving them is roster-stale until one is established.",
+    "note": "claude-fable-5's top placement is vendor-stated on the source page as of as_of: Fable 5 is named Anthropic's most capable widely released model for workloads needing the highest available capability. Opus above Sonnet (claude-opus-4-6/4-7/4-8 above claude-sonnet-4-6 and claude-sonnet-5) is an operator ruling of the same date; within-family order needs no citation because it is derived from generation. claude-opus-5 at rank 6, between claude-opus-4-8 and claude-fable-5, is an operator ruling of 2026-08-08: no published spec establishes claude-opus-5's cross-family standing, so the operator placed it directly above the rest of the Opus line and below claude-fable-5's vendor-stated top placement, filling the vacant slot without renumbering any other rank. claude-sonnet-4-6 above claude-haiku-4-5 is inherited from the previously shipped rank table and carries no citation. claude-opus-4-5 and claude-sonnet-4-5 declare no rank at all, so every cross-family pair involving them is roster-stale until one is established.",
     "source": "https://platform.claude.com/docs/en/about-claude/models/overview"
   },
   "_schema_version": 1,
@@ -222,7 +222,7 @@
     "claude-opus-5": {
       "batch_discount": 0.5,
       "context_window": 1000000,
-      "cross_family_rank": null,
+      "cross_family_rank": 6,
       "deprecation_date": null,
       "effort_available": [
         "low",
