@@ -6,7 +6,7 @@ The single source of record for the selectable Claude model set. Every consumer 
 
 | File | Role |
 |---|---|
-| `model-roster.schema.json` | JSON Schema 2020-12. Carries the normative contract in its `description`: inputs, every projection a consumer derives, and the invariants (ordering, the two selectability axes, null semantics, forward-refusal, canonical form). Schema `version` is `1.0.0`; its MAJOR is the roster's `_schema_version`. |
+| `model-roster.schema.json` | JSON Schema 2020-12. Carries the normative contract in its `description`: inputs, every projection a consumer derives, and the invariants (ordering, the two selectability axes, null semantics, forward-refusal, canonical form). Schema `version` is `1.1.0`; its MAJOR is the roster's `_schema_version`. |
 | `model-roster.json` | The authored roster — one row per pinned full model ID, keyed by that ID, plus the document-level provenance and the effort-exemption sentinels. The only file a refresh edits. |
 
 ## Validation
