@@ -2,6 +2,7 @@ package roster
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -112,6 +113,50 @@ func TestCompareCrossFamilyMissingRankErrors(t *testing.T) {
 	var stale *StaleError
 	if !errors.As(err, &stale) {
 		t.Fatalf("Compare(opus-4-5, fable-5) error = %v, want *StaleError", err)
+	}
+}
+
+// checkRankContract enforces ROSTER-RANK-CONTRACT: a row that sources a knowledge_cutoff is a
+// row the vendor published facts for, so it must also declare a cross_family_rank. A cutoff
+// with no rank is the exact gap TestCompareCrossFamilyMissingRankErrors guards Compare against
+// — this checks the roster data itself so a future refresh can't reintroduce that gap silently.
+func checkRankContract(r row) error {
+	if r.KnowledgeCutoff != nil && r.CrossFamilyRank == nil {
+		return fmt.Errorf("knowledge_cutoff %q declared with no cross_family_rank", *r.KnowledgeCutoff)
+	}
+	return nil
+}
+
+func TestRankContractKnowledgeCutoffImpliesRank(t *testing.T) {
+	cutoff, rank := "2026-05", 6
+
+	// Shaped like today's claude-opus-5 before its rank was assigned: a sourced cutoff with no
+	// rank must be rejected.
+	if err := checkRankContract(row{KnowledgeCutoff: &cutoff}); err == nil {
+		t.Error("checkRankContract(cutoff, no rank) = nil, want an error")
+	}
+	// Shaped like today's claude-opus-5 as ranked: cutoff and rank both present must pass.
+	if err := checkRankContract(row{KnowledgeCutoff: &cutoff, CrossFamilyRank: &rank}); err != nil {
+		t.Errorf("checkRankContract(cutoff, rank) = %v, want nil", err)
+	}
+
+	// claude-opus-4-5 and claude-sonnet-4-5 declare neither field (vendor-fact fields null by
+	// design, per model-roster.json's _source note) — the implication holds vacuously.
+	for _, id := range []string{"claude-opus-4-5", "claude-sonnet-4-5"} {
+		r, ok := rosterDoc.Models[id]
+		if !ok {
+			t.Fatalf("model-roster.json no longer has a %q row; update this guard's targets", id)
+		}
+		if err := checkRankContract(r); err != nil {
+			t.Errorf("checkRankContract(%s) = %v, want nil", id, err)
+		}
+	}
+
+	// Every live roster row must satisfy the contract, not just the two named above.
+	for id, r := range rosterDoc.Models {
+		if err := checkRankContract(r); err != nil {
+			t.Errorf("checkRankContract(%s) = %v, want nil — every roster row must satisfy ROSTER-RANK-CONTRACT", id, err)
+		}
 	}
 }
 
