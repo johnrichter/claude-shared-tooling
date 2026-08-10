@@ -19,7 +19,7 @@ _TOOL_DIR = _REPO_ROOT / "tooling" / "invariant-lint"
 sys.path.insert(0, str(_TOOL_DIR))
 from invariant_lint import symbols, testrun  # noqa: E402
 
-_EXECUTION_GO = _REPO_ROOT / "go" / "build-helpers" / "bh" / "execution.go"
+_EXECUTION_GO = _REPO_ROOT / "go" / "state" / "record.go"
 
 
 class CoreResolutionTests(unittest.TestCase):
