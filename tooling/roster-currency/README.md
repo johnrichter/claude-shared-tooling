@@ -10,8 +10,7 @@ install) so it renders from the exact roster and target definitions roster-gen i
 
 ## Why regenerate-and-diff, not a set-membership check
 
-The model-set drift class this replaces (see the retirement note in
-`go/build-helpers/bh/schema_sync_test.go`) used to be caught by diffing ID *sets* across
+The model-set drift class this replaces used to be caught by diffing ID *sets* across
 independently hand-scraped sources. Regenerate-and-diff is strictly stronger: it catches a
 changed *value* (a price, a capability flag) on an ID already present everywhere, not just a
 missing or extra ID, and it traces every failure to the one input that fixes it — the roster

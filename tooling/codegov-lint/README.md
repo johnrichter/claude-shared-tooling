@@ -39,7 +39,7 @@ Exit codes: `0` no violations; `1` one or more violations found (each printed as
 ## Why `--diff`, not a full-tree scan, gates CI
 
 This tree predates the code-authoring policy: it already carries thousands of pre-existing
-Python docstring gaps and, since `go/build-helpers` domain-models plan/task ids as data,
+Python docstring gaps and, since `go/ledger` domain-models plan/task ids as data,
 legitimate `M<n>.P<n>.T<n>`-shaped literals throughout its comments and tests. A full-tree
 scan run as a required check would fail on that backlog on day one, for work no current task
 touches. `--diff` scopes enforcement to what a task actually changes — new code stops adding
