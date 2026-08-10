@@ -13,7 +13,7 @@ github.com/bmatcuk/doublestar/v4 v4.10.0 h1:zU9WiOla1YA122oLM6i4EXvGW62DvKZVxIe6
 github.com/bmatcuk/doublestar/v4 v4.10.0/go.mod h1:xBQ8jztBU6kakFMg+8WGxn0c6z1fTSPVIjEY1Wr7jzc=
 ```
 
-**Application site:** `go/build-helpers/bh/surface.go` — the shared lib's file-surface verifier. It currently matches allow/deny path patterns with Go's `filepath.Match`/`fs.Glob`, neither of which supports `**` (globstar). Adopting doublestar here is what fixes the gap.
+**Application site:** `go/fsx` (`classify.go`, `enumerators.go`) — the shared lib's path-classification package. It matches allow/deny path patterns with Go's `filepath.Match`/`fs.Glob`, neither of which supports `**` (globstar). Adopting doublestar here is what fixes the gap.
 
 ## Problem
 
@@ -64,9 +64,9 @@ Verified by compiling and running this against a `go.mod` requiring `github.com/
 
 - **License:** MIT (confirmed from the tagged `v4.10.0` `LICENSE` file, copyright Bob Matcuk).
 - MIT is permissive and low-obligation — the only standing obligation is to retain the copyright and permission notice and record the component.
-- **Tracking requirement (a consuming change, not this spike):** record in the repository's `LICENSE-3rdparty.csv` (component `doublestar`, origin `https://github.com/bmatcuk/doublestar`, license `MIT`, copyright `Bob Matcuk`). If `go/bh` ships inside the repo's distributed signed binary, the MIT permission/license text must also travel with that binary — reproduce it in `THIRD-PARTY-LICENSES.md` per the repo's existing attribution practice. The consuming change must confirm the distribution status of the Go surface and satisfy whichever obligation applies.
+- **Tracking requirement (a consuming change, not this spike):** record in the repository's `LICENSE-3rdparty.csv` (component `doublestar`, origin `https://github.com/bmatcuk/doublestar`, license `MIT`, copyright `Bob Matcuk`). If `go/fsx` ships inside the repo's distributed signed binaries, the MIT permission/license text must also travel with those binaries — reproduce it in `THIRD-PARTY-LICENSES.md` per the repo's existing attribution practice. The consuming change must confirm the distribution status of the Go surface and satisfy whichever obligation applies.
 
 ## Consuming this decision
 
-- The consuming change adopts `github.com/bmatcuk/doublestar/v4 v4.10.0` in `go/build-helpers/bh/surface.go`, adds the `require` line + `go.sum` entries above to `go/build-helpers/go.mod`/`go/build-helpers/go.sum`, and adds the `LICENSE-3rdparty.csv` row (plus the `THIRD-PARTY-LICENSES.md` entry if distributed).
+- The consuming change adopts `github.com/bmatcuk/doublestar/v4 v4.10.0` in `go/fsx`, adds the `require` line + `go.sum` entries above to `go/fsx/go.mod`/`go/fsx/go.sum`, and adds the `LICENSE-3rdparty.csv` row (plus the `THIRD-PARTY-LICENSES.md` entry if distributed).
 - No other capability spike (JSON-schema validation, diffing, semver, CLI parsing) is decided by this doc — each gets its own dependency-selection spike.
