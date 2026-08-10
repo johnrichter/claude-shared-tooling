@@ -10,7 +10,7 @@ a library release pins a git tag with no archive, a CLI release publishes per-OS
 A candidate is a git-tracked file whose **tracked mode is executable** (`100755`) and whose
 content is binary by git's own is-binary heuristic (a NUL byte or a UTF-8 decode failure in its
 leading bytes). That precisely targets a committed, ready-to-exec build output — the class
-`go/.bin/build-helpers-<goos>-<goarch>` belongs to and the class CD replaces — without touching
+`go/.bin/<tool>-<goos>-<goarch>` belongs to and the class CD replaces — without touching
 a legitimately committed binary *asset* (image, font) that carries no execute bit; those remain
 `scripts/check_no_raw_binary.py`'s concern, with its own size threshold and LFS exemption.
 

@@ -1,7 +1,7 @@
 """Finds a committed binary in the tracked tree, scoped to executables.
 
 SC-DISTRIBUTION targets one class of committed artifact: a built binary meant to be exec'd
-directly (a CLI/build-helper output like `go/.bin/build-helpers-<goos>-<goarch>`) — the exact
+directly (a CLI output like `go/.bin/<tool>-<goos>-<goarch>`) — the exact
 class CD (per-OS/arch release archives) exists to replace. It does not target a legitimately
 committed binary asset (an image, a font) that carries no execute bit; those are a separate,
 existing concern (`scripts/check_no_raw_binary.py`) with a different threshold and LFS
