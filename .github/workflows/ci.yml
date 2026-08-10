@@ -384,6 +384,60 @@ jobs:
         working-directory: plugin-foundation
         run: bash download-script.test.sh
 
+  # SC-PROD: go/git's real-signature resign tests (TestResign_* in resign_signing_test.go)
+  # generate an ephemeral, no-passphrase GPG key themselves via genEphemeralGPGKey — the test
+  # is self-sufficient once a gpg binary is on PATH, so CI's job here is proving that binary
+  # is present and functional, not provisioning a key. genEphemeralGPGKey calls t.Skip when
+  # gpg is missing (L0.7's declared skip-only-when-gpg-absent condition); on a runner where
+  # gpg is installed and verified, that skip must never fire, so a skip reaching the log here
+  # is a real regression (a broken gpg, not an absent one) and must fail the job rather than
+  # pass quietly on a security-signing path.
+  go-git:
+    name: go-git (real-signature resign)
+    runs-on: ubuntu-latest
+    needs: guardrail
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/git/go.mod
+      # ubuntu-latest ships gpg, but install explicitly so the step (and its failure mode)
+      # is visible in the job log rather than an implicit runner-image assumption.
+      - name: Install gpg
+        run: sudo apt-get update && sudo apt-get install -y gnupg
+      - name: Verify gpg binary is on PATH and runnable
+        run: |
+          command -v gpg
+          gpg --version
+      - name: gofmt (zero-diff lint bar)
+        working-directory: go/git
+        run: |
+          diff="$(gofmt -l .)"
+          if [ -n "$diff" ]; then
+            echo "$diff"
+            exit 1
+          fi
+      - name: go vet
+        working-directory: go/git
+        run: go vet ./...
+      # Skip-is-failure guard: gpg is installed and verified above, so
+      # genEphemeralGPGKey's t.Skip("gpg not installed; ...") must not fire. `go test -v`
+      # prints "--- SKIP" for any skipped test; grep it out of the captured output and fail
+      # the job if found, converting a silent pass into a hard failure on this signing path.
+      - name: go test -v (fail the job if the real-signature test skips)
+        working-directory: go/git
+        run: |
+          set +e
+          output="$(go test -v ./... 2>&1)"
+          status=$?
+          set -e
+          echo "$output"
+          if echo "$output" | grep -q -- '--- SKIP'; then
+            echo "::error::real-signature resign test reported SKIP with gpg installed and verified - treating skip as failure"
+            exit 1
+          fi
+          exit "$status"
+
   # GH-specific caveat, no GitLab equivalent needed here: GitHub Advanced Security secret
   # scanning is a repo/org SETTING, not a workflow step — it cannot be replicated as a job
   # in this file. Confirm secret scanning is enabled at the claude-tooling repo level;
