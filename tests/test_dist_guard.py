@@ -16,9 +16,6 @@ from pathlib import Path
 _DIST_GUARD = Path(__file__).resolve().parent.parent / "tooling" / "dist-guard"
 _CHECK = _DIST_GUARD / "check.py"
 _ALLOWLIST_JSON = _DIST_GUARD / "allowlist.json"
-# The path that WAS the standing exception before this retirement; now allowlisted nowhere.
-_FORMER_ALLOWLISTED_PATH = "go/.bin/build-helpers-darwin-arm64"
-
 sys.path.insert(0, str(_DIST_GUARD))
 from dist_guard import allowlist  # noqa: E402
 
@@ -70,14 +67,6 @@ class ScanSubprocessTests(unittest.TestCase):
         self._commit_executable(root, "bin/run.sh", b"#!/bin/sh\necho hi\n")
         result = _run_guard(root, "scan")
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
-
-    def test_former_darwin_arm64_now_rejected(self):
-        # The standing exception is retired: the once-allowlisted path is now a violation.
-        root = self._repo()
-        self._commit_executable(root, _FORMER_ALLOWLISTED_PATH, _BINARY)
-        result = _run_guard(root, "scan")
-        self.assertEqual(result.returncode, 1, msg=result.stdout + result.stderr)
-        self.assertIn(_FORMER_ALLOWLISTED_PATH, result.stderr)
 
     def test_executable_text_ignored(self):
         root = self._repo()
