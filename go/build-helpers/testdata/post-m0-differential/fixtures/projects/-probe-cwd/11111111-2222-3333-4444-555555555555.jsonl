@@ -1,2 +1,0 @@
-{"type":"assistant","sessionId":"11111111-2222-3333-4444-555555555555","message":{"model":"claude-sonnet-5","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":10,"cache_read_input_tokens":20}}}
-{"type":"assistant","sessionId":"11111111-2222-3333-4444-555555555555","message":{"model":"claude-sonnet-5","usage":{"input_tokens":200,"output_tokens":70,"cache_creation_input_tokens":5,"cache_read_input_tokens":30}}}

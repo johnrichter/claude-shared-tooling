@@ -1,8 +1,0 @@
-{
-  "schema": "feedback-register/v1",
-  "project": "probe",
-  "entries": [
-    {"id": "FB1", "title": "high-criticality probe entry", "source_task_id": "M1.P1.T1", "feedback": "f1", "proposed_solution": "p1", "why_it_matters": "w1", "impact": 5, "urgency": 5, "criticality": 25, "added": "2026-01-01T00:00:00Z"},
-    {"id": "FB2", "title": "low-criticality probe entry", "feedback": "f2", "impact": 1, "urgency": 1, "criticality": 1, "added": "2026-01-01T00:00:00Z"}
-  ]
-}

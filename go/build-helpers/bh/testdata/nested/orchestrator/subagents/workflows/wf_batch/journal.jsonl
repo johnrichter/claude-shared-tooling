@@ -1,2 +1,0 @@
-{"type": "started", "wf_id": "wf_batch", "scriptPath": "batch-engine.workflow.js", "at": "2026-07-05T20:00:00.000Z"}
-{"type": "result", "wf_id": "wf_batch", "status": "ok", "at": "2026-07-05T20:00:40.000Z"}
