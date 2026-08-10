@@ -1,8 +1,10 @@
 package git
 
 import (
+	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -119,6 +121,127 @@ func TestResign_DryRunMovesNothing(t *testing.T) {
 	}
 	if _, err := r.resolveRef(ctx, out.BackupTag); err == nil {
 		t.Fatalf("backup tag %s exists after a dry run, want none created", out.BackupTag)
+	}
+}
+
+// gitBytes runs git and returns its stdout untrimmed, for assertions that turn
+// on exact bytes (a trailing carriage return, a missing final newline).
+func gitBytes(t *testing.T, dir string, args ...string) []byte {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %s (in %s): %v", strings.Join(args, " "), dir, err)
+	}
+	return out
+}
+
+// rawCommit stages file and forges a commit with an exact message via
+// commit-tree — bypassing `git commit`'s message cleanup so the stored message
+// keeps whatever unusual bytes (trailing \r, no final newline) the test needs.
+func rawCommit(t *testing.T, dir, file, content, message, parent string) string {
+	t.Helper()
+	writeFile(t, dir, file, content)
+	runGit(t, dir, "add", "-A")
+	tree := runGit(t, dir, "write-tree")
+	args := []string{"commit-tree", tree}
+	if parent != "" {
+		args = append(args, "-p", parent)
+	}
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(message)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git commit-tree (in %s): %v\n%s", dir, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// commitMessageBytes returns sha's commit message exactly as stored — the bytes
+// after the header block's terminating blank line.
+func commitMessageBytes(t *testing.T, dir, sha string) []byte {
+	t.Helper()
+	raw := gitBytes(t, dir, "cat-file", "commit", sha)
+	if i := bytes.Index(raw, []byte("\n\n")); i >= 0 {
+		return raw[i+2:]
+	}
+	return nil
+}
+
+// TestResign_PreservesExactMessageBytes checks Resign reproduces a commit's
+// message byte-for-byte, including a trailing carriage return and a missing
+// final newline — cases a line-oriented reassembly silently corrupts.
+func TestResign_PreservesExactMessageBytes(t *testing.T) {
+	cases := []struct {
+		name    string
+		message string
+	}{
+		{"trailing carriage return", "subject\r\n\r\nbody ending in a carriage return\r"},
+		{"no trailing newline", "subject with no trailing newline"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			r := newScratchRepo(t)
+			dir := r.Dir
+
+			base := commitFile(t, dir, "base.txt", "base\n", "base")
+			oldHead := rawCommit(t, dir, "payload.txt", "payload\n", tc.message, base)
+			runGit(t, dir, "update-ref", "refs/heads/main", oldHead)
+
+			oldMsg := commitMessageBytes(t, dir, oldHead)
+			if string(oldMsg) != tc.message {
+				t.Fatalf("precondition: original message not stored verbatim: got %q, want %q", oldMsg, tc.message)
+			}
+
+			out, err := r.Resign(ctx, "refs/heads/main", ResignOptions{Base: base, SignArgs: noSign})
+			if err != nil {
+				t.Fatalf("Resign: %v", err)
+			}
+			if newMsg := commitMessageBytes(t, dir, out.NewHead); !bytes.Equal(oldMsg, newMsg) {
+				t.Fatalf("message bytes changed across resign:\n old %q\n new %q", oldMsg, newMsg)
+			}
+		})
+	}
+}
+
+// TestResign_PopulatesPostConditionReport checks Resign returns a filled-in
+// post-condition report over a known range: every tree preserved, an accurate
+// unsigned count (all, since this range is resigned without a key), no bad
+// signatures, and Base still an ancestor of the new tip.
+func TestResign_PopulatesPostConditionReport(t *testing.T) {
+	ctx := context.Background()
+	r := newScratchRepo(t)
+	dir := r.Dir
+
+	base := commitFile(t, dir, "base.txt", "base\n", "base")
+	commitFile(t, dir, "a.txt", "a\n", "a")
+	commitFile(t, dir, "b.txt", "b\n", "b")
+
+	out, err := r.Resign(ctx, "refs/heads/main", ResignOptions{Base: base, SignArgs: noSign})
+	if err != nil {
+		t.Fatalf("Resign: %v", err)
+	}
+	rep := out.Post
+	if rep == nil {
+		t.Fatalf("Resign carried no post-condition report")
+	}
+	if rep.Commits != 2 {
+		t.Fatalf("report Commits = %d, want 2", rep.Commits)
+	}
+	if !rep.TreesPreserved {
+		t.Fatalf("report TreesPreserved = false, want true")
+	}
+	if rep.UnsignedCount != 2 {
+		t.Fatalf("report UnsignedCount = %d, want 2 (resigned without a key)", rep.UnsignedCount)
+	}
+	if rep.BadSignatureCount != 0 {
+		t.Fatalf("report BadSignatureCount = %d, want 0", rep.BadSignatureCount)
+	}
+	if !rep.BaseIsAncestor {
+		t.Fatalf("report BaseIsAncestor = false; Base must stay an ancestor of the new tip")
 	}
 }
 

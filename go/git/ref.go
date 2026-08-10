@@ -36,6 +36,13 @@ type RewriteOutcome struct {
 	// the rewrite. Populated only for SyncEmitForceWithLease on a non-dry
 	// run; this package never executes it.
 	PushCmd []string
+	// NoOp is set by Resign when the range was already fully signed: the ref
+	// was left where it was and no new commit objects were minted. Other
+	// operations never set it.
+	NoOp bool
+	// Post carries Resign's post-condition verification of the rewrite; nil
+	// for operations other than Resign. See ResignReport.
+	Post *ResignReport
 }
 
 // backupTagName derives a collision-resistant backup tag from ref and the
