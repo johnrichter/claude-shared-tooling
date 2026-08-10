@@ -2,11 +2,11 @@ module github.com/johnrichter/claude-shared-tooling/go/git
 
 go 1.26
 
-require github.com/johnrichter/claude-shared-tooling/go/sysops v0.0.0
+require github.com/johnrichter/claude-shared-tooling/go/sysops v0.1.0
 
-// sysops is a same-repo sibling module (ai-shared-lib/go/sysops), not yet independently
-// tagged -- this placeholder version + local replace is a monorepo-development stand-in the
-// release transaction resolves by cutting a real sysops tag and pointing this require at it. A
-// `replace` directive is only honored in the MAIN module's own go.mod, so until then, an external
-// `go get` of a NEW git tag containing this dependency cannot resolve sysops on its own.
+// sysops is a same-repo sibling module (ai-shared-lib/go/sysops), independently tagged at
+// go/sysops/v0.1.0. The require above resolves that tag for external consumers on its own. The
+// replace below is kept only as a monorepo-development convenience so local sysops edits are
+// picked up without re-tagging; a `replace` directive is only honored in the MAIN module's own
+// go.mod, so it has no effect on external consumers of this module.
 replace github.com/johnrichter/claude-shared-tooling/go/sysops => ../sysops
