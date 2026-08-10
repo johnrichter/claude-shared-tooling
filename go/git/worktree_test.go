@@ -77,6 +77,77 @@ func TestWorktreeRemove_NonexistentPathErrors(t *testing.T) {
 	}
 }
 
+// TestWorktreeAdd_DryRunCwdIndependent checks a relative target path in a
+// dry-run resolves against r.Dir, not the calling process's working
+// directory: the existence answer must be the same regardless of where the
+// process happens to be chdir'd.
+func TestWorktreeAdd_DryRunCwdIndependent(t *testing.T) {
+	ctx := context.Background()
+	r := newScratchRepo(t)
+	head := commitFile(t, r.Dir, "a.txt", "a\n", "first")
+
+	// A relative path that already exists under r.Dir, so the dry-run must
+	// report it as taken however the process cwd is set.
+	if err := os.Mkdir(filepath.Join(r.Dir, "taken"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	elsewhere := t.TempDir()
+	chdir(t, elsewhere)
+
+	err := r.WorktreeAdd(ctx, "taken", head, WorktreeAddOptions{DryRun: true})
+	if err == nil {
+		t.Fatalf("WorktreeAdd dry-run from cwd %s: want error (path exists under r.Dir), got nil", elsewhere)
+	}
+
+	// A relative path that does not exist under r.Dir must dry-run clean,
+	// even though it happens to exist under the process cwd.
+	if err := os.Mkdir(filepath.Join(elsewhere, "free"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := r.WorktreeAdd(ctx, "free", head, WorktreeAddOptions{DryRun: true}); err != nil {
+		t.Fatalf("WorktreeAdd dry-run from cwd %s: want nil (path free under r.Dir), got %v", elsewhere, err)
+	}
+}
+
+// TestWorktreeRemove_DryRunCwdIndependent checks a relative path in a
+// dry-run resolves against r.Dir, not the calling process's working
+// directory, when matching against the registered worktree list.
+func TestWorktreeRemove_DryRunCwdIndependent(t *testing.T) {
+	ctx := context.Background()
+	r := newScratchRepo(t)
+	head := commitFile(t, r.Dir, "a.txt", "a\n", "first")
+
+	wtPath := filepath.Join(r.Dir, "linked")
+	if err := r.WorktreeAdd(ctx, wtPath, head, WorktreeAddOptions{}); err != nil {
+		t.Fatalf("WorktreeAdd: %v", err)
+	}
+
+	chdir(t, t.TempDir())
+
+	if err := r.WorktreeRemove(ctx, "linked", WorktreeRemoveOptions{DryRun: true}); err != nil {
+		t.Fatalf("WorktreeRemove dry-run for a registered worktree from an unrelated cwd: %v", err)
+	}
+}
+
+// chdir switches the process working directory to dir for the duration of
+// the test, restoring the original on cleanup.
+func chdir(t *testing.T, dir string) {
+	t.Helper()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir(%s): %v", dir, err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(orig); err != nil {
+			t.Fatalf("restore Chdir(%s): %v", orig, err)
+		}
+	})
+}
+
 // TestWorktreeAdd_DuplicateBranchWithoutForceErrors checks git's own
 // same-branch-checked-out-twice guard surfaces as an error, not a silent
 // no-op.
