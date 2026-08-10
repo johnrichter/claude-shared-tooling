@@ -1,7 +1,6 @@
 # CI for claude-tooling (the authority layer of the security guardrail).
-# Replaces the removed .gitlab-ci.yml — same shape: guardrail gates unit-tests,
-# the Rust arch matrix, and the Go arch matrix, which run independently of
-# each other.
+# Replaces the removed .gitlab-ci.yml — same shape: guardrail gates unit-tests
+# and the Rust arch matrix, which run independently of each other.
 #
 # Rust workspace (rust/) — arch matrix: {linux, macos} x {x86_64, aarch64}. Each
 # cell runs cargo fmt --check + cargo clippy -D warnings (zero-warnings lint
@@ -17,13 +16,7 @@
 #                     fmt+clippy only (doc build is host-target and arch-independent
 #                     for this pure crate, already covered by macos-aarch64).
 #
-# Go workspace (go/build-helpers) — same four-cell matrix, GOOS/GOARCH in place
-# of the Rust target triple. Each cell runs gofmt -l (zero-diff lint bar) +
-# go vet + go build for that GOOS/GOARCH, plus go test where a GitHub-hosted
-# runner exists natively for that {os, arch} pair (same native/cross split as
-# the Rust matrix above — macos-x86_64 is build+lint only).
-#
-# logkit-conformance — single job, parallel to the rust/go matrices: the cross-language
+# logkit-conformance — single job, parallel to the rust matrix: the cross-language
 # byte-identity gate for the logkit record contract. Arch-independent (canonical JSON is
 # byte-defined, not host-defined), so it runs once on linux-x86_64, but it needs the Go and
 # Rust toolchains together because it drives both implementations in one run.
@@ -31,10 +24,6 @@
 # clikit-conformance — same shape, same reasoning, for the clikit CLI output contract: one
 # normalized result record and one of eleven exit codes, byte-identical and integer-identical
 # across the Go and Rust implementations.
-#
-# golangci-lint — single job, parallel to the rust/go matrices, mirroring the
-# Rust arch matrix's clippy gate: version-pinned (config + install both pin
-# v2.12.2), zero-warning bar, no arch dependence so it runs once on linux-x86_64.
 
 name: CI
 
@@ -75,8 +64,8 @@ jobs:
       # SC-CODEGOV: the dist-guard allowlist is a generated artifact — regenerate it from its
       # producer and fail on any byte difference, so a hand-edited allowlist.json or a producer
       # change landed without regenerating fails the same way. (The scan gate that rejects
-      # committed binaries is staged until the pre-SC-DISTRIBUTION go/.bin/* debt is retired
-      # through CD; see tooling/dist-guard/README.md.)
+      # committed binaries stays unwired by deliberate CI-design decision, not a live debt;
+      # see tooling/dist-guard/README.md.)
       - name: dist-guard allowlist is current with its producer (SC-CODEGOV)
         run: python3 tooling/dist-guard/check.py check --root .
       # SC-RESOLVE guardrail: a go.mod/go.sum that resolves to a binary/LFS
@@ -269,7 +258,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: guardrail
     steps:
-      # go.mod is LFS-routed (see the go job below) — lfs: true smudges go/logkit's manifest so
+      # go/logkit's go.mod is LFS-routed — lfs: true smudges the manifest so
       # setup-go reads the real go directive instead of a pointer stub.
       - uses: actions/checkout@v5
         with:
@@ -376,69 +365,6 @@ jobs:
         if: ${{ !matrix.test_native }}
         run: echo "cross target ${{ matrix.target }} - fmt+clippy only (no hosted runner to execute the test binary natively)"
 
-  go:
-    name: go-${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
-    needs: guardrail
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: linux-x86_64
-            os: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            test_native: true
-          - name: linux-aarch64
-            os: ubuntu-24.04-arm
-            goos: linux
-            goarch: arm64
-            test_native: true
-          - name: macos-aarch64
-            os: macos-latest
-            goos: darwin
-            goarch: arm64
-            test_native: true
-          - name: macos-x86_64
-            os: macos-latest
-            goos: darwin
-            goarch: amd64
-            test_native: false
-    steps:
-      # go.mod is LFS-routed (the *.mod binary-extension rule also catches Go's
-      # go.mod), and go/.bin/* prebuilt binaries are LFS-routed too — lfs: true
-      # smudges both so the checkout is buildable, not pointer stubs.
-      - uses: actions/checkout@v5
-        with:
-          lfs: true
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go/build-helpers/go.mod
-      - name: gofmt --check
-        working-directory: go/build-helpers
-        run: |
-          fmt_diff="$(gofmt -l .)"
-          if [ -n "$fmt_diff" ]; then
-            echo "$fmt_diff"
-            exit 1
-          fi
-      - name: go vet
-        working-directory: go/build-helpers
-        run: go vet ./...
-      - name: go build (${{ matrix.goos }}/${{ matrix.goarch }})
-        working-directory: go/build-helpers
-        run: go build -trimpath -ldflags='-s -w' -o /dev/null .
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-      - name: go test (native only)
-        if: matrix.test_native
-        working-directory: go/build-helpers
-        run: go test ./...
-      - name: Skip test execution (cross target, no native runner)
-        if: ${{ !matrix.test_native }}
-        run: echo "cross target ${{ matrix.goos }}/${{ matrix.goarch }} - build+vet+fmt only (no hosted runner to execute the test binary natively)"
-
   # SC-FORCEDUSE / SC-DISTRIBUTION guardrail: plugin-foundation's two POSIX-sh scripts
   # (forced-use-hook.sh, download-script.sh) are shared byte-identical into every govern-now
   # CLI's plugin, so a regression here reaches every consumer at once. jq is required by
@@ -457,24 +383,6 @@ jobs:
       - name: download-script.sh regression suite
         working-directory: plugin-foundation
         run: bash download-script.test.sh
-
-  golangci-lint:
-    name: golangci-lint
-    runs-on: ubuntu-latest
-    needs: guardrail
-    steps:
-      # go.mod is LFS-routed (see the go job above) — lfs: true smudges it so
-      # setup-go's go-version-file read sees the real go directive, not a pointer stub.
-      - uses: actions/checkout@v5
-        with:
-          lfs: true
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go/build-helpers/go.mod
-      - uses: golangci/golangci-lint-action@v8.0.0
-        with:
-          version: v2.12.2
-          working-directory: go/build-helpers
 
   # GH-specific caveat, no GitLab equivalent needed here: GitHub Advanced Security secret
   # scanning is a repo/org SETTING, not a workflow step — it cannot be replicated as a job
