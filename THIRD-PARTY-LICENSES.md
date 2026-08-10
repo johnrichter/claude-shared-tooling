@@ -5,7 +5,6 @@ This file lists the third-party code bundled into this repository's distributed 
 Scope:
 
 - Python side: zero third-party runtime dependencies (stdlib only).
-- Go side (`go/build-helpers`): one third-party dependency, `doublestar` (glob matching in `bh/surface.go`), statically linked into the distributed `go/.bin/build-helpers-*` binaries.
 - Go side (`go/logkit`): `zerolog` (the JSON stream's byte writer) and `jcs` (RFC 8785 canonicalization), plus zerolog's own `go-isatty`, `go-colorable` and `golang.org/x/sys` dependencies, statically linked into any binary that imports `go/logkit`.
 - Go side (`go/fsx`): `renameio` (crash-safe atomic writes) and `doublestar` (glob-based path classification), statically linked into any binary that imports `go/fsx`.
 - Go side (`go/schema`): `santhosh-tekuri/jsonschema` (draft-2020-12 validation), plus its own `golang.org/x/text` dependency (localized error strings), statically linked into any binary that imports `go/schema`.
