@@ -133,7 +133,7 @@
       "owner": "ai-shared-lib",
       "status": "shipped",
       "fail_fast_symbol": "ai-shared-lib/go/state/record.go:RecordTask",
-      "notes": "The worked rung-1 example: the writer already holds everything needed to refuse, so the bad state is unrepresentable rather than merely detectable. The refusal now lives in go/state, the shared state library; bh/execution.go keeps its own pre-existing RecordTask until callers migrate onto the shared writer."
+      "notes": "The worked rung-1 example: the writer already holds everything needed to refuse, so the bad state is unrepresentable rather than merely detectable. The refusal lives in go/state, the shared state library, and every caller writes through it."
     },
     {
       "id": "anoikis-tools.dispatch.oversized-return-refused",
@@ -415,7 +415,7 @@
     },
     {
       "id": "ai-shared-lib.dist-guard.no-committed-binary",
-      "statement": "No binary artifact is committed to the tree except the single documented last-resort path.",
+      "statement": "No binary artifact is committed to the tree except through the allowlist, which structurally permits at most one documented exception and holds zero entries in the steady state.",
       "rung": 3,
       "fail_direction": "closed",
       "blast_radius": "A false positive fails one run and is resolved by an allowlist entry that is itself reviewed and regenerated. A committed binary is unreviewable, bloats every clone permanently, and is the delivery route the distribution design removes.",
@@ -424,7 +424,7 @@
       "gate_id": "ai-shared-lib.dist-guard",
       "reason_lower_rung": "The question is whether the tracked tree contains a binary, which is a property of the repository rather than of any one write; a gate would also miss anything arriving by merge.",
       "test_id": "ai-shared-lib/tests/test_dist_guard.py::ScanSubprocessTests",
-      "notes": "The scan half of this guard is staged out of the required CI path until the pre-distribution prebuilt-binary debt is retired through the release pipeline; the currency half runs today. Until it is wired, enforcement is the test named here plus review, and this entry is what makes that gap legible."
+      "notes": "The scan gate here stays unwired from the required CI path by deliberate design, not a live committed-binary debt — scripts/check_no_raw_binary.py already covers the tracked tree authoritatively; the currency half (this allowlist matching its producer) runs today, and the producer itself enforces the at-most-one bound."
     },
     {
       "id": "ai-shared-lib.dist-guard.allowlist-regenerates-identically",
