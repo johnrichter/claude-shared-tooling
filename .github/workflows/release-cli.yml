@@ -19,15 +19,15 @@ on:
   workflow_call:
     inputs:
       version:
-        description: "Tag to cut, e.g. go/build-helpers/v1.2.3 (SC-VERSIONING: tag prefix == module path)."
+        description: "Tag to cut, e.g. lang/example-cli/v1.2.3 (SC-VERSIONING: tag prefix == module path)."
         required: true
         type: string
       module_dir:
-        description: "Directory the CLI builds from, relative to repo root (e.g. go/build-helpers)."
+        description: "Directory the CLI builds from, relative to repo root (e.g. lang/example-cli)."
         required: true
         type: string
       binary_name:
-        description: "Output binary name (e.g. build-helpers)."
+        description: "Output binary name (e.g. example-cli)."
         required: true
         type: string
       dry_run:
@@ -82,7 +82,7 @@ jobs:
         run: go build -trimpath -buildvcs=false -ldflags='-s -w' -o "${{ inputs.binary_name }}" .
 
       # Archive names must be flat: a release tag carries its module-path prefix
-      # (SC-VERSIONING, e.g. go/build-helpers/v1.2.3), so the filename uses the tag's
+      # (SC-VERSIONING, e.g. lang/example-cli/v1.2.3), so the filename uses the tag's
       # leaf only — a slash in the name would send tar writing into a nonexistent dir.
       # Inputs pass through env, never interpolated into the shell.
       - name: Archive + checksum
