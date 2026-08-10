@@ -317,7 +317,7 @@ go.mod text=auto eol=lf diff merge -filter
 # Repo-local — extensionless prebuilt binaries under go/.bin/, matched by name
 # glob since they carry no extension for the class rules below to catch.
 #
-# build-helpers prebuilt binaries (one per OS/arch)
+# Repository convention for extensionless prebuilt binaries (one per OS/arch, e.g., clikit-emit)
 go/.bin/* filter=lfs diff=lfs merge=lfs -text
 
 #
