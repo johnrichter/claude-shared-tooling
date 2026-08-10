@@ -19,7 +19,7 @@ a legitimately committed binary *asset* (image, font) that carries no execute bi
 | Command | Does |
 |---|---|
 | `scan` | Fails if any tracked executable is binary content and not in `allowlist.json`. |
-| `generate` | Renders `allowlist.json` from its producer (`dist_guard/allowlist.py`) and writes it. |
+| `generate` | Renders `allowlist.json` from its producer and writes it. |
 | `check` | Renders `allowlist.json` in memory and diffs against disk; exit 1 on drift or missing. |
 
 ```sh
@@ -30,12 +30,10 @@ python3 tooling/dist-guard/check.py check --root .
 
 ## The allowlist
 
-Exactly one entry: `go/.bin/build-helpers-darwin-arm64`, a Step-0 last resort committed before
-any arm64-macOS CI runner existed to produce it through CD. `dist_guard/allowlist.py` is the
-producer — never hand-edit `allowlist.json`; edit `ENTRIES` there and run `generate`.
-`ENTRIES` carrying more than one item is a hard error (`ValueError`, exit 2 from the CLI):
-SC-DISTRIBUTION scopes this as a single documented exception, not a pattern later exceptions
-can join.
+Empty in the steady state: no committed binary is permitted at all. SC-DISTRIBUTION allows at
+most one documented exception — zero or one entry is valid; two or more is a hard error
+(`ValueError`, exit 2 from the CLI), never a growable list. The allowlist has a producer —
+never hand-edit `allowlist.json`; edit `ENTRIES` in the producer and run `generate`.
 
 ## Exit codes
 
@@ -43,15 +41,7 @@ can join.
 |---|---|
 | 0 | clean (`scan`), or current with its producer (`check`) |
 | 1 | a committed binary is not allowlisted (`scan`); the allowlist drifted or is missing (`check`) |
-| 2 | usage or allowlist-source error (e.g. `ENTRIES` has more than one item) |
-
-## Known residual (out of this tool's scope)
-
-`go/.bin/build-helpers-darwin-amd64`, `-linux-amd64`, and `-linux-arm64` are committed today
-alongside the allowlisted `-darwin-arm64` — pre-SC-DISTRIBUTION bootstrap debt from before CD
-existed to build and publish them. `scan` correctly flags all three; retiring them is a release-
-pipeline task (wiring `build-helpers`'s actual release through `release-cli.yml`), not this
-guard's job to paper over.
+| 2 | usage or allowlist-source error (e.g. `ENTRIES` carries more than one item) |
 
 ## Wiring it into CI
 

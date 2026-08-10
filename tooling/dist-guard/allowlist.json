@@ -1,9 +1,4 @@
 {
   "generated_by": "tooling/dist-guard/dist_guard/allowlist.py \u2014 do not hand-edit; run `python3 tooling/dist-guard/check.py generate`",
-  "entries": [
-    {
-      "path": "go/.bin/build-helpers-darwin-arm64",
-      "reason": "Step-0 last resort (SC-DISTRIBUTION): no arm64-macOS CI runner existed yet to produce this binary through CD, so it was committed once to unblock a working pre-commit hook on an Apple-Silicon clone. Superseded once the SC-DISTRIBUTION CLI release template publishes per-OS/arch archives from a real CI runner; until then this is the only path a committed binary is allowed to occupy."
-    }
-  ]
+  "entries": []
 }

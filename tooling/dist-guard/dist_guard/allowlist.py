@@ -1,4 +1,4 @@
-"""The allowlist producer — single source of record for dist-guard's one permitted exception.
+"""The allowlist producer — single source of record for dist-guard's permitted exceptions.
 
 Edit ENTRIES here, never `allowlist.json` directly, then run `check.py generate` to re-render
 it. `check.py check` regenerates in memory and diffs against disk, so a hand-edit or a source
@@ -16,37 +16,25 @@ class Entry(TypedDict):
     reason: str
 
 
-# Exactly one entry, enforced structurally (see `_assert_single`) rather than left to review
-# discipline alone: SC-DISTRIBUTION scopes the darwin-arm64 last resort as a single documented
-# path, not a pattern other exceptions can join.
-ENTRIES: list[Entry] = [
-    {
-        "path": "go/.bin/build-helpers-darwin-arm64",
-        "reason": (
-            "Step-0 last resort (SC-DISTRIBUTION): no arm64-macOS CI runner existed yet to "
-            "produce this binary through CD, so it was committed once to unblock a working "
-            "pre-commit hook on an Apple-Silicon clone. Superseded once the SC-DISTRIBUTION "
-            "CLI release template publishes per-OS/arch archives from a real CI runner; until "
-            "then this is the only path a committed binary is allowed to occupy."
-        ),
-    },
-]
+# At most one entry, enforced structurally (see `_assert_at_most_one`) rather than left to
+# review discipline alone: SC-DISTRIBUTION permits at most one documented committed-binary
+# exception, never a growable list. The steady state is zero — no committed binary at all.
+ENTRIES: list[Entry] = []
 
 _GENERATED_BY = "tooling/dist-guard/dist_guard/allowlist.py"
 
 
-def _assert_single(entries: list[Entry]) -> None:
-    if len(entries) != 1:
+def _assert_at_most_one(entries: list[Entry]) -> None:
+    if len(entries) > 1:
         raise ValueError(
-            f"dist-guard allowlist must carry exactly one entry, found {len(entries)} — "
-            "SC-DISTRIBUTION scopes the darwin-arm64 last resort as a single documented "
-            "exception, not a growable list"
+            f"dist-guard allowlist must carry at most one entry, found {len(entries)} — "
+            "SC-DISTRIBUTION permits a single documented exception at most, not a growable list"
         )
 
 
 def render() -> str:
     """Deterministic JSON rendering of ENTRIES — the file `generate` writes to disk."""
-    _assert_single(ENTRIES)
+    _assert_at_most_one(ENTRIES)
     doc = {
         "generated_by": f"{_GENERATED_BY} — do not hand-edit; run `python3 tooling/dist-guard/check.py generate`",
         "entries": ENTRIES,

@@ -2,8 +2,8 @@
 """Regression for tooling/dist-guard — the SC-DISTRIBUTION no-committed-binaries guard.
 
 `scan` runs as a SUBPROCESS against a throwaway real git repo (the exact argv/exit-code
-contract CI hits); the allowlist producer's invariants (single-entry, byte-for-byte currency)
-run in-process against the committed artifact.
+contract CI hits); the allowlist producer's invariants (at-most-one, empty steady state,
+byte-for-byte currency) run in-process against the committed artifact.
 """
 from __future__ import annotations
 
@@ -16,7 +16,8 @@ from pathlib import Path
 _DIST_GUARD = Path(__file__).resolve().parent.parent / "tooling" / "dist-guard"
 _CHECK = _DIST_GUARD / "check.py"
 _ALLOWLIST_JSON = _DIST_GUARD / "allowlist.json"
-_ALLOWLISTED_PATH = "go/.bin/build-helpers-darwin-arm64"
+# The path that WAS the standing exception before this retirement; now allowlisted nowhere.
+_FORMER_ALLOWLISTED_PATH = "go/.bin/build-helpers-darwin-arm64"
 
 sys.path.insert(0, str(_DIST_GUARD))
 from dist_guard import allowlist  # noqa: E402
@@ -63,11 +64,20 @@ class ScanSubprocessTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, msg=result.stdout + result.stderr)
         self.assertIn("bin/planted", result.stderr)
 
-    def test_allowlisted_darwin_arm64_accepted(self):
+    def test_clean_tree_accepted(self):
+        # Post-deletion steady state: no committed binary, empty allowlist -> scan exits 0.
         root = self._repo()
-        self._commit_executable(root, _ALLOWLISTED_PATH, _BINARY)
+        self._commit_executable(root, "bin/run.sh", b"#!/bin/sh\necho hi\n")
         result = _run_guard(root, "scan")
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
+    def test_former_darwin_arm64_now_rejected(self):
+        # The standing exception is retired: the once-allowlisted path is now a violation.
+        root = self._repo()
+        self._commit_executable(root, _FORMER_ALLOWLISTED_PATH, _BINARY)
+        result = _run_guard(root, "scan")
+        self.assertEqual(result.returncode, 1, msg=result.stdout + result.stderr)
+        self.assertIn(_FORMER_ALLOWLISTED_PATH, result.stderr)
 
     def test_executable_text_ignored(self):
         root = self._repo()
@@ -89,12 +99,26 @@ class AllowlistProducerTests(unittest.TestCase):
     def test_render_matches_committed_json_byte_for_byte(self):
         self.assertEqual(allowlist.render(), _ALLOWLIST_JSON.read_text(encoding="utf-8"))
 
-    def test_committed_allowlist_holds_only_the_documented_path(self):
-        self.assertEqual(allowlist.load(_ALLOWLIST_JSON), frozenset({_ALLOWLISTED_PATH}))
+    def test_committed_allowlist_is_empty(self):
+        self.assertEqual(allowlist.load(_ALLOWLIST_JSON), frozenset())
+
+    def test_zero_or_one_entry_is_valid(self):
+        # At-most-one lower boundary: empty (steady state) and a lone entry both render.
+        original = allowlist.ENTRIES
+        try:
+            allowlist.ENTRIES = []
+            allowlist.render()  # must not raise
+            allowlist.ENTRIES = [{"path": "go/.bin/one", "reason": "x"}]
+            allowlist.render()  # must not raise
+        finally:
+            allowlist.ENTRIES = original
 
     def test_more_than_one_entry_is_a_hard_error(self):
         original = allowlist.ENTRIES
-        allowlist.ENTRIES = original + [{"path": "go/.bin/extra", "reason": "x"}]
+        allowlist.ENTRIES = [
+            {"path": "go/.bin/one", "reason": "x"},
+            {"path": "go/.bin/two", "reason": "y"},
+        ]
         try:
             with self.assertRaises(ValueError):
                 allowlist.render()
