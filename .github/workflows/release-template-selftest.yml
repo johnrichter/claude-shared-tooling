@@ -1,7 +1,7 @@
-# Proves the SC-DISTRIBUTION CLI release template actually builds: dry-runs release-cli.yml
-# against this repo's own build-helpers module on every change to a release template or
-# dist-guard, and on demand. dry_run: true skips the tag push and the platform release — this
-# only exercises the build/archive/checksum stage, so it needs no release credentials.
+# Proves the SC-DISTRIBUTION library release template actually builds: dry-runs
+# release-library.yml on every change to a release template or dist-guard, and on demand.
+# dry_run: true skips the tag push and the platform release — this only exercises the
+# build/archive/checksum stage, so it needs no release credentials.
 
 name: SC-DISTRIBUTION release template self-test
 
@@ -13,16 +13,6 @@ on:
   workflow_dispatch: {}
 
 jobs:
-  dry-run-cli-release:
-    uses: ./.github/workflows/release-cli.yml
-    with:
-      # Slash-prefixed on purpose: mirrors a real SC-VERSIONING tag (module path prefix)
-      # so the dry-run exercises archive-name flattening, not just a bare token.
-      version: go/build-helpers/dry-run-${{ github.run_id }}
-      module_dir: go/build-helpers
-      binary_name: build-helpers
-      dry_run: true
-
   dry-run-library-release:
     uses: ./.github/workflows/release-library.yml
     with:
