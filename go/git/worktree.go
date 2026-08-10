@@ -29,7 +29,11 @@ func (r *Repo) WorktreeAdd(ctx context.Context, path, ref string, opts WorktreeA
 		if _, err := r.resolveRef(ctx, ref); err != nil {
 			return fmt.Errorf("git: worktree add %s at %s (dry-run): %w", path, ref, err)
 		}
-		if _, err := os.Stat(path); err == nil {
+		statPath := path
+		if !filepath.IsAbs(statPath) {
+			statPath = filepath.Join(r.Dir, statPath)
+		}
+		if _, err := os.Stat(statPath); err == nil {
 			return fmt.Errorf("git: worktree add (dry-run): path %s already exists", path)
 		} else if !os.IsNotExist(err) {
 			return fmt.Errorf("git: worktree add (dry-run): stat %s: %w", path, err)
@@ -74,7 +78,11 @@ func (r *Repo) WorktreeRemove(ctx context.Context, path string, opts WorktreeRem
 		if err != nil {
 			return err
 		}
-		target := canonPath(path)
+		removePath := path
+		if !filepath.IsAbs(removePath) {
+			removePath = filepath.Join(r.Dir, removePath)
+		}
+		target := canonPath(removePath)
 		for _, wt := range list {
 			if canonPath(wt.Path) == target {
 				return nil
