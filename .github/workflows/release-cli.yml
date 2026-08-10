@@ -5,9 +5,9 @@
 # that). A plugin-side download-script fetches the pinned version and verifies the checksum
 # before ever running the binary.
 #
-# Build matrix mirrors this repo's own CI arch coverage (.github/workflows/ci.yml): the same
-# four Go GOOS/GOARCH cells. The archive/checksum/publish shape below is language-independent —
-# swap the build step for the module's actual toolchain if reused for a non-Go CLI.
+# Build matrix covers the four standard GOOS/GOARCH cells (linux/macos x amd64/arm64). The
+# archive/checksum/publish shape below is language-independent — swap the build step for the
+# module's actual toolchain if reused for a non-Go CLI.
 #
 # GitLab equivalent: the same four-cell `parallel:matrix` build job + a `release-cli create`
 # job attaching the same artifacts. No separate GitLab template exists in this repo; this file
