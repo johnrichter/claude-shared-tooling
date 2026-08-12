@@ -25,6 +25,15 @@ type MergeOptions struct {
 	// are unchanged either way, including for a fast-forwardable branch.
 	// Reports clean-mergeability regardless of FastForward.
 	DryRun bool
+	// Sign requests a signed merge commit by passing -S to `git merge`. Its
+	// zero value (false) adds no signing flag at all, reproducing today's
+	// unsigned behavior exactly — every existing caller is unaffected. This
+	// package neither checks whether signing is configured nor enforces that
+	// it happen; the caller owns the decision and requirement, and git's own
+	// error (e.g. no usable key) surfaces unchanged on failure. Honored only
+	// on the real-merge path: a dry run never lands a commit, so there is
+	// nothing for it to sign.
+	Sign bool
 }
 
 // MergeResult is the outcome of a (possibly dry-run) merge.
@@ -64,6 +73,9 @@ func (r *Repo) Merge(ctx context.Context, branches []string, opts MergeOptions) 
 			args = append(args, "--no-ff")
 		case FastForwardOnly:
 			args = append(args, "--ff-only")
+		}
+		if opts.Sign {
+			args = append(args, "-S")
 		}
 	}
 	if opts.Message != "" {

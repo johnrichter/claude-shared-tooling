@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -194,5 +195,139 @@ func TestMerge_NoBranchesErrors(t *testing.T) {
 
 	if _, err := r.Merge(ctx, nil, MergeOptions{}); err == nil {
 		t.Fatalf("Merge with no branches: want error, got nil")
+	}
+}
+
+// divergentBranches sets up main and a feature branch that both carry a
+// commit the other lacks, so a merge between them cannot fast-forward and
+// always produces a real merge commit regardless of FastForward.
+func divergentBranches(t *testing.T, dir string) {
+	t.Helper()
+	base := commitFile(t, dir, "base.txt", "base\n", "base")
+	runGit(t, dir, "branch", "feature", base)
+	runGit(t, dir, "checkout", "-q", "feature")
+	commitFile(t, dir, "feature.txt", "feature\n", "feature work")
+	runGit(t, dir, "checkout", "-q", "main")
+	commitFile(t, dir, "main.txt", "main\n", "main work")
+}
+
+// TestMerge_ZeroValueProducesUnsignedCommit is the R5 regression guard: a
+// zero-valued MergeOptions must reproduce today's behavior byte-for-byte —
+// no -S reaches git merge — even with commit.gpgsign unset (not merely
+// overridden to false).
+func TestMerge_ZeroValueProducesUnsignedCommit(t *testing.T) {
+	// The host's own global/system git config may itself set
+	// commit.gpgsign=true; blank both out so "unset" in this test means
+	// unset in the whole effective config, not just the repo-local layer.
+	emptyConfig := filepath.Join(t.TempDir(), "empty.gitconfig")
+	if err := os.WriteFile(emptyConfig, nil, 0o600); err != nil {
+		t.Fatalf("write empty git config: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", emptyConfig)
+	t.Setenv("GIT_CONFIG_SYSTEM", emptyConfig)
+
+	ctx := context.Background()
+	r := newScratchRepo(t)
+	dir := r.Dir
+	// newScratchRepo pins commit.gpgsign=false for other tests' isolation;
+	// unset it so this test proves the zero value's own behavior rather than
+	// a config override doing the work for it.
+	runGit(t, dir, "config", "--unset", "commit.gpgsign")
+
+	divergentBranches(t, dir)
+
+	res, err := r.Merge(ctx, []string{"feature"}, MergeOptions{})
+	if err != nil {
+		t.Fatalf("Merge with zero-valued MergeOptions: %v", err)
+	}
+	if got := runGit(t, dir, "log", "-1", "--format=%G?", res.NewHead); got != "N" {
+		t.Fatalf("merge commit %%G? = %q, want N (unsigned) for zero-valued MergeOptions", got)
+	}
+}
+
+// TestMerge_SignProducesSignedCommit checks that Sign: true against a real
+// signing key produces a merge commit git itself reports as verifying.
+func TestMerge_SignProducesSignedCommit(t *testing.T) {
+	fingerprint, gnupgHome := genEphemeralGPGKey(t)
+	t.Setenv("GNUPGHOME", gnupgHome)
+
+	ctx := context.Background()
+	r := newScratchRepo(t)
+	dir := r.Dir
+	runGit(t, dir, "config", "gpg.format", "openpgp")
+	runGit(t, dir, "config", "user.signingkey", fingerprint)
+
+	divergentBranches(t, dir)
+
+	res, err := r.Merge(ctx, []string{"feature"}, MergeOptions{Sign: true})
+	if err != nil {
+		t.Fatalf("Merge with Sign=true: %v", err)
+	}
+	code := runGit(t, dir, "log", "-1", "--format=%G?", res.NewHead)
+	if code != "G" && code != "U" {
+		t.Fatalf("merge commit %%G? = %q, want G or U (signed) with Sign=true", code)
+	}
+}
+
+// TestMerge_DryRunIgnoresSign checks Sign is honored only on the real-merge
+// path: with Sign: true and no signing key configured anywhere, a dry run
+// must still succeed, proving -S never reached the dry-run argv (it would
+// otherwise fail attempting to sign).
+func TestMerge_DryRunIgnoresSign(t *testing.T) {
+	ctx := context.Background()
+	r := newScratchRepo(t)
+	dir := r.Dir
+
+	base := commitFile(t, dir, "base.txt", "base\n", "base")
+	runGit(t, dir, "branch", "feature", base)
+	runGit(t, dir, "checkout", "-q", "feature")
+	commitFile(t, dir, "feature.txt", "feature\n", "feature work")
+	runGit(t, dir, "checkout", "-q", "main")
+	mainHead := commitFile(t, dir, "main.txt", "main\n", "main work")
+
+	res, err := r.Merge(ctx, []string{"feature"}, MergeOptions{DryRun: true, Sign: true})
+	if err != nil {
+		t.Fatalf("Merge dry-run with Sign=true (no signing key available): %v", err)
+	}
+	if !res.WouldMerge {
+		t.Fatalf("WouldMerge = false, want true")
+	}
+	if got := runGit(t, dir, "rev-parse", "HEAD"); got != mainHead {
+		t.Fatalf("HEAD moved during dry-run merge: %s, want unchanged %s", got, mainHead)
+	}
+	if _, err := r.resolveRef(ctx, "MERGE_HEAD"); err == nil {
+		t.Fatalf("MERGE_HEAD left set after dry-run merge")
+	}
+}
+
+// TestMerge_SignWithoutUsableKeySurfacesGitError checks that this package
+// applies no policy around signing (K8): with Sign: true and no usable
+// signing key, git's own failure must surface — not a silent unsigned
+// success and not a ConflictError (there is no conflict here at all).
+func TestMerge_SignWithoutUsableKeySurfacesGitError(t *testing.T) {
+	if _, err := exec.LookPath("gpg"); err != nil {
+		t.Skip("gpg not installed; skipping keyless-signing-failure test")
+	}
+	ctx := context.Background()
+	r := newScratchRepo(t)
+	dir := r.Dir
+
+	// An empty, freshly created GNUPGHOME guarantees no secret key is
+	// available to satisfy -S.
+	emptyGNUPGHome := filepath.Join(t.TempDir(), "gnupg-empty")
+	if err := os.MkdirAll(emptyGNUPGHome, 0o700); err != nil {
+		t.Fatalf("mkdir GNUPGHOME: %v", err)
+	}
+	t.Setenv("GNUPGHOME", emptyGNUPGHome)
+	runGit(t, dir, "config", "gpg.format", "openpgp")
+
+	divergentBranches(t, dir)
+
+	_, err := r.Merge(ctx, []string{"feature"}, MergeOptions{Sign: true})
+	if err == nil {
+		t.Fatalf("Merge with Sign=true and no usable key: want error, got nil")
+	}
+	if _, ok := err.(*ConflictError); ok {
+		t.Fatalf("Merge with Sign=true and no usable key: got ConflictError, want git's own signing failure")
 	}
 }
