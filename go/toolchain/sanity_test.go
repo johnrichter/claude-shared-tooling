@@ -182,6 +182,45 @@ func TestSanityCacheRerunsAfterContentChange(t *testing.T) {
 	}
 }
 
+// TestSanityArgsAppendedToExecutedArgv checks Target.Args lands at the end
+// of the argv Run actually executes (captured verbatim on RunResult.Command).
+func TestSanityArgsAppendedToExecutedArgv(t *testing.T) {
+	dir := writeCrate(t, "crateargssanity", cleanLib)
+	args := []string{"--release", "x86_64-unknown-linux-gnu"}
+	res, err := Run(context.Background(), Target{Language: "rust", Check: CheckBuild, Dir: dir, Args: args}, Options{LogDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Command) < len(args) {
+		t.Fatalf("Command = %v, too short to hold Args %v", res.Command, args)
+	}
+	got := res.Command[len(res.Command)-len(args):]
+	if got[0] != args[0] || got[1] != args[1] {
+		t.Fatalf("Command tail = %v, want Args %v", got, args)
+	}
+}
+
+// TestSanityArgsAloneChangeRunIdentity checks two targets that differ only
+// in Args get distinct run identities, so they never collide on one cache
+// entry or one log file.
+func TestSanityArgsAloneChangeRunIdentity(t *testing.T) {
+	dir := writeCrate(t, "crateargsidsanity", cleanLib)
+	debug := Target{Language: "rust", Check: CheckBuild, Dir: dir, Args: []string{"--target", "x86_64-unknown-linux-gnu"}}
+	release := Target{Language: "rust", Check: CheckBuild, Dir: dir, Args: []string{"--release", "x86_64-unknown-linux-gnu"}}
+
+	debugRes, err := Run(context.Background(), debug, Options{LogDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Run debug: %v", err)
+	}
+	releaseRes, err := Run(context.Background(), release, Options{LogDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Run release: %v", err)
+	}
+	if debugRes.ID == releaseRes.ID {
+		t.Fatalf("ID = %q for both targets, want distinct IDs for distinct Args", debugRes.ID)
+	}
+}
+
 // TestSanityVerifyBinaryParityMatchesFreshBuild checks the committed==fresh
 // parity check against a trivially reproducible Go build, and that a
 // tampered committed artifact is caught as a mismatch.

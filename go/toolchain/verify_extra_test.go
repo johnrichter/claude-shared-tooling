@@ -182,3 +182,107 @@ func TestVerifyRerunOverwritesSameIDLogFileRatherThanAccumulating(t *testing.T) 
 		t.Fatalf("ID changed across identical reruns: %q vs %q", first.ID, second.ID)
 	}
 }
+
+// TestVerifyRunIDNilArgsVsExplicitEmptyArgsDiffer documents runID's actual,
+// deliberate behavior at the nil/empty boundary: Target.Args left nil
+// (zero value) and Target.Args set to []string{} (explicitly no args)
+// marshal to distinct JSON ("null" vs "[]") and so hash to distinct IDs.
+// A caller that means "no args" must pick one representation consistently
+// per target — silently switching between them changes the run identity
+// and therefore the cache key and log file name.
+func TestVerifyRunIDNilArgsVsExplicitEmptyArgsDiffer(t *testing.T) {
+	nilArgs := Target{Language: "rust", Check: CheckBuild, Dir: "/tmp/x"}
+	emptyArgs := Target{Language: "rust", Check: CheckBuild, Dir: "/tmp/x", Args: []string{}}
+
+	nilID, err := runID(nilArgs)
+	if err != nil {
+		t.Fatalf("runID(nil Args): %v", err)
+	}
+	emptyID, err := runID(emptyArgs)
+	if err != nil {
+		t.Fatalf("runID(empty Args): %v", err)
+	}
+	if nilID == emptyID {
+		t.Fatalf("runID nil-Args == explicit-empty-Args (%q); documented behavior expects these to differ ([]string(nil) marshals to null, []string{} marshals to []) — if this now matches, update the Args doc comment to state nil and empty are equivalent", nilID)
+	}
+}
+
+// TestVerifyRunIDStableAcrossArgsElementOrder checks runID is sensitive to
+// Args order: Run appends Args verbatim to argv (order affects the actual
+// command line, e.g. flag-then-value pairs), so two targets whose Args
+// hold the same elements in a different order must not collide on one
+// cache entry / log file — a stale replay of the wrong ordering would be a
+// silent correctness bug the tool never sees exercised.
+func TestVerifyRunIDStableAcrossArgsElementOrder(t *testing.T) {
+	a := Target{Language: "rust", Check: CheckBuild, Dir: "/tmp/x", Args: []string{"--target", "x86_64-unknown-linux-gnu"}}
+	b := Target{Language: "rust", Check: CheckBuild, Dir: "/tmp/x", Args: []string{"x86_64-unknown-linux-gnu", "--target"}}
+
+	idA, err := runID(a)
+	if err != nil {
+		t.Fatalf("runID(a): %v", err)
+	}
+	idB, err := runID(b)
+	if err != nil {
+		t.Fatalf("runID(b): %v", err)
+	}
+	if idA == idB {
+		t.Fatalf("runID identical for Args in different order (%q); a reordering that changes the executed command line must not collide on one cache entry", idA)
+	}
+}
+
+// TestVerifyConcurrentCacheWritesForArgsDifferingTargetsBothPersist mirrors
+// TestVerifyConcurrentCacheWritesForDifferentTargetsBothPersist but drives
+// the IDs through runID on targets that differ only in Args, so it also
+// proves the Args-derived ID is what actually keys concurrent cache
+// entries end to end — not just that runID returns distinct strings, but
+// that saveCache/lookupCache correctly separate them under concurrent
+// writers.
+func TestVerifyConcurrentCacheWritesForArgsDifferingTargetsBothPersist(t *testing.T) {
+	cacheDir := t.TempDir()
+	const n = 20
+	targets := make([]Target, n)
+	ids := make([]string, n)
+	for i := 0; i < n; i++ {
+		targets[i] = Target{Language: "rust", Check: CheckBuild, Dir: "/tmp/x", Args: []string{fmt.Sprintf("--target-%d", i)}}
+		id, err := runID(targets[i])
+		if err != nil {
+			t.Fatalf("runID[%d]: %v", i, err)
+		}
+		ids[i] = id
+	}
+	seen := map[string]bool{}
+	for i, id := range ids {
+		if seen[id] {
+			t.Fatalf("runID collision at index %d: %q already produced by an earlier Args-differing target", i, id)
+		}
+		seen[id] = true
+	}
+
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = saveCache(cacheDir, ids[i], "hash-shared-dir", false, RunResult{ID: ids[i]})
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("saveCache[%d]: %v", i, err)
+		}
+	}
+	for i := 0; i < n; i++ {
+		cached, hit, err := lookupCache(cacheDir, ids[i], "hash-shared-dir", false)
+		if err != nil {
+			t.Fatalf("lookupCache(%s): %v", ids[i], err)
+		}
+		if !hit {
+			t.Fatalf("lookupCache(%s): miss, want hit — a concurrent write for an Args-differing target was lost", ids[i])
+		}
+		if cached.ID != ids[i] {
+			t.Fatalf("lookupCache(%s): got ID %q, want %q — Args-derived IDs collided in the cache document", ids[i], cached.ID, ids[i])
+		}
+	}
+}

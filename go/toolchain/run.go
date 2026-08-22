@@ -36,6 +36,7 @@ func Run(ctx context.Context, target Target, opts Options) (*RunResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	argv = append(argv, target.Args...)
 	id, err := runID(target)
 	if err != nil {
 		return nil, err
@@ -145,15 +146,19 @@ func classifyStatus(exitCode int, counts Counts, allowWarnings bool) clikit.Stat
 }
 
 // runID derives RunResult.ID deterministically from what identifies a
-// target: its language, check, and directory. The same target always
+// target: its language, check, directory, and args. The same target always
 // produces the same ID, which doubles as the cache key (cache.go) and the
 // log file's base name (log.go) — a re-run of the identical target
 // overwrites its own prior log rather than accumulating one file per run.
+// Two targets that differ only in Args (e.g. a release build vs. a debug
+// build of the same dir) hash to distinct IDs, so they get distinct cache
+// entries and log files rather than colliding on one.
 func runID(target Target) (string, error) {
-	key := map[string]string{
+	key := map[string]any{
 		"language": target.Language,
 		"check":    string(target.Check),
 		"dir":      target.Dir,
+		"args":     target.Args,
 	}
 	hash, err := jsondoc.ContentHash(key)
 	if err != nil {

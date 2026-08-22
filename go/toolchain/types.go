@@ -115,6 +115,12 @@ type Target struct {
 	Language string
 	Check    Check
 	Dir      string
+	// Args carries a build profile and a target triple (e.g. "--release",
+	// "x86_64-unknown-linux-gnu") — nothing else. Run appends Args verbatim
+	// to the end of the adapter's argv, and runID folds it into the run
+	// identity so two targets differing only in Args get distinct cache
+	// entries and log files.
+	Args []string
 }
 
 // Options configures a Run call. The zero value already carries the
