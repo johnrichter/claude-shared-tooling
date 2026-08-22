@@ -1,6 +1,7 @@
 package toolchain
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 )
@@ -55,8 +56,14 @@ func lookup(language string) (Adapter, bool) {
 	return a, ok
 }
 
-// errUnsupportedCheck is the error Command returns for a check an adapter
-// has no equivalent for.
+// ErrUnsupportedCheck is the sentinel wrapped into the error Command returns
+// for a check an adapter has no equivalent for. Callers match it with
+// errors.Is rather than parsing the error's text.
+var ErrUnsupportedCheck = errors.New("toolchain: check not supported by adapter")
+
+// errUnsupportedCheck builds the error Command returns for a check tool has
+// no equivalent for, wrapping ErrUnsupportedCheck so callers can match it
+// with errors.Is.
 func errUnsupportedCheck(tool string, check Check) error {
-	return fmt.Errorf("toolchain: %s has no equivalent for check %q", tool, check)
+	return fmt.Errorf("toolchain: %s has no equivalent for check %q: %w", tool, check, ErrUnsupportedCheck)
 }

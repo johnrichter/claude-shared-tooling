@@ -58,6 +58,26 @@ func keysOf(m map[string]json.RawMessage) []string {
 	return ks
 }
 
+// TestVerifyCheckDeclaresFormatAndVetBesideBuildTestLint checks types.go's
+// Check constants include format and vet alongside build/test/lint, each
+// with the exact lowercase string value the wire contract and adapters key
+// on — not merely that the identifiers compile, but that their values are
+// the documented ones.
+func TestVerifyCheckDeclaresFormatAndVetBesideBuildTestLint(t *testing.T) {
+	want := map[Check]string{
+		CheckBuild:  "build",
+		CheckTest:   "test",
+		CheckLint:   "lint",
+		CheckFormat: "format",
+		CheckVet:    "vet",
+	}
+	for check, wantVal := range want {
+		if string(check) != wantVal {
+			t.Fatalf("Check constant = %q, want %q", string(check), wantVal)
+		}
+	}
+}
+
 // TestVerifyDiagnosticsCapIsExactlyTwenty pins MaxDiagnostics itself, since
 // the cap value is part of the frozen contract (acceptance criterion #1
 // names 20 explicitly, not "MaxDiagnostics whatever it happens to be").
