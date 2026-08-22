@@ -191,20 +191,18 @@ func TestAdversarialCargoRejectsUnsupportedCheck(t *testing.T) {
 	}
 }
 
-// TestAdversarialErrUnsupportedCheckMatchesFormatAndVet checks errors.Is
-// matches the exported ErrUnsupportedCheck sentinel against the error
-// cargoAdapter.Command returns for CheckFormat and CheckVet — checks
-// declared in types.go that cargo has no subcommand for — not merely that
-// an error is non-nil, and not by comparing error text.
-func TestAdversarialErrUnsupportedCheckMatchesFormatAndVet(t *testing.T) {
-	for _, check := range []Check{CheckFormat, CheckVet} {
-		_, err := cargoAdapter{}.Command(check)
-		if err == nil {
-			t.Fatalf("Command(%s): expected an error, got nil", check)
-		}
-		if !errors.Is(err, ErrUnsupportedCheck) {
-			t.Fatalf("Command(%s): errors.Is(err, ErrUnsupportedCheck) = false; err = %v", check, err)
-		}
+// TestAdversarialErrUnsupportedCheckMatchesVet checks errors.Is matches the
+// exported ErrUnsupportedCheck sentinel against the error
+// cargoAdapter.Command returns for CheckVet — a check declared in types.go
+// that cargo has no subcommand for — not merely that an error is non-nil,
+// and not by comparing error text.
+func TestAdversarialErrUnsupportedCheckMatchesVet(t *testing.T) {
+	_, err := cargoAdapter{}.Command(CheckVet)
+	if err == nil {
+		t.Fatalf("Command(%s): expected an error, got nil", CheckVet)
+	}
+	if !errors.Is(err, ErrUnsupportedCheck) {
+		t.Fatalf("Command(%s): errors.Is(err, ErrUnsupportedCheck) = false; err = %v", CheckVet, err)
 	}
 }
 

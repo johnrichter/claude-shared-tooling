@@ -218,6 +218,50 @@ func TestVerifyConcurrentCacheWritesForDifferentTargetsBothPersist(t *testing.T)
 	}
 }
 
+// TestVerifyCargoArgvTableLockedPerCheck pins cargoAdapter.Command's argv
+// for every check it supports: --locked on build, test and lint (so a stale
+// Cargo.lock fails the run instead of silently re-resolving), and its
+// absence on format — cargo fmt forwards unrecognized flags straight to
+// rustfmt, which has no --locked and would fail the check on that flag alone
+// rather than on anything about the code's formatting.
+func TestVerifyCargoArgvTableLockedPerCheck(t *testing.T) {
+	locked := map[Check]bool{
+		CheckBuild:  true,
+		CheckTest:   true,
+		CheckLint:   true,
+		CheckFormat: false,
+	}
+	for check, wantLocked := range locked {
+		argv, err := cargoAdapter{}.Command(check)
+		if err != nil {
+			t.Fatalf("Command(%s): %v", check, err)
+		}
+		gotLocked := false
+		for _, arg := range argv {
+			if arg == "--locked" {
+				gotLocked = true
+			}
+		}
+		if gotLocked != wantLocked {
+			t.Fatalf("Command(%s) = %v, --locked present = %v, want %v", check, argv, gotLocked, wantLocked)
+		}
+	}
+}
+
+// TestVerifyCargoFormatArgvIsFmtCheck pins the format check's argv exactly:
+// `fmt --check`, cargo fmt's own dry-run flag, never `fmt` alone (which
+// rewrites files) and never a flag order rustfmt would reject.
+func TestVerifyCargoFormatArgvIsFmtCheck(t *testing.T) {
+	argv, err := cargoAdapter{}.Command(CheckFormat)
+	if err != nil {
+		t.Fatalf("Command(CheckFormat): %v", err)
+	}
+	want := []string{"fmt", "--check"}
+	if len(argv) != len(want) || argv[0] != want[0] || argv[1] != want[1] {
+		t.Fatalf("Command(CheckFormat) = %v, want %v", argv, want)
+	}
+}
+
 // TestVerifyClippyLintReportsWarningAsMustFail checks the cargo Adapter's
 // lint Check (clippy) round-trips through Run exactly like build/test: a
 // clippy-flagged lint is a Diagnostic that fails the run by default.
