@@ -2,6 +2,7 @@ package toolchain
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -17,23 +18,43 @@ func init() {
 // adapter's cap-and-log behavior (run.go) exists to bound.
 type cargoAdapter struct{}
 
-func (cargoAdapter) Language() string { return "rust" }
-func (cargoAdapter) Tool() string     { return "cargo" }
+func (cargoAdapter) Language() string        { return "rust" }
+func (cargoAdapter) Route(check Check) Route { return RouteSubprocess }
+func (cargoAdapter) Tool(check Check) string { return "cargo" }
 
-// Command returns cargo's argv for check. build and lint both request
-// --message-format=json, giving Parse the compiler's own structured
-// diagnostics rather than its human-rendered text. test requests the same
-// format for its compile phase; the test harness itself still prints plain
-// text on the stable toolchain, so Parse also recognizes that plain-text
-// failure line.
+// RunInProcess is unreachable through Run — cargo spawns every check it
+// supports — and reports the unsupported-check error to a direct caller.
+func (cargoAdapter) RunInProcess(_ context.Context, target Target) ([]Diagnostic, error) {
+	return nil, errUnsupportedCheck("cargo", target.Check)
+}
+
+// Command returns cargo's argv for check. build, test and lint all pass
+// --locked, so a run fails on a stale Cargo.lock rather than silently
+// re-resolving it; format never does — cargo fmt forwards unrecognized
+// options straight to rustfmt, and rustfmt has no --locked, so passing it
+// there fails the check itself at exit 2 before rustfmt ever inspects a
+// file. build and lint also request --message-format=json, giving Parse the
+// compiler's own structured diagnostics rather than its human-rendered text.
+// test requests the same format for its compile phase; the test harness
+// itself still prints plain text on the stable toolchain, so Parse also
+// recognizes that plain-text failure line. build's profile (e.g.
+// "--release") and cross-compile target triple (e.g. "--target",
+// "x86_64-unknown-linux-gnu") are never named here — Run appends
+// target.Args, which carries exactly those, to this argv's end. A
+// cross-compile's linker comes from whatever CARGO_TARGET_<triple>_LINKER
+// (or an equivalent .cargo/config.toml) is already set in the environment
+// cargo inherits; this adapter reads none of that and sets no linker
+// variable of its own.
 func (cargoAdapter) Command(check Check) ([]string, error) {
 	switch check {
 	case CheckBuild:
-		return []string{"build", "--message-format=json"}, nil
+		return []string{"build", "--locked", "--message-format=json"}, nil
 	case CheckTest:
-		return []string{"test", "--message-format=json"}, nil
+		return []string{"test", "--locked", "--message-format=json"}, nil
 	case CheckLint:
-		return []string{"clippy", "--message-format=json", "--all-targets", "--all-features"}, nil
+		return []string{"clippy", "--locked", "--message-format=json", "--all-targets", "--all-features"}, nil
+	case CheckFormat:
+		return []string{"fmt", "--check"}, nil
 	default:
 		return nil, errUnsupportedCheck("cargo", check)
 	}
@@ -68,7 +89,11 @@ var cargoTestFailureRE = regexp.MustCompile(`^test (\S+) \.\.\. FAILED$`)
 // --message-format=json event or, during a test run, one of the test
 // harness's own plain-text lines. A line that is neither yields nothing —
 // cargo's build progress and summary lines are expected noise, not an
-// unparseable-output error.
+// unparseable-output error. cargo fmt --check carries neither shape: it
+// prints a unified diff per unformatted file and nothing else, so a failing
+// format check falls through to the synthetic exit-code diagnostic below
+// rather than a per-file one — the diff's presence in the log the run writes
+// is what a reader consults for which file and what changed.
 func (cargoAdapter) Parse(exitCode int, stdout, stderr []byte) ([]Diagnostic, error) {
 	var diags []Diagnostic
 	for _, line := range bytes.Split(stdout, []byte("\n")) {

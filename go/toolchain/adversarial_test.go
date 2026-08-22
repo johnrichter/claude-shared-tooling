@@ -3,6 +3,7 @@ package toolchain
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -184,8 +185,49 @@ func TestAdversarialMissingLogDirErrors(t *testing.T) {
 // reports an error, not a zero-value argv, for a Check it has no cargo
 // subcommand for.
 func TestAdversarialCargoRejectsUnsupportedCheck(t *testing.T) {
-	_, err := cargoAdapter{}.Command(Check("format"))
+	_, err := cargoAdapter{}.Command(Check("nonexistent-check"))
 	if err == nil {
 		t.Fatalf("expected an error for an unsupported check")
+	}
+}
+
+// TestAdversarialErrUnsupportedCheckMatchesVet checks errors.Is matches the
+// exported ErrUnsupportedCheck sentinel against the error
+// cargoAdapter.Command returns for CheckVet — a check declared in types.go
+// that cargo has no subcommand for — not merely that an error is non-nil,
+// and not by comparing error text.
+func TestAdversarialErrUnsupportedCheckMatchesVet(t *testing.T) {
+	_, err := cargoAdapter{}.Command(CheckVet)
+	if err == nil {
+		t.Fatalf("Command(%s): expected an error, got nil", CheckVet)
+	}
+	if !errors.Is(err, ErrUnsupportedCheck) {
+		t.Fatalf("Command(%s): errors.Is(err, ErrUnsupportedCheck) = false; err = %v", CheckVet, err)
+	}
+}
+
+// TestAdversarialRunPropagatesErrUnsupportedCheck checks Run's own error for
+// a check the registered adapter rejects still satisfies errors.Is against
+// ErrUnsupportedCheck — the sentinel must survive Run's passthrough
+// (run.go's `if err != nil { return nil, err }` immediately after
+// adapter.Command), not just Command's own direct return.
+func TestAdversarialRunPropagatesErrUnsupportedCheck(t *testing.T) {
+	_, err := Run(context.Background(), Target{Language: "rust", Check: CheckVet, Dir: t.TempDir()}, Options{LogDir: t.TempDir()})
+	if err == nil {
+		t.Fatalf("Run: expected an error for CheckVet against cargo, got nil")
+	}
+	if !errors.Is(err, ErrUnsupportedCheck) {
+		t.Fatalf("Run: errors.Is(err, ErrUnsupportedCheck) = false; err = %v", err)
+	}
+}
+
+// TestAdversarialErrUnsupportedCheckDoesNotMatchUnrelatedError checks
+// errors.Is against ErrUnsupportedCheck is a real sentinel match, not a
+// tautology that would pass against any error — an unrelated error must not
+// spuriously match.
+func TestAdversarialErrUnsupportedCheckDoesNotMatchUnrelatedError(t *testing.T) {
+	unrelated := errors.New("toolchain: some other failure")
+	if errors.Is(unrelated, ErrUnsupportedCheck) {
+		t.Fatalf("errors.Is matched an unrelated error against ErrUnsupportedCheck")
 	}
 }

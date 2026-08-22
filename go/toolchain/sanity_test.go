@@ -182,6 +182,82 @@ func TestSanityCacheRerunsAfterContentChange(t *testing.T) {
 	}
 }
 
+// TestSanityArgsAppendedToExecutedArgv checks Target.Args lands at the end
+// of the argv Run actually executes (captured verbatim on RunResult.Command).
+func TestSanityArgsAppendedToExecutedArgv(t *testing.T) {
+	dir := writeCrate(t, "crateargssanity", cleanLib)
+	args := []string{"--release", "x86_64-unknown-linux-gnu"}
+	res, err := Run(context.Background(), Target{Language: "rust", Check: CheckBuild, Dir: dir, Args: args}, Options{LogDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Command) < len(args) {
+		t.Fatalf("Command = %v, too short to hold Args %v", res.Command, args)
+	}
+	got := res.Command[len(res.Command)-len(args):]
+	if got[0] != args[0] || got[1] != args[1] {
+		t.Fatalf("Command tail = %v, want Args %v", got, args)
+	}
+}
+
+// TestSanityArgsAloneChangeRunIdentity checks two targets that differ only
+// in Args get distinct run identities, so they never collide on one cache
+// entry or one log file.
+func TestSanityArgsAloneChangeRunIdentity(t *testing.T) {
+	dir := writeCrate(t, "crateargsidsanity", cleanLib)
+	debug := Target{Language: "rust", Check: CheckBuild, Dir: dir, Args: []string{"--target", "x86_64-unknown-linux-gnu"}}
+	release := Target{Language: "rust", Check: CheckBuild, Dir: dir, Args: []string{"--release", "x86_64-unknown-linux-gnu"}}
+
+	debugRes, err := Run(context.Background(), debug, Options{LogDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Run debug: %v", err)
+	}
+	releaseRes, err := Run(context.Background(), release, Options{LogDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Run release: %v", err)
+	}
+	if debugRes.ID == releaseRes.ID {
+		t.Fatalf("ID = %q for both targets, want distinct IDs for distinct Args", debugRes.ID)
+	}
+}
+
+// unformattedLib is valid Rust that rustfmt would rewrite (spacing around
+// the signature and body), so it fails a format check without failing a
+// build.
+const unformattedLib = "pub fn add(a:i32,b:i32)->i32{a+b}\n"
+
+// TestSanityFormatCheckFailsAndLeavesFileUnchanged checks the format check
+// against a crate with one unformatted file: the run reports GateNegative,
+// and the file's bytes on disk are exactly what they were before the run —
+// cargo fmt --check must never rewrite what it's asked only to check.
+func TestSanityFormatCheckFailsAndLeavesFileUnchanged(t *testing.T) {
+	dir := writeCrate(t, "cratefmtsanity", unformattedLib)
+	libPath := filepath.Join(dir, "src", "lib.rs")
+	before, err := os.ReadFile(libPath)
+	if err != nil {
+		t.Fatalf("read lib.rs before run: %v", err)
+	}
+
+	res, err := Run(context.Background(), Target{Language: "rust", Check: CheckFormat, Dir: dir}, Options{LogDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != clikit.StatusGateNegative {
+		t.Fatalf("Status = %q, want gate_negative for an unformatted file", res.Status)
+	}
+	if res.Counts.Errors == 0 {
+		t.Fatalf("Counts.Errors = 0, want > 0 for a failed format check")
+	}
+
+	after, err := os.ReadFile(libPath)
+	if err != nil {
+		t.Fatalf("read lib.rs after run: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("lib.rs changed by the format check: before=%q after=%q", before, after)
+	}
+}
+
 // TestSanityVerifyBinaryParityMatchesFreshBuild checks the committed==fresh
 // parity check against a trivially reproducible Go build, and that a
 // tampered committed artifact is caught as a mismatch.

@@ -101,12 +101,14 @@ type RunResult struct {
 // Check is a language-tool run's kind: what the tool was asked to verify.
 type Check string
 
-// The three checks every Adapter is expected to support, though Command may
-// reject one a particular language tool has no equivalent for.
+// The checks an Adapter may support, though Command may reject one a
+// particular language tool has no equivalent for.
 const (
-	CheckBuild Check = "build"
-	CheckTest  Check = "test"
-	CheckLint  Check = "lint"
+	CheckBuild  Check = "build"
+	CheckTest   Check = "test"
+	CheckLint   Check = "lint"
+	CheckFormat Check = "format"
+	CheckVet    Check = "vet"
 )
 
 // Target names one thing Run can check: a language, a check kind, and the
@@ -115,6 +117,12 @@ type Target struct {
 	Language string
 	Check    Check
 	Dir      string
+	// Args carries a build profile and a target triple (e.g. "--release",
+	// "x86_64-unknown-linux-gnu") — nothing else. Run appends Args verbatim
+	// to the end of the adapter's argv, and runID folds it into the run
+	// identity so two targets differing only in Args get distinct cache
+	// entries and log files.
+	Args []string
 }
 
 // Options configures a Run call. The zero value already carries the
