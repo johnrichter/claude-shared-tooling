@@ -11,13 +11,15 @@ import (
 )
 
 // Run executes target's check through its language's registered Adapter and
-// returns the normalized, capped RunResult. It is the one execution path
-// every adapter shares: Run spawns the tool (sysops.Run), applies the
-// content-hash impact-skip cache when opts.CacheDir is set, classifies
-// pass/fail per opts.AllowWarnings, caps Diagnostics at MaxDiagnostics, and
-// writes the uncapped detail to opts.LogDir.
+// returns the normalized, capped RunResult. The adapter picks the route —
+// a spawned tool or in-process analysis — and Run owns everything after it:
+// the content-hash impact-skip cache when opts.CacheDir is set,
+// classification of pass/fail per opts.AllowWarnings, the MaxDiagnostics cap
+// on Diagnostics, and the uncapped detail written to opts.LogDir. All of
+// that is identical on both routes; only how the diagnostics were obtained
+// differs.
 //
-// A returned error means the tool could not be run at all or its output
+// A returned error means the check could not be run at all or its output
 // could not be parsed — an infrastructure failure, never a code problem the
 // tool itself reported (that is always a Diagnostic on a returned
 // RunResult).
@@ -32,11 +34,26 @@ func Run(ctx context.Context, target Target, opts Options) (*RunResult, error) {
 	if !ok {
 		return nil, fmt.Errorf("toolchain: no adapter registered for language %q", target.Language)
 	}
-	argv, err := adapter.Command(target.Check)
-	if err != nil {
-		return nil, err
+	route := adapter.Route(target.Check)
+	if !route.valid() {
+		return nil, fmt.Errorf("toolchain: adapter for language %q reported unknown route %q for check %q",
+			target.Language, route, target.Check)
 	}
-	argv = append(argv, target.Args...)
+	// Tool answers on every route, so the name on the result, the log, and
+	// every error message below comes from this one read.
+	tool := adapter.Tool(target.Check)
+
+	// Only a spawned check has an argv; the in-process route leaves Command
+	// unread and the command field empty on both the result and the log.
+	var argv []string
+	if route == RouteSubprocess {
+		cmd, err := adapter.Command(target.Check)
+		if err != nil {
+			return nil, err
+		}
+		argv = append(cmd, target.Args...)
+	}
+
 	id, err := runID(target)
 	if err != nil {
 		return nil, err
@@ -62,19 +79,21 @@ func Run(ctx context.Context, target Target, opts Options) (*RunResult, error) {
 		timeout = DefaultTimeout
 	}
 	start := time.Now()
-	execRes, err := sysops.Run(ctx, adapter.Tool(target.Check), argv, sysops.Options{Dir: target.Dir, Timeout: timeout})
+	var out outcome
+	// Exhaustive: the route.valid() guard above rejected anything else.
+	switch route {
+	case RouteSubprocess:
+		out, err = runSubprocess(ctx, adapter, target, tool, argv, timeout)
+	case RouteInProcess:
+		out, err = runInProcess(ctx, adapter, target, timeout)
+	}
 	duration := time.Since(start)
 	if err != nil {
-		return nil, fmt.Errorf("toolchain: run %s %v in %s: %w", adapter.Tool(target.Check), argv, target.Dir, err)
-	}
-
-	diags, err := adapter.Parse(execRes.ExitCode, execRes.Stdout, execRes.Stderr)
-	if err != nil {
-		return nil, fmt.Errorf("toolchain: parse %s output: %w", adapter.Tool(target.Check), err)
+		return nil, err
 	}
 
 	counts := Counts{}
-	for _, d := range diags {
+	for _, d := range out.diags {
 		switch d.Severity {
 		case SeverityError:
 			counts.Errors++
@@ -83,19 +102,19 @@ func Run(ctx context.Context, target Target, opts Options) (*RunResult, error) {
 		}
 	}
 
-	capped := diags
+	capped := out.diags
 	overflow := 0
-	if len(diags) > MaxDiagnostics {
-		overflow = len(diags) - MaxDiagnostics
-		capped = diags[:MaxDiagnostics]
+	if len(out.diags) > MaxDiagnostics {
+		overflow = len(out.diags) - MaxDiagnostics
+		capped = out.diags[:MaxDiagnostics]
 	}
 
 	logRef, err := writeLog(opts.LogDir, id, logDetail{
-		Tool:        adapter.Tool(target.Check),
+		Tool:        tool,
 		Command:     argv,
-		Diagnostics: diags,
-		Stdout:      string(execRes.Stdout),
-		Stderr:      string(execRes.Stderr),
+		Diagnostics: out.diags,
+		Stdout:      string(out.stdout),
+		Stderr:      string(out.stderr),
 	})
 	if err != nil {
 		return nil, err
@@ -104,10 +123,10 @@ func Run(ctx context.Context, target Target, opts Options) (*RunResult, error) {
 	result := &RunResult{
 		SchemaVersion: SchemaVersion,
 		ID:            id,
-		Tool:          adapter.Tool(target.Check),
+		Tool:          tool,
 		Language:      target.Language,
 		Command:       argv,
-		Status:        classifyStatus(execRes.ExitCode, counts, opts.AllowWarnings),
+		Status:        classifyStatus(out.exitCode, counts, opts.AllowWarnings),
 		Counts:        counts,
 		Diagnostics:   capped,
 		Overflow:      overflow,
@@ -122,6 +141,51 @@ func Run(ctx context.Context, target Target, opts Options) (*RunResult, error) {
 		}
 	}
 	return result, nil
+}
+
+// outcome is what one route produced, and the only thing Run's shared tail —
+// counting, capping, classification, logging, caching — reads. A route that
+// spawns nothing leaves exitCode, stdout and stderr at their zero values, so
+// the tail treats it exactly like a clean tool run that happened to report
+// these diagnostics.
+type outcome struct {
+	exitCode int
+	diags    []Diagnostic
+	stdout   []byte
+	stderr   []byte
+}
+
+// runSubprocess spawns tool with argv in target's directory and hands what
+// it wrote to the adapter's Parse. timeout bounds the child process.
+func runSubprocess(ctx context.Context, adapter Adapter, target Target, tool string, argv []string, timeout time.Duration) (outcome, error) {
+	execRes, err := sysops.Run(ctx, tool, argv, sysops.Options{Dir: target.Dir, Timeout: timeout})
+	if err != nil {
+		return outcome{}, fmt.Errorf("toolchain: run %s %v in %s: %w", tool, argv, target.Dir, err)
+	}
+	diags, err := adapter.Parse(execRes.ExitCode, execRes.Stdout, execRes.Stderr)
+	if err != nil {
+		return outcome{}, fmt.Errorf("toolchain: parse %s output: %w", tool, err)
+	}
+	return outcome{
+		exitCode: execRes.ExitCode,
+		diags:    diags,
+		stdout:   execRes.Stdout,
+		stderr:   execRes.Stderr,
+	}, nil
+}
+
+// runInProcess hands the target to the adapter's own analysis, bounded by
+// the same timeout a spawned tool gets. The diagnostics it returns are the
+// whole outcome: nothing was executed, so there is no exit status for
+// classifyStatus to weigh and no raw output for the log to carry.
+func runInProcess(ctx context.Context, adapter Adapter, target Target, timeout time.Duration) (outcome, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	diags, err := adapter.RunInProcess(ctx, target)
+	if err != nil {
+		return outcome{}, fmt.Errorf("toolchain: in-process %s check in %s: %w", target.Check, target.Dir, err)
+	}
+	return outcome{diags: diags}, nil
 }
 
 // classifyStatus derives a RunResult's clikit.Status from what the tool

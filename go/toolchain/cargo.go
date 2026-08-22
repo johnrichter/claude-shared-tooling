@@ -2,6 +2,7 @@ package toolchain
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -18,7 +19,14 @@ func init() {
 type cargoAdapter struct{}
 
 func (cargoAdapter) Language() string        { return "rust" }
+func (cargoAdapter) Route(check Check) Route { return RouteSubprocess }
 func (cargoAdapter) Tool(check Check) string { return "cargo" }
+
+// RunInProcess is unreachable through Run — cargo spawns every check it
+// supports — and reports the unsupported-check error to a direct caller.
+func (cargoAdapter) RunInProcess(_ context.Context, target Target) ([]Diagnostic, error) {
+	return nil, errUnsupportedCheck("cargo", target.Check)
+}
 
 // Command returns cargo's argv for check. build and lint both request
 // --message-format=json, giving Parse the compiler's own structured
