@@ -72,13 +72,64 @@ func TestVerifyDiagnosticsCapIsExactlyTwenty(t *testing.T) {
 // depending on cargo ever actually being slow.
 type sleepAdapter struct{}
 
-func (sleepAdapter) Language() string { return "slowlang" }
-func (sleepAdapter) Tool() string     { return "sleep" }
+func (sleepAdapter) Language() string        { return "slowlang" }
+func (sleepAdapter) Tool(check Check) string { return "sleep" }
 func (sleepAdapter) Command(check Check) ([]string, error) {
 	return []string{"5"}, nil
 }
 func (sleepAdapter) Parse(exitCode int, stdout, stderr []byte) ([]Diagnostic, error) {
 	return nil, nil
+}
+
+// multiToolAdapter is a fake Adapter fronting two distinct executables for
+// two distinct checks, so Tool's per-check signature can be exercised
+// without depending on cargoAdapter (which answers the same executable for
+// every check it supports).
+type multiToolAdapter struct{}
+
+func (multiToolAdapter) Language() string { return "multitool" }
+func (multiToolAdapter) Tool(check Check) string {
+	if check == CheckLint {
+		return "linter-bin"
+	}
+	return "builder-bin"
+}
+func (multiToolAdapter) Command(check Check) ([]string, error) {
+	if check == CheckLint {
+		return []string{"lint", "--check"}, nil
+	}
+	return []string{"build"}, nil
+}
+func (multiToolAdapter) Parse(exitCode int, stdout, stderr []byte) ([]Diagnostic, error) {
+	return nil, nil
+}
+
+// TestVerifyToolVariesByCheck checks that Tool(check) is check-dependent:
+// an adapter fronting more than one executable answers each check with its
+// own tool, and Command's argv for that check stays consistent with the
+// executable Tool names for it (never a "linter-bin" Tool paired with a
+// "build" argv or vice versa).
+func TestVerifyToolVariesByCheck(t *testing.T) {
+	a := multiToolAdapter{}
+	buildTool := a.Tool(CheckBuild)
+	lintTool := a.Tool(CheckLint)
+	if buildTool == lintTool {
+		t.Fatalf("Tool(CheckBuild) == Tool(CheckLint) == %q, want two different executables", buildTool)
+	}
+
+	for _, check := range []Check{CheckBuild, CheckLint} {
+		tool := a.Tool(check)
+		argv, err := a.Command(check)
+		if err != nil {
+			t.Fatalf("Command(%s): %v", check, err)
+		}
+		if tool == "builder-bin" && (len(argv) == 0 || argv[0] != "build") {
+			t.Fatalf("Tool(%s) = %q but Command(%s) = %v: executable and argv disagree", check, tool, check, argv)
+		}
+		if tool == "linter-bin" && (len(argv) == 0 || argv[0] != "lint") {
+			t.Fatalf("Tool(%s) = %q but Command(%s) = %v: executable and argv disagree", check, tool, check, argv)
+		}
+	}
 }
 
 // TestVerifyTimeoutIsErrorNotRunResult checks a tool invocation that exceeds

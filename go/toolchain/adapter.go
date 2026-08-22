@@ -14,9 +14,12 @@ type Adapter interface {
 	// Language returns the adapter's identity, e.g. "rust" — the key
 	// Target and the registry key on.
 	Language() string
-	// Tool returns the underlying executable name, e.g. "cargo" — carried
-	// verbatim onto RunResult.Tool.
-	Tool() string
+	// Tool returns the underlying executable name for check, e.g. "cargo" —
+	// carried verbatim onto RunResult.Tool. Most adapters run one executable
+	// for every check they support, but the interface takes check so an
+	// adapter fronting more than one tool (e.g. one language's formatter vs.
+	// its compiler) can answer accurately per check.
+	Tool(check Check) string
 	// Command returns the argv (excluding the working directory, which Run
 	// supplies separately as the process's cwd) for check, or an error if
 	// this adapter has no equivalent for it.

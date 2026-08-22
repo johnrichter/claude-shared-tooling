@@ -62,15 +62,15 @@ func Run(ctx context.Context, target Target, opts Options) (*RunResult, error) {
 		timeout = DefaultTimeout
 	}
 	start := time.Now()
-	execRes, err := sysops.Run(ctx, adapter.Tool(), argv, sysops.Options{Dir: target.Dir, Timeout: timeout})
+	execRes, err := sysops.Run(ctx, adapter.Tool(target.Check), argv, sysops.Options{Dir: target.Dir, Timeout: timeout})
 	duration := time.Since(start)
 	if err != nil {
-		return nil, fmt.Errorf("toolchain: run %s %v in %s: %w", adapter.Tool(), argv, target.Dir, err)
+		return nil, fmt.Errorf("toolchain: run %s %v in %s: %w", adapter.Tool(target.Check), argv, target.Dir, err)
 	}
 
 	diags, err := adapter.Parse(execRes.ExitCode, execRes.Stdout, execRes.Stderr)
 	if err != nil {
-		return nil, fmt.Errorf("toolchain: parse %s output: %w", adapter.Tool(), err)
+		return nil, fmt.Errorf("toolchain: parse %s output: %w", adapter.Tool(target.Check), err)
 	}
 
 	counts := Counts{}
@@ -91,7 +91,7 @@ func Run(ctx context.Context, target Target, opts Options) (*RunResult, error) {
 	}
 
 	logRef, err := writeLog(opts.LogDir, id, logDetail{
-		Tool:        adapter.Tool(),
+		Tool:        adapter.Tool(target.Check),
 		Command:     argv,
 		Diagnostics: diags,
 		Stdout:      string(execRes.Stdout),
@@ -104,7 +104,7 @@ func Run(ctx context.Context, target Target, opts Options) (*RunResult, error) {
 	result := &RunResult{
 		SchemaVersion: SchemaVersion,
 		ID:            id,
-		Tool:          adapter.Tool(),
+		Tool:          adapter.Tool(target.Check),
 		Language:      target.Language,
 		Command:       argv,
 		Status:        classifyStatus(execRes.ExitCode, counts, opts.AllowWarnings),

@@ -17,8 +17,8 @@ func init() {
 // adapter's cap-and-log behavior (run.go) exists to bound.
 type cargoAdapter struct{}
 
-func (cargoAdapter) Language() string { return "rust" }
-func (cargoAdapter) Tool() string     { return "cargo" }
+func (cargoAdapter) Language() string        { return "rust" }
+func (cargoAdapter) Tool(check Check) string { return "cargo" }
 
 // Command returns cargo's argv for check. build and lint both request
 // --message-format=json, giving Parse the compiler's own structured
