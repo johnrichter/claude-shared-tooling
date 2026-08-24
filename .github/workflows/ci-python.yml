@@ -1,0 +1,209 @@
+# Reusable CI template — Python track. Shares ci-go.yml's canonical preamble (mise pin,
+# verified fetch, platform resolution, dry-run gating) byte-for-byte; a change to that
+# shared shape belongs in ci-go.yml first, then copies here.
+#
+# Purpose: a `workflow_call` template that installs a pinned mise, installs a verified
+# language-tools release, and runs the five language-tools checks (build, test, lint,
+# format, vet) against a caller's Python project. It reads nothing from the caller beyond
+# mise.toml + mise.lock at the checked-out repo root and pyproject.toml at `project_dir` —
+# every other decision (runner image, extra checks language-tools doesn't cover) is a
+# typed input.
+#
+# The mise install step below sets MISE_PYTHON_COMPILE=0. An ambient [settings.python]
+# compile = true makes mise resolve a source-build asset instead of the committed
+# python-build-standalone url+sha256 pin, and that source build breaks `mise install
+# --locked`, which expects the pinned pre-built asset. Neither MISE_GLOBAL_CONFIG_FILE
+# nor XDG_CONFIG_HOME suppresses that setting on mise 2026.8.10 — only the env var does,
+# so it's set on this one step rather than assumed away by config isolation.
+#
+# Inputs:
+#   runs_on                          (string,  default "ubuntu-24.04")
+#     Fully qualified GitHub-hosted runner label, published by actions/runner-images.
+#     Never a floating tag (ubuntu-latest, ...): those move under a caller without notice.
+#   project_dir                      (string,  default ".")
+#     Python project directory language-tools checks, relative to the checked-out repo
+#     (language-tools' `--dir`).
+#   mise_version                     (string,  default "2026.8.10")
+#     mise release this template installs. Every mise.lock the fleet has committed was
+#     written by this version; override only to try a newer mise ahead of repinning the
+#     fleet.
+#   dry_run                          (boolean, default false)
+#     true installs mise and language-tools, verifies both, and stops — the five check
+#     steps and the extra-steps escape hatch are skipped. Proves the call contract and the
+#     installs without needing the caller's code to actually pass a check.
+#   extra_steps                      (string,  default "")
+#     Shell script run as a final step, after the five checks, for a repository-specific
+#     check language-tools doesn't cover (e.g. a shellcheck run, a GPG-signing smoke test).
+#     Empty runs nothing.
+#
+# Caller contract: the caller supplies nothing but these inputs — this template checks out
+# the caller's own repo itself, at repo root. Python has no cross-repository sibling
+# coupling the way Go's replace directive or Rust's [patch] entry do (no local path or
+# private-index dependency on this repo), so this template takes neither a sibling-checkout
+# input nor a GOPRIVATE-equivalent, and needs no secret. It pushes and publishes nothing.
+
+name: CI template (Python)
+
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: "Fully qualified GitHub-hosted runner label (actions/runner-images). Never a floating tag."
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      project_dir:
+        description: "Python project directory language-tools checks, relative to the checked-out repo."
+        required: false
+        type: string
+        default: "."
+      mise_version:
+        description: "mise release to install. Every committed mise.lock in the fleet was written by this version."
+        required: false
+        type: string
+        default: "2026.8.10"
+      dry_run:
+        description: "true installs and verifies mise + language-tools and stops; the five check steps and extra_steps are skipped."
+        required: false
+        type: boolean
+        default: false
+      extra_steps:
+        description: "Shell script run after the five checks, for a repository-specific check language-tools doesn't cover. Empty runs nothing."
+        required: false
+        type: string
+        default: ""
+
+env:
+  # Named once; every step below reads this instead of restating the version.
+  LANGUAGE_TOOLS_VERSION: "2.1.0"
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: python
+    runs-on: ${{ inputs.runs_on }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # mise and language-tools name platforms differently (mise: linux/macos, x64/arm64;
+      # language-tools: Go's own linux/darwin, amd64/arm64) — resolve both once, here.
+      - name: Resolve runner platform
+        id: platform
+        run: |
+          mkdir -p "${RUNNER_TEMP}/bin"
+          echo "${RUNNER_TEMP}/bin" >> "$GITHUB_PATH"
+          case "$(uname -s)" in
+            Linux)  mise_os=linux;  lt_os=linux  ;;
+            Darwin) mise_os=macos;  lt_os=darwin ;;
+            *) echo "::error::unsupported runner OS $(uname -s)"; exit 1 ;;
+          esac
+          case "$(uname -m)" in
+            x86_64|amd64)  mise_arch=x64;   lt_arch=amd64 ;;
+            arm64|aarch64) mise_arch=arm64; lt_arch=arm64 ;;
+            *) echo "::error::unsupported runner arch $(uname -m)"; exit 1 ;;
+          esac
+          {
+            echo "mise_os=${mise_os}"
+            echo "mise_arch=${mise_arch}"
+            echo "lt_os=${lt_os}"
+            echo "lt_arch=${lt_arch}"
+          } >> "$GITHUB_OUTPUT"
+
+      # Verified fetch (SC1 shape): fetch the release's own published checksum manifest,
+      # look up this artifact's digest by exact filename match, then fetch the artifact and
+      # fail closed on any mismatch. Never pipes a download into a shell.
+      - name: Install mise ${{ inputs.mise_version }} (verified fetch)
+        env:
+          MISE_VERSION: ${{ inputs.mise_version }}
+          MISE_OS: ${{ steps.platform.outputs.mise_os }}
+          MISE_ARCH: ${{ steps.platform.outputs.mise_arch }}
+        run: |
+          set -euo pipefail
+          bin="mise-v${MISE_VERSION}-${MISE_OS}-${MISE_ARCH}"
+          base="https://github.com/jdx/mise/releases/download/v${MISE_VERSION}"
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "${tmp}/SHASUMS256.txt" "${base}/SHASUMS256.txt"
+          curl -fsSL -o "${tmp}/${bin}" "${base}/${bin}"
+          expected="$(awk -v want="./${bin}" '$2 == want { print $1; exit }' "${tmp}/SHASUMS256.txt")"
+          if [ -z "${expected}" ]; then
+            echo "::error::${bin} not listed in SHASUMS256.txt for mise v${MISE_VERSION}"
+            exit 1
+          fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "${tmp}/${bin}" | awk '{print $1}')"
+          else
+            actual="$(shasum -a 256 "${tmp}/${bin}" | awk '{print $1}')"
+          fi
+          if [ "${expected}" != "${actual}" ]; then
+            echo "::error::sha256 mismatch for ${bin} -- expected ${expected}, got ${actual}"
+            exit 1
+          fi
+          install -m 0755 "${tmp}/${bin}" "${RUNNER_TEMP}/bin/mise"
+          rm -rf "${tmp}"
+
+      # MISE_PYTHON_COMPILE=0: without it, an ambient [settings.python] compile = true
+      # sends mise after a source-build asset that isn't the url+sha256 this repo's
+      # mise.lock pins, and --locked fails closed on that mismatch. See the header.
+      - name: mise install --locked
+        env:
+          MISE_PYTHON_COMPILE: "0"
+        run: mise install --locked
+
+      - name: Install language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} (verified fetch)
+        env:
+          LT_OS: ${{ steps.platform.outputs.lt_os }}
+          LT_ARCH: ${{ steps.platform.outputs.lt_arch }}
+        run: |
+          set -euo pipefail
+          archive="language-tools_${LANGUAGE_TOOLS_VERSION}_${LT_OS}_${LT_ARCH}.tar.gz"
+          base="https://github.com/johnrichter/language-tools/releases/download/v${LANGUAGE_TOOLS_VERSION}"
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "${tmp}/checksums.txt" "${base}/checksums.txt"
+          curl -fsSL -o "${tmp}/${archive}" "${base}/${archive}"
+          expected="$(awk -v want="${archive}" '$2 == want { print $1; exit }' "${tmp}/checksums.txt")"
+          if [ -z "${expected}" ]; then
+            echo "::error::${archive} not listed in checksums.txt for language-tools v${LANGUAGE_TOOLS_VERSION}"
+            exit 1
+          fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "${tmp}/${archive}" | awk '{print $1}')"
+          else
+            actual="$(shasum -a 256 "${tmp}/${archive}" | awk '{print $1}')"
+          fi
+          if [ "${expected}" != "${actual}" ]; then
+            echo "::error::sha256 mismatch for ${archive} -- expected ${expected}, got ${actual}"
+            exit 1
+          fi
+          tar -xzf "${tmp}/${archive}" -C "${tmp}"
+          install -m 0755 "${tmp}/language-tools" "${RUNNER_TEMP}/bin/language-tools"
+          rm -rf "${tmp}"
+
+      - name: Dry-run summary (installs verified, checks skipped)
+        if: ${{ inputs.dry_run }}
+        run: echo "dry-run summary -- mise ${{ inputs.mise_version }} and language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} installed and verified, the five check steps are skipped"
+
+      - name: language-tools build
+        if: ${{ !inputs.dry_run }}
+        run: language-tools build --language python --dir "${{ inputs.project_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
+
+      - name: language-tools test
+        if: ${{ !inputs.dry_run }}
+        run: language-tools test --language python --dir "${{ inputs.project_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
+
+      - name: language-tools lint
+        if: ${{ !inputs.dry_run }}
+        run: language-tools lint --language python --dir "${{ inputs.project_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
+
+      - name: language-tools format
+        if: ${{ !inputs.dry_run }}
+        run: language-tools format --language python --dir "${{ inputs.project_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
+
+      - name: language-tools vet
+        if: ${{ !inputs.dry_run }}
+        run: language-tools vet --language python --dir "${{ inputs.project_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
+
+      - name: Extra steps (repository-specific checks language-tools doesn't cover)
+        if: ${{ !inputs.dry_run && inputs.extra_steps != '' }}
+        run: ${{ inputs.extra_steps }}
