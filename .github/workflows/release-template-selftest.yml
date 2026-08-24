@@ -1,18 +1,49 @@
-# Proves the SC-DISTRIBUTION library release template actually builds: dry-runs
-# release-library.yml on every change to a release template or dist-guard, and on demand.
-# dry_run: true skips the tag push and the platform release — this only exercises the
-# build/archive/checksum stage, so it needs no release credentials.
+# Proves the fleet's five reusable SC-DISTRIBUTION/CI templates actually work: dry-runs each
+# on every change to a template or dist-guard, and on demand. dry_run: true means something
+# different per track: on a CI template (ci-go/ci-rust/ci-python) it skips the five
+# language-tools checks and only proves the install steps and the call contract — never a
+# check result. On a release template (release-cli/release-library) it always runs the real
+# build (there's nothing else to prove a build against) and only skips the tag push and the
+# platform release, so it needs no release credentials.
+#
+# This is a self-test of the templates themselves, not adoption: no caller here is wired into
+# this repo's own ci.yml, and no real language check result is asserted. Wiring a template
+# into a real caller for this repo's own modules is a separate concern.
 
-name: SC-DISTRIBUTION release template self-test
+name: SC-DISTRIBUTION and CI release template self-test
 
 on:
   pull_request:
     paths:
+      - ".github/workflows/ci-*.yml"
       - ".github/workflows/release-*.yml"
       - "tooling/dist-guard/**"
   workflow_dispatch: {}
 
 jobs:
+  dry-run-ci-go:
+    uses: ./.github/workflows/ci-go.yml
+    with:
+      dry_run: true
+
+  dry-run-ci-rust:
+    uses: ./.github/workflows/ci-rust.yml
+    with:
+      dry_run: true
+
+  dry-run-ci-python:
+    uses: ./.github/workflows/ci-python.yml
+    with:
+      dry_run: true
+
+  dry-run-cli-release:
+    uses: ./.github/workflows/release-cli.yml
+    with:
+      version: dry-run-cli-${{ github.run_id }}
+      module_dir: go/agentcontract/cmd/agentcontract-lint
+      binary_name: agentcontract-lint
+      dry_run: true
+
   dry-run-library-release:
     uses: ./.github/workflows/release-library.yml
     with:
