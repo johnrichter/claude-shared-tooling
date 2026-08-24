@@ -1,10 +1,25 @@
-# Reusable SC-DISTRIBUTION release template — LIBRARY track.
+# Reusable SC-DISTRIBUTION release template — LIBRARY track. Fleet-wide: any repository's
+# workflow may call this, not only ai-shared-lib's own modules (the original scope this file
+# shipped with). Calling it now requires a mise.toml + mise.lock at the caller's checked-out
+# repo root pinning a toolchain, and network access to fetch a pinned language-tools release —
+# a pre-mise caller of this file needed neither.
 #
 # A library releases by pinning a git tag; there is nothing to archive. Consumers pull the
 # tagged source directly (a Rust git-tag dependency, a Go module tag, a documented commit).
 # A module-owning workflow calls this via `workflow_call`; it tags and cuts the official
 # platform release, nothing else — dist-guard (tooling/dist-guard/) is what keeps a built
 # artifact from ever needing to be committed in the first place.
+#
+# Shares ci-go.yml's canonical preamble (mise pin, verified fetch, platform resolution) up
+# through installing language-tools, byte-for-byte; a change to that shared shape belongs in
+# ci-go.yml first, then copies here. It departs from the CI templates' preamble the same way
+# release-cli.yml does, for the same release-track reason: there are no checks to run, so
+# there is no dry_run-gated "checks skipped" step, no extra_steps escape hatch, and no
+# cross-repository sibling-checkout input. Unlike release-cli.yml, this template runs no
+# build either — a tag has nothing to compile — so mise and language-tools install here as a
+# standing dependency the fleet now requires of every template, not because a step below
+# invokes language-tools directly. Nothing here runs a checked language command, so nothing
+# on the banned-check-command list can run as a check.
 #
 # GitLab equivalent: the same tag-push + `release-cli create` pair as an `include:`d job in a
 # caller `.gitlab-ci.yml`. No separate GitLab template exists in this repo; this file is the
@@ -24,6 +39,16 @@ on:
         required: false
         type: string
         default: ""
+      runs_on:
+        description: "Fully qualified GitHub-hosted runner label (actions/runner-images). Never a floating tag."
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      mise_version:
+        description: "mise release to install. Every committed mise.lock in the fleet was written by this version."
+        required: false
+        type: string
+        default: "2026.8.10"
       dry_run:
         description: "Verify only — skip the tag push and the platform release."
         required: false
@@ -34,17 +59,109 @@ on:
         description: "Token with contents:write, for `gh release create`. Unused in dry-run."
         required: false
 
+env:
+  # Named once; every step below reads this instead of restating the version.
+  LANGUAGE_TOOLS_VERSION: "2.1.0"
+
 permissions:
   contents: write
 
 jobs:
   release:
     name: tag-and-release
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
+
+      # mise and language-tools name platforms differently (mise: linux/macos, x64/arm64;
+      # language-tools: Go's own linux/darwin, amd64/arm64) — resolve both once, here.
+      - name: Resolve runner platform
+        id: platform
+        run: |
+          mkdir -p "${RUNNER_TEMP}/bin"
+          echo "${RUNNER_TEMP}/bin" >> "$GITHUB_PATH"
+          case "$(uname -s)" in
+            Linux)  mise_os=linux;  lt_os=linux  ;;
+            Darwin) mise_os=macos;  lt_os=darwin ;;
+            *) echo "::error::unsupported runner OS $(uname -s)"; exit 1 ;;
+          esac
+          case "$(uname -m)" in
+            x86_64|amd64)  mise_arch=x64;   lt_arch=amd64 ;;
+            arm64|aarch64) mise_arch=arm64; lt_arch=arm64 ;;
+            *) echo "::error::unsupported runner arch $(uname -m)"; exit 1 ;;
+          esac
+          {
+            echo "mise_os=${mise_os}"
+            echo "mise_arch=${mise_arch}"
+            echo "lt_os=${lt_os}"
+            echo "lt_arch=${lt_arch}"
+          } >> "$GITHUB_OUTPUT"
+
+      # Verified fetch (SC1 shape): fetch the release's own published checksum manifest,
+      # look up this artifact's digest by exact filename match, then fetch the artifact and
+      # fail closed on any mismatch. Never pipes a download into a shell.
+      - name: Install mise ${{ inputs.mise_version }} (verified fetch)
+        env:
+          MISE_VERSION: ${{ inputs.mise_version }}
+          MISE_OS: ${{ steps.platform.outputs.mise_os }}
+          MISE_ARCH: ${{ steps.platform.outputs.mise_arch }}
+        run: |
+          set -euo pipefail
+          bin="mise-v${MISE_VERSION}-${MISE_OS}-${MISE_ARCH}"
+          base="https://github.com/jdx/mise/releases/download/v${MISE_VERSION}"
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "${tmp}/SHASUMS256.txt" "${base}/SHASUMS256.txt"
+          curl -fsSL -o "${tmp}/${bin}" "${base}/${bin}"
+          expected="$(awk -v want="./${bin}" '$2 == want { print $1; exit }' "${tmp}/SHASUMS256.txt")"
+          if [ -z "${expected}" ]; then
+            echo "::error::${bin} not listed in SHASUMS256.txt for mise v${MISE_VERSION}"
+            exit 1
+          fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "${tmp}/${bin}" | awk '{print $1}')"
+          else
+            actual="$(shasum -a 256 "${tmp}/${bin}" | awk '{print $1}')"
+          fi
+          if [ "${expected}" != "${actual}" ]; then
+            echo "::error::sha256 mismatch for ${bin} -- expected ${expected}, got ${actual}"
+            exit 1
+          fi
+          install -m 0755 "${tmp}/${bin}" "${RUNNER_TEMP}/bin/mise"
+          rm -rf "${tmp}"
+
+      - name: mise install --locked
+        run: mise install --locked
+
+      - name: Install language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} (verified fetch)
+        env:
+          LT_OS: ${{ steps.platform.outputs.lt_os }}
+          LT_ARCH: ${{ steps.platform.outputs.lt_arch }}
+        run: |
+          set -euo pipefail
+          archive="language-tools_${LANGUAGE_TOOLS_VERSION}_${LT_OS}_${LT_ARCH}.tar.gz"
+          base="https://github.com/johnrichter/language-tools/releases/download/v${LANGUAGE_TOOLS_VERSION}"
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "${tmp}/checksums.txt" "${base}/checksums.txt"
+          curl -fsSL -o "${tmp}/${archive}" "${base}/${archive}"
+          expected="$(awk -v want="${archive}" '$2 == want { print $1; exit }' "${tmp}/checksums.txt")"
+          if [ -z "${expected}" ]; then
+            echo "::error::${archive} not listed in checksums.txt for language-tools v${LANGUAGE_TOOLS_VERSION}"
+            exit 1
+          fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "${tmp}/${archive}" | awk '{print $1}')"
+          else
+            actual="$(shasum -a 256 "${tmp}/${archive}" | awk '{print $1}')"
+          fi
+          if [ "${expected}" != "${actual}" ]; then
+            echo "::error::sha256 mismatch for ${archive} -- expected ${expected}, got ${actual}"
+            exit 1
+          fi
+          tar -xzf "${tmp}/${archive}" -C "${tmp}"
+          install -m 0755 "${tmp}/language-tools" "${RUNNER_TEMP}/bin/language-tools"
+          rm -rf "${tmp}"
 
       - name: Reject an existing tag (no overwrite)
         run: |
