@@ -1,17 +1,39 @@
-# Reusable SC-DISTRIBUTION release template — CLI track.
+# Reusable SC-DISTRIBUTION release template — CLI track. Fleet-wide: any repository's
+# workflow may call this, not only ai-shared-lib's own modules (the original scope this file
+# shipped with). Calling it now requires two things a pre-mise caller of this file never
+# needed: a mise.toml + mise.lock at the caller's checked-out repo root pinning a Go toolchain,
+# and network access to fetch a pinned language-tools release — the cross-compile `go build`
+# this file used to run directly took neither dependency.
 #
-# A CLI releases as per-OS/arch archives + a checksums file, attached to the official platform
-# release; nothing is committed to git for this (dist-guard, tooling/dist-guard/, enforces
-# that). A plugin-side download-script fetches the pinned version and verifies the checksum
-# before ever running the binary.
+# A CLI releases as per-OS/arch archives + two checksum manifests, attached to the official
+# platform release; nothing is committed to git for this (dist-guard, tooling/dist-guard/,
+# enforces that). A plugin-side download-script fetches the pinned version and verifies the
+# checksum before ever running the binary.
 #
-# Build matrix covers the four standard GOOS/GOARCH cells (linux/macos x amd64/arm64). The
-# archive/checksum/publish shape below is language-independent — swap the build step for the
-# module's actual toolchain if reused for a non-Go CLI.
+# Shares ci-go.yml's canonical preamble (mise pin, verified fetch, platform resolution) up
+# through installing language-tools, byte-for-byte; a change to that shared shape belongs in
+# ci-go.yml first, then copies here. It departs from the CI templates' preamble in three ways,
+# all release-track, not check-track:
+#   - There are no five language-tools checks to skip, so there is no dry_run-gated
+#     "checks skipped" step; the build/archive/manifest work below runs the same whether
+#     dry_run is set or not (only the tag push and the platform release skip it — see below).
+#   - No extra_steps escape hatch and no cross-repository sibling-checkout input: those exist
+#     on the CI templates for a repository-specific check or a private-module resolution
+#     problem, neither of which a single release-build invocation has.
+#   - `language-tools release build` (cmd/release.go) itself cross-compiles every target in
+#     one call, so this template needs no per-cell build matrix — the four-cell GOOS/GOARCH
+#     fan-out that used to live in `strategy.matrix` now lives inside that one command.
 #
-# GitLab equivalent: the same four-cell `parallel:matrix` build job + a `release-cli create`
-# job attaching the same artifacts. No separate GitLab template exists in this repo; this file
-# is the GitHub Actions implementation of the SC-DISTRIBUTION CLI contract.
+# `language-tools release build` replaces the cross-compile `go build` this file ran directly
+# before — the one documented exception to the fleet's banned-check-command list, since a
+# release build is not a check. It writes archives plus checksums.txt (one row per archive)
+# and binary-checksums.txt (one row per extracted binary) straight to --output-dir; this
+# template publishes exactly those three kinds of asset, replacing the per-archive .sha256
+# files and the combined SHA256SUMS this file used to produce and publish instead.
+#
+# GitLab equivalent: the same `language-tools release build` call + a `release-cli create`
+# job attaching its output. No separate GitLab template exists in this repo; this file is the
+# GitHub Actions implementation of the SC-DISTRIBUTION CLI contract.
 
 name: SC-DISTRIBUTION release (CLI)
 
@@ -23,15 +45,25 @@ on:
         required: true
         type: string
       module_dir:
-        description: "Directory the CLI builds from, relative to repo root (e.g. lang/example-cli)."
+        description: "Go module directory the CLI builds from, relative to the checked-out repo (language-tools' --module-dir)."
         required: true
         type: string
       binary_name:
-        description: "Output binary name (e.g. example-cli)."
+        description: "Output binary name (e.g. example-cli); built from module_dir's root package."
         required: true
         type: string
+      runs_on:
+        description: "Fully qualified GitHub-hosted runner label (actions/runner-images). Never a floating tag."
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      mise_version:
+        description: "mise release to install. Every committed mise.lock in the fleet was written by this version."
+        required: false
+        type: string
+        default: "2026.8.10"
       dry_run:
-        description: "Build archives + checksums; skip the tag push and the platform release."
+        description: "Build archives, checksums.txt, and binary-checksums.txt as usual; skip the tag push and the platform release."
         required: false
         type: boolean
         default: false
@@ -40,89 +72,147 @@ on:
         description: "Token with contents:write, for `gh release create`. Unused in dry-run."
         required: false
 
+env:
+  # Named once; every step below reads this instead of restating the version.
+  LANGUAGE_TOOLS_VERSION: "2.1.0"
+
 permissions:
   contents: write
 
 jobs:
   build:
-    name: build-${{ matrix.name }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: linux-amd64
-            goos: linux
-            goarch: amd64
-          - name: linux-arm64
-            goos: linux
-            goarch: arm64
-          - name: darwin-amd64
-            goos: darwin
-            goarch: amd64
-          - name: darwin-arm64
-            goos: darwin
-            goarch: arm64
+    name: build
+    runs-on: ${{ inputs.runs_on }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: ${{ inputs.module_dir }}/go.mod
-
-      # CGO_ENABLED=0 pinned explicitly: the host's ambient default can silently link a cgo
-      # runtime into a cross-compiled target. -buildvcs=false keeps the output reproducible
-      # (no stamped checkout revision/time/dirty state).
-      - name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
-        working-directory: ${{ inputs.module_dir }}
-        env:
-          CGO_ENABLED: "0"
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-        run: go build -trimpath -buildvcs=false -ldflags='-s -w' -o "${{ inputs.binary_name }}" .
-
-      # Archive names must be flat: a release tag carries its module-path prefix
-      # (SC-VERSIONING, e.g. lang/example-cli/v1.2.3), so the filename uses the tag's
-      # leaf only — a slash in the name would send tar writing into a nonexistent dir.
-      # Inputs pass through env, never interpolated into the shell.
-      - name: Archive + checksum
-        working-directory: ${{ inputs.module_dir }}
-        env:
-          VERSION: ${{ inputs.version }}
-          BINARY: ${{ inputs.binary_name }}
-          CELL: ${{ matrix.name }}
+      # mise and language-tools name platforms differently (mise: linux/macos, x64/arm64;
+      # language-tools: Go's own linux/darwin, amd64/arm64) — resolve both once, here.
+      - name: Resolve runner platform
+        id: platform
         run: |
-          ver="${VERSION##*/}"
-          archive="${BINARY}-${ver}-${CELL}.tar.gz"
-          tar -czf "$archive" "$BINARY"
-          sha256sum "$archive" > "$archive.sha256"
+          mkdir -p "${RUNNER_TEMP}/bin"
+          echo "${RUNNER_TEMP}/bin" >> "$GITHUB_PATH"
+          case "$(uname -s)" in
+            Linux)  mise_os=linux;  lt_os=linux  ;;
+            Darwin) mise_os=macos;  lt_os=darwin ;;
+            *) echo "::error::unsupported runner OS $(uname -s)"; exit 1 ;;
+          esac
+          case "$(uname -m)" in
+            x86_64|amd64)  mise_arch=x64;   lt_arch=amd64 ;;
+            arm64|aarch64) mise_arch=arm64; lt_arch=arm64 ;;
+            *) echo "::error::unsupported runner arch $(uname -m)"; exit 1 ;;
+          esac
+          {
+            echo "mise_os=${mise_os}"
+            echo "mise_arch=${mise_arch}"
+            echo "lt_os=${lt_os}"
+            echo "lt_arch=${lt_arch}"
+          } >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v4
+      # Verified fetch (SC1 shape): fetch the release's own published checksum manifest,
+      # look up this artifact's digest by exact filename match, then fetch the artifact and
+      # fail closed on any mismatch. Never pipes a download into a shell.
+      - name: Install mise ${{ inputs.mise_version }} (verified fetch)
+        env:
+          MISE_VERSION: ${{ inputs.mise_version }}
+          MISE_OS: ${{ steps.platform.outputs.mise_os }}
+          MISE_ARCH: ${{ steps.platform.outputs.mise_arch }}
+        run: |
+          set -euo pipefail
+          bin="mise-v${MISE_VERSION}-${MISE_OS}-${MISE_ARCH}"
+          base="https://github.com/jdx/mise/releases/download/v${MISE_VERSION}"
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "${tmp}/SHASUMS256.txt" "${base}/SHASUMS256.txt"
+          curl -fsSL -o "${tmp}/${bin}" "${base}/${bin}"
+          expected="$(awk -v want="./${bin}" '$2 == want { print $1; exit }' "${tmp}/SHASUMS256.txt")"
+          if [ -z "${expected}" ]; then
+            echo "::error::${bin} not listed in SHASUMS256.txt for mise v${MISE_VERSION}"
+            exit 1
+          fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "${tmp}/${bin}" | awk '{print $1}')"
+          else
+            actual="$(shasum -a 256 "${tmp}/${bin}" | awk '{print $1}')"
+          fi
+          if [ "${expected}" != "${actual}" ]; then
+            echo "::error::sha256 mismatch for ${bin} -- expected ${expected}, got ${actual}"
+            exit 1
+          fi
+          install -m 0755 "${tmp}/${bin}" "${RUNNER_TEMP}/bin/mise"
+          rm -rf "${tmp}"
+
+      - name: mise install --locked
+        run: mise install --locked
+
+      - name: Install language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} (verified fetch)
+        env:
+          LT_OS: ${{ steps.platform.outputs.lt_os }}
+          LT_ARCH: ${{ steps.platform.outputs.lt_arch }}
+        run: |
+          set -euo pipefail
+          archive="language-tools_${LANGUAGE_TOOLS_VERSION}_${LT_OS}_${LT_ARCH}.tar.gz"
+          base="https://github.com/johnrichter/language-tools/releases/download/v${LANGUAGE_TOOLS_VERSION}"
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "${tmp}/checksums.txt" "${base}/checksums.txt"
+          curl -fsSL -o "${tmp}/${archive}" "${base}/${archive}"
+          expected="$(awk -v want="${archive}" '$2 == want { print $1; exit }' "${tmp}/checksums.txt")"
+          if [ -z "${expected}" ]; then
+            echo "::error::${archive} not listed in checksums.txt for language-tools v${LANGUAGE_TOOLS_VERSION}"
+            exit 1
+          fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "${tmp}/${archive}" | awk '{print $1}')"
+          else
+            actual="$(shasum -a 256 "${tmp}/${archive}" | awk '{print $1}')"
+          fi
+          if [ "${expected}" != "${actual}" ]; then
+            echo "::error::sha256 mismatch for ${archive} -- expected ${expected}, got ${actual}"
+            exit 1
+          fi
+          tar -xzf "${tmp}/${archive}" -C "${tmp}"
+          install -m 0755 "${tmp}/language-tools" "${RUNNER_TEMP}/bin/language-tools"
+          rm -rf "${tmp}"
+
+      # Cross-compiles every default GOOS/GOARCH cell in one call and writes checksums.txt +
+      # binary-checksums.txt alongside the archives — no per-cell matrix, no separate archive
+      # or checksum step. Runs unconditionally: dry_run only gates the tag push and the
+      # platform release below, never this build. Inputs pass through env, never interpolated
+      # into the shell.
+      - name: language-tools release build
+        env:
+          MODULE_DIR: ${{ inputs.module_dir }}
+          BINARY_NAME: ${{ inputs.binary_name }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          ver="${VERSION##*/}"
+          ver="${ver#v}"
+          language-tools release build \
+            --module-dir "${MODULE_DIR}" \
+            --output-dir "${{ github.workspace }}/dist" \
+            --binary "${BINARY_NAME}:." \
+            --version "${ver}"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: release-${{ matrix.name }}
-          path: |
-            ${{ inputs.module_dir }}/*.tar.gz
-            ${{ inputs.module_dir }}/*.sha256
+          name: release-dist
+          path: dist/
           if-no-files-found: error
 
   publish:
     name: tag-and-release
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: release-*
+          name: release-dist
           path: dist
-          merge-multiple: true
-
-      - name: Combined checksums file
-        working-directory: dist
-        run: cat *.sha256 > SHA256SUMS
 
       - name: Reject an existing tag (no overwrite)
         run: |
@@ -137,14 +227,14 @@ jobs:
           git tag -a "${{ inputs.version }}" -m "${{ inputs.version }}"
           git push origin "${{ inputs.version }}"
 
-      - name: Publish the official release (per-OS/arch archives + checksums)
+      - name: Publish the official release (archives + checksums.txt + binary-checksums.txt)
         if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: gh release create "${{ inputs.version }}" --title "${{ inputs.version }}" --generate-notes dist/*.tar.gz dist/*.sha256 dist/SHA256SUMS
+        run: gh release create "${{ inputs.version }}" --title "${{ inputs.version }}" --generate-notes dist/*.tar.gz dist/checksums.txt dist/binary-checksums.txt
 
       - name: Dry-run summary
         if: ${{ inputs.dry_run }}
         run: |
-          echo "dry-run: built archives + checksums for ${{ inputs.version }} across every OS/arch cell, publish skipped"
+          echo "dry-run: built archives, checksums.txt, and binary-checksums.txt for ${{ inputs.version }}, tag push and platform release skipped"
           ls -la dist
