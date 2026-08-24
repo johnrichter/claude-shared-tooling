@@ -1,0 +1,3 @@
+# Pin Go toolchain version for this module
+[tools]
+go = "1.26.0"
