@@ -3,3 +3,6 @@
 # on the workspace boxes ~/.cache is the ephemeral instance-store mount.
 [env]
 CARGO_TARGET_DIR = "{{env.HOME}}/.cache/cargo/target/ai-shared-lib-public"
+
+[tools]
+rust = "1.98.0"
