@@ -11,6 +11,7 @@ Coverage (mirrors the guardrail's stated contract):
     1. Each high-confidence secret pattern FAILs.
     2. A clean tree PASSes.
     3. Binary/skip-dir files are never scanned, and a real leak elsewhere still is.
+    4. AWS's own reserved doc placeholder key is exempt, exactly and only it.
 """
 from __future__ import annotations
 
@@ -24,7 +25,9 @@ _spec = importlib.util.spec_from_file_location("check_secrets", _CHECKER)
 cs = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cs)
 
-_AWS = "AKIA" + "IOSFODNN7" + "EXAMPLE"             # AKIA + exactly 16 -> matches AWS key pattern
+_AWS = "AKIA" + "JXNH2K3LQZ" + "ABCDEF"             # AKIA + exactly 16 -> matches AWS key pattern
+_AWS_DOC = "AKIAIOSFODNN7" + "EXAMPLE"              # AWS's reserved doc placeholder -> allowlisted, never a finding
+_AWS_NEAR_MISS = "AKIAIOSFODNN7EXAMPL" + "F"        # one char off the placeholder -> not allowlisted
 _KEY = "-----BEGIN " + "OPENSSH PRIVATE " + "KEY-----"
 _GHP = "ghp_" + "A" * 36                            # ghp_ + 36 alnum -> matches GitHub token pattern
 _SLACK = "xoxb-" + "1234567890" + "-abcdefghij"     # xoxb- + 10+ alnum/dash -> matches Slack token pattern
@@ -61,6 +64,28 @@ class ScanTests(unittest.TestCase):
     def test_github_token_secret_fails(self):
         failures = self._scan({"leak.txt": f"token={_GHP}\n"})
         self.assertTrue(any("GitHub" in f for f in failures))
+
+    def test_aws_doc_placeholder_key_is_exempt(self):
+        # AWS's own permanently-reserved doc placeholder cannot be a real key,
+        # so quoting AWS docs/examples must never fail the build.
+        failures = self._scan({"docs/example.md": f"aws_access_key_id = {_AWS_DOC}\n"})
+        self.assertEqual(failures, [])
+
+    def test_aws_placeholder_exemption_is_exact_not_fuzzy(self):
+        # A one-character near-miss of the placeholder is not allowlisted, and a
+        # real-shaped key in the same tree still fails: the exemption is exact.
+        failures = self._scan({
+            "near.env": f"AWS_KEY={_AWS_NEAR_MISS}\n",
+            "real.env": f"AWS_KEY={_AWS}\n",
+        })
+        self.assertTrue(any(f.startswith("near.env") for f in failures), msg=str(failures))
+        self.assertTrue(any(f.startswith("real.env") for f in failures), msg=str(failures))
+
+    def test_real_key_alongside_placeholder_in_one_file_still_fails(self):
+        # Per-occurrence check, not per-file: a file that quotes the placeholder
+        # AND leaks a real-shaped key is still flagged.
+        failures = self._scan({"mixed.md": f"example: {_AWS_DOC}\nreal: {_AWS}\n"})
+        self.assertTrue(any("AWS" in f for f in failures), msg=str(failures))
 
     def test_binary_and_skip_dirs_ignored(self):
         failures = self._scan({

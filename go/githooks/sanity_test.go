@@ -12,9 +12,17 @@ import (
 
 // Trigger literals are assembled from fragments so this file's own source
 // does not trip the repo's secret guardrail when it scans this tree.
+// fixtureAWSDocKey is fragment-assembled too, even though this package and
+// the repo's scripts/check_secrets.py guardrail both allowlist it by exact
+// match: a pre-fix git-tools binary landing this very commit has no such
+// allowlist yet, and its own whole-file scan of this source line would
+// otherwise refuse the merge that ships the allowlist. The concatenation
+// changes nothing about the value under test.
 var (
-	fixtureAWSKey = "AKIA" + "ABCDEFGHIJKLMNOP" // AKIA + 16 chars -> matches the AWS key pattern
-	fixturePEMKey = "-----BEGIN " + "RSA PRIVATE " + "KEY-----"
+	fixtureAWSKey      = "AKIA" + "ABCDEFGHIJKLMNOP" // AKIA + 16 chars -> matches the AWS key pattern
+	fixtureAWSDocKey   = "AKIAIOSFODNN7" + "EXAMPLE" // AWS's reserved doc placeholder -> allowlisted
+	fixtureAWSNearMiss = "AKIAIOSFODNN7EXAMPL" + "F" // one char off the placeholder -> not allowlisted
+	fixturePEMKey      = "-----BEGIN " + "RSA PRIVATE " + "KEY-----"
 )
 
 func writeFile(t *testing.T, dir, rel, content string) string {
@@ -36,12 +44,106 @@ func TestScanSecretsDetectsPlantedSecret(t *testing.T) {
 	writeFile(t, dir, "src/leak.txt", "aws_key = "+fixtureAWSKey+"\n")
 	writeFile(t, dir, "src/clean.txt", "nothing to see here\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
 	if len(got) != 1 || got[0].Path != "src/leak.txt" || got[0].Rule != "aws_access_key_id" {
 		t.Fatalf("got %+v, want one aws_access_key_id finding at src/leak.txt", got)
+	}
+}
+
+// TestScanSecretsExemptsAWSDocPlaceholder confirms AWS's own canonical,
+// permanently-reserved documentation placeholder access-key id never
+// triggers a finding, so it stops false-positiving in a corpus that quotes
+// AWS's official docs/examples.
+func TestScanSecretsExemptsAWSDocPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "docs/example.md", "aws_access_key_id = "+fixtureAWSDocKey+"\n")
+
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	if err != nil {
+		t.Fatalf("ScanSecrets: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %+v, want no findings for the AWS doc placeholder key", got)
+	}
+}
+
+// TestScanSecretsStillFlagsRealShapedKey confirms the placeholder exemption
+// is exact, not a weakening of the general AWS-key-shape detection: a
+// different, plausible-looking key still triggers.
+func TestScanSecretsStillFlagsRealShapedKey(t *testing.T) {
+	dir := t.TempDir()
+	fixtureOtherKey := "AKIA" + "JXNH2K3LQZABCDEF" // AKIA + 16 chars, not the placeholder
+	writeFile(t, dir, "src/leak.txt", "aws_key = "+fixtureOtherKey+"\n")
+
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	if err != nil {
+		t.Fatalf("ScanSecrets: %v", err)
+	}
+	if len(got) != 1 || got[0].Path != "src/leak.txt" || got[0].Rule != "aws_access_key_id" {
+		t.Fatalf("got %+v, want one aws_access_key_id finding at src/leak.txt", got)
+	}
+}
+
+// TestScanSecretsStillFlagsNearMissOfPlaceholder confirms the exemption is a
+// strict exact match, not fuzzy: a single-character near-miss of the
+// placeholder still triggers.
+func TestScanSecretsStillFlagsNearMissOfPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "src/leak.txt", "aws_key = "+fixtureAWSNearMiss+"\n")
+
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	if err != nil {
+		t.Fatalf("ScanSecrets: %v", err)
+	}
+	if len(got) != 1 || got[0].Path != "src/leak.txt" || got[0].Rule != "aws_access_key_id" {
+		t.Fatalf("got %+v, want one aws_access_key_id finding at src/leak.txt", got)
+	}
+}
+
+// TestScanSecretsRealKeyAlongsidePlaceholderStillFlagged pins the exemption's
+// per-occurrence semantics: matchesSecretPattern flags a file if ANY occurrence
+// is non-exempt, so a file that legitimately quotes the placeholder and also
+// leaks a real-shaped key is still reported. Without this case, inverting the
+// helper to "exempt the file if any occurrence is exempt" would leave every
+// other test green.
+func TestScanSecretsRealKeyAlongsidePlaceholderStillFlagged(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "docs/mixed.md", "example: "+fixtureAWSDocKey+"\nreal: "+fixtureAWSKey+"\n")
+
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	if err != nil {
+		t.Fatalf("ScanSecrets: %v", err)
+	}
+	if len(got) != 1 || got[0].Path != "docs/mixed.md" || got[0].Rule != "aws_access_key_id" {
+		t.Fatalf("got %+v, want one aws_access_key_id finding at docs/mixed.md", got)
+	}
+}
+
+// TestScanSecretsPlaceholderWithoutWordBoundaryIsNotExempted confirms the
+// allowlist is applied only to what the AWS-key regex actually extracts
+// (a \b...\b-bounded match), never by a raw substring search: the
+// placeholder glued onto other word characters, so that \b never matches at
+// either end, is not a regex hit at all - and is therefore not reported,
+// exactly as an equally-embedded real key would not be either. This proves
+// the exemption cannot accidentally suppress a genuine leaked key merely
+// because it happens to contain the placeholder text as a substring.
+func TestScanSecretsPlaceholderWithoutWordBoundaryIsNotExempted(t *testing.T) {
+	dir := t.TempDir()
+	// Neither embedding has a \b boundary immediately before or after the
+	// placeholder run (word chars on both sides), so the AWS pattern itself
+	// never matches these strings - independent of the allowlist.
+	writeFile(t, dir, "src/a.txt", "x"+fixtureAWSDocKey+"x\n")
+	writeFile(t, dir, "src/b.txt", fixtureAWSDocKey+"123\n")
+
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	if err != nil {
+		t.Fatalf("ScanSecrets: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %+v, want no findings: the AWS key regex has no word-boundary match in either fixture, so nothing is extracted for the allowlist to even consider", got)
 	}
 }
 
@@ -52,7 +154,7 @@ func TestScanSecretsCleanFixturePasses(t *testing.T) {
 	writeFile(t, dir, "README.md", "# Project\n\nNo secrets here.\n")
 	writeFile(t, dir, "src/main.go", "package main\n\nfunc main() {}\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -67,7 +169,7 @@ func TestScanSecretsSkipsExcludedDirs(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "node_modules/pkg/secret.txt", fixturePEMKey+"\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -185,6 +287,109 @@ func TestScanPrivacyMarkerExemptDirSkipsMarkerCheckOnly(t *testing.T) {
 	}
 	if !sawSecret {
 		t.Fatalf("got %+v, want the secret still caught (whole-file, no exemption)", failures)
+	}
+}
+
+// TestScanPrivacySecretExemptDirSkipsSecretCheckOnly confirms a secret inside
+// a secret-exempt directory is not flagged, while a marker violation and an
+// internal-identifier hit in that same file still are - the narrow proof that
+// SecretExemptRules never leaks into the other two checks.
+func TestScanPrivacySecretExemptDirSkipsSecretCheckOnly(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "corpus/case.md", "---\nprivacy: confidential\n---\n\n"+
+		fixtureAWSKey+"\ncontact: eng@datadoghq.com\n")
+	exempt := []fsx.Rule{{Pattern: "corpus/**", Class: SkipClass}}
+
+	failures, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules, SecretExemptRules: exempt})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	sawMarker, sawSecret := false, false
+	for _, f := range failures {
+		if f.Rule == "forbidden_marker" {
+			sawMarker = true
+		}
+		if f.Rule == "aws_access_key_id" {
+			sawSecret = true
+		}
+	}
+	if sawSecret {
+		t.Fatalf("got %+v, want secret check skipped under a secret-exempt dir", failures)
+	}
+	if !sawMarker {
+		t.Fatalf("got %+v, want the marker violation still caught", failures)
+	}
+	if len(warnings) == 0 {
+		t.Fatalf("want the internal-identifier email still caught as a warning")
+	}
+}
+
+// TestScanPrivacySecretExemptDirIsPathScoped confirms an identical secret
+// planted outside the secret-exempt directory is still reported in the same
+// scan - the exemption is path-scoped, not a global weakening of the check.
+func TestScanPrivacySecretExemptDirIsPathScoped(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "corpus/case.md", fixtureAWSKey+"\n")
+	writeFile(t, dir, "src/leak.md", fixtureAWSKey+"\n")
+	exempt := []fsx.Rule{{Pattern: "corpus/**", Class: SkipClass}}
+
+	failures, _, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules, SecretExemptRules: exempt})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	var flaggedPaths []string
+	for _, f := range failures {
+		if f.Rule == "aws_access_key_id" {
+			flaggedPaths = append(flaggedPaths, f.Path)
+		}
+	}
+	if len(flaggedPaths) != 1 || flaggedPaths[0] != "src/leak.md" {
+		t.Fatalf("got %+v, want only src/leak.md flagged, not corpus/case.md", flaggedPaths)
+	}
+}
+
+// TestScanPrivacyHonorsAWSDocPlaceholderAllowlist pins the placeholder
+// allowlist at ScanPrivacy's own inline secret loop, which is a second call
+// site into the pattern set that ScanSecrets' tests do not cover: without this
+// case, reverting that loop to a bare regex match - reintroducing the exact
+// false positive this branch fixes, for every ScanPrivacy consumer - leaves
+// the whole suite green. The real-shaped key in the same scan keeps the case
+// from passing merely because the secret check stopped running.
+func TestScanPrivacyHonorsAWSDocPlaceholderAllowlist(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "docs/example.md", "aws_access_key_id = "+fixtureAWSDocKey+"\n")
+	writeFile(t, dir, "src/leak.md", fixtureAWSKey+"\n")
+
+	failures, _, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	var flaggedPaths []string
+	for _, f := range failures {
+		if f.Rule == "aws_access_key_id" {
+			flaggedPaths = append(flaggedPaths, f.Path)
+		}
+	}
+	if len(flaggedPaths) != 1 || flaggedPaths[0] != "src/leak.md" {
+		t.Fatalf("got %+v, want only src/leak.md flagged, never the AWS doc placeholder at docs/example.md", flaggedPaths)
+	}
+}
+
+// TestScanSecretsHonorsSecretExemptRules confirms ScanSecrets itself - not
+// just ScanPrivacy's inline secret check - skips a secret-exempt path, and
+// still reports the identical pattern at a non-exempt path in the same run.
+func TestScanSecretsHonorsSecretExemptRules(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "corpus/case.md", fixtureAWSKey+"\n")
+	writeFile(t, dir, "src/leak.md", fixtureAWSKey+"\n")
+	exempt := []fsx.Rule{{Pattern: "corpus/**", Class: SkipClass}}
+
+	got, err := ScanSecrets(dir, DefaultSkipRules, exempt)
+	if err != nil {
+		t.Fatalf("ScanSecrets: %v", err)
+	}
+	if len(got) != 1 || got[0].Path != "src/leak.md" || got[0].Rule != "aws_access_key_id" {
+		t.Fatalf("got %+v, want one aws_access_key_id finding at src/leak.md only", got)
 	}
 }
 

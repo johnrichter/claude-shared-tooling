@@ -7,7 +7,11 @@
 // job has one line to call to get a well-formed JSON envelope on stdout.
 // File discovery is built on fsx's injected-ruleset path classification:
 // which directories/paths a scan skips is a caller-supplied parameter, not a
-// hardcoded list.
+// hardcoded list. Path exemption is per-check, never global: beyond skipRules
+// (a path no scan reads at all), ScanPrivacy takes MarkerExemptRules and
+// SecretExemptRules, each suppressing only its own check, and ScanSecrets
+// takes that same secret-exempt ruleset - so exempting a path from one check
+// never exempts it from another.
 //
 // ScanRawBinary carries two independent rules over the same candidate list,
 // both gated by skipRules and isLFSRouted:

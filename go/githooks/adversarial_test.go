@@ -52,7 +52,7 @@ func TestScanSecretsDetectsAllSignatureShapes(t *testing.T) {
 	writeFile(t, dir, "pem.txt", fixturePEMKey+"\n-----END RSA PRIVATE KEY-----\n")
 	writeFile(t, dir, "near-miss.txt", "ghp_tooshort\nAKIA123\n") // too short for either signature
 
-	got, err := ScanSecrets(dir, DefaultSkipRules)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestScanSecretsSkipsNonUTF8Binary(t *testing.T) {
 	invalid := append([]byte(fixtureAWSKey), 0xff, 0xfe, 0x00)
 	writeFile(t, dir, "blob.dat", string(invalid))
 
-	got, err := ScanSecrets(dir, DefaultSkipRules)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}

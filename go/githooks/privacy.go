@@ -133,6 +133,15 @@ type PrivacyOptions struct {
 	// code and fixture/corpus directories that legitimately embed literal
 	// marker strings as data, not as a real sensitivity/owner declaration.
 	MarkerExemptRules []fsx.Rule
+	// SecretExemptRules is a third, independent fsx.ClassifyPath ruleset:
+	// paths resolving to SkipClass here still get the frontmatter-marker and
+	// internal-id checks, but never the secret-pattern scan. Intended for
+	// machine-generated corpus/fixture files whose content is verified-safe
+	// but happens to match a secret-shaped regex (e.g. a security tool's own
+	// pattern definitions, or scraped documentation examples), so the whole
+	// path doesn't have to be pulled out of every other check to fix one
+	// false positive.
+	SecretExemptRules []fsx.Rule
 }
 
 // ScanPrivacy applies tier's forbidden-marker and internal-identifier
@@ -145,8 +154,14 @@ type PrivacyOptions struct {
 // Marker checks (forbidden markers, and the public-tier declares-but-not-
 // public pair check) run only against each file's own leading `---`/`---`
 // frontmatter block, and are skipped entirely for a file opts.
-// MarkerExemptRules resolves to SkipClass. Secret and internal-identifier
-// checks run whole-file, with no exemption.
+// MarkerExemptRules resolves to SkipClass. The secret-pattern check runs
+// whole-file and is skipped entirely for a file opts.SecretExemptRules
+// resolves to SkipClass (see PrivacyOptions.SecretExemptRules); its other
+// exemptions are by exact matched value (see awsExampleAccessKeyIDs). The
+// internal-identifier check runs whole-file with no path exemption; its only
+// exemption is by exact matched value (see publicEmailAllowlist). Each of
+// the three checks has its own independent exemption mechanism, so
+// exempting a path from one never exempts it from the others.
 func ScanPrivacy(root string, tier PrivacyTier, opts PrivacyOptions) (failures, warnings []Finding, err error) {
 	cfg, ok := privacyTierConfigs[tier]
 	if !ok {
@@ -179,9 +194,11 @@ func ScanPrivacy(root string, tier PrivacyTier, opts PrivacyOptions) (failures, 
 			}
 		}
 
-		for _, p := range secretPatterns {
-			if p.re.MatchString(text) {
-				failures = append(failures, Finding{Path: rel, Rule: p.label, Detail: "possible " + strings.ReplaceAll(p.label, "_", " ")})
+		if fsx.ClassifyPath(rel, opts.SecretExemptRules).Class != SkipClass {
+			for _, p := range secretPatterns {
+				if matchesSecretPattern(p, text) {
+					failures = append(failures, Finding{Path: rel, Rule: p.label, Detail: "possible " + strings.ReplaceAll(p.label, "_", " ")})
+				}
 			}
 		}
 

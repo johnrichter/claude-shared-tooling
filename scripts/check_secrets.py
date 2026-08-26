@@ -4,7 +4,9 @@
 Scans committed files for accidentally-committed plaintext secrets: private
 keys, cloud/API access-key ids, and chat/VCS-host tokens. Fails the build on
 any high-confidence match, scanned across the FULL text of EVERY non-skipped
-file, unconditionally.
+file. The only exemption is an exact match against a vendor's own permanently
+reserved documentation placeholder (AWS_EXAMPLE_ACCESS_KEY_IDS), which cannot
+be a real credential.
 
 Usage:
     python3 scripts/check_secrets.py            # scan repo root (exit 1 on any match)
@@ -24,13 +26,38 @@ SKIP_SUFFIX_DIRS = (".egg-info",)
 # Binary/asset extensions we never text-scan.
 BINARY_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".zip", ".gz", ".whl", ".pyc", ".ico", ".woff", ".woff2"}
 
+# The AWS-access-key-id label, named once because matches_pattern dispatches its
+# exemption on it: a rename here stays in sync with SECRET_PATTERNS by construction.
+AWS_KEY_LABEL = "AWS access-key id"
+
 # High-confidence plaintext secret patterns.
 SECRET_PATTERNS = [
     (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "private key block"),
-    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS access-key id"),
+    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), AWS_KEY_LABEL),
     (re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}"), "Slack token"),
     (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}"), "GitHub token"),
 ]
+
+# The exact, enumerated AWS documentation placeholder access-key ids that the
+# AWS-access-key-id pattern must never flag -- AWS's key-generation process can
+# never produce these exact strings, so an exact match is provably not a real,
+# leaked credential. Mirrors awsExampleAccessKeyIDs in go/githooks/secrets.go;
+# the two implementations of this pattern set stay behaviorally identical.
+# Exempt by exact string only, never by substring or "contains EXAMPLE" heuristic.
+# Fragment-assembled: a pre-fix scanner landing this commit has no allowlist
+# yet and would otherwise refuse the merge over this source line.
+AWS_EXAMPLE_ACCESS_KEY_IDS = frozenset({"AKIAIOSFODNN7" + "EXAMPLE"})
+
+
+def matches_pattern(rx: re.Pattern[str], label: str, text: str) -> bool:
+    """Whether text holds a hit for rx not covered by an exact-match exemption.
+
+    Every occurrence is checked; text is flagged only if at least one occurrence
+    is not exempt (see AWS_EXAMPLE_ACCESS_KEY_IDS).
+    """
+    if label != AWS_KEY_LABEL:
+        return rx.search(text) is not None
+    return any(m.group(0) not in AWS_EXAMPLE_ACCESS_KEY_IDS for m in rx.finditer(text))
 
 
 def iter_files(root: Path, self_path: Path):
@@ -58,7 +85,7 @@ def scan(root: Path, self_path: Path) -> list[str]:
         except (UnicodeDecodeError, OSError):
             continue  # unreadable/binary — nothing to leak in text form
         for rx, label in SECRET_PATTERNS:
-            if rx.search(text):
+            if matches_pattern(rx, label, text):
                 failures.append(f"{rel}: possible {label}")
     return failures
 
