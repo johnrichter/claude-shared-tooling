@@ -80,7 +80,17 @@ func matchesSecretPattern(p secretPattern, text string) bool {
 // always skipped regardless of skipRules. A file that fails to decode as
 // UTF-8 is treated as unreadable-as-text, not scanned, and never reported -
 // there is nothing to leak in text form.
+//
+// A secretExemptRules pattern that is not a valid glob returns an error
+// naming the pattern before any file is read, since an unparseable exempt
+// pattern would otherwise exempt the whole tree from the scan. A malformed
+// skipRules pattern is not an error: it keeps fsx.ClassifyPath's cautious
+// skip-the-path default.
 func ScanSecrets(root string, skipRules, secretExemptRules []fsx.Rule) ([]Finding, error) {
+	if err := validateExemptRules(secretExemptRuleset, secretExemptRules); err != nil {
+		return nil, err
+	}
+
 	var findings []Finding
 	err := walkScannable(root, skipRules, func(rel, abs string) error {
 		if binarySuffixes[strings.ToLower(filepath.Ext(rel))] {

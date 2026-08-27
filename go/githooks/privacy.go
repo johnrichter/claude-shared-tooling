@@ -162,10 +162,22 @@ type PrivacyOptions struct {
 // exemption is by exact matched value (see publicEmailAllowlist). Each of
 // the three checks has its own independent exemption mechanism, so
 // exempting a path from one never exempts it from the others.
+//
+// A pattern in MarkerExemptRules or SecretExemptRules that is not a valid
+// glob returns an error naming the ruleset and the pattern before any file is
+// read, since an unparseable exempt pattern would otherwise exempt the whole
+// tree from that check. A malformed opts.SkipRules pattern is not an error:
+// it keeps fsx.ClassifyPath's cautious skip-the-path default.
 func ScanPrivacy(root string, tier PrivacyTier, opts PrivacyOptions) (failures, warnings []Finding, err error) {
 	cfg, ok := privacyTierConfigs[tier]
 	if !ok {
 		return nil, nil, fmt.Errorf("githooks: unknown privacy tier %q", tier)
+	}
+	if err := validateExemptRules(markerExemptRuleset, opts.MarkerExemptRules); err != nil {
+		return nil, nil, err
+	}
+	if err := validateExemptRules(secretExemptRuleset, opts.SecretExemptRules); err != nil {
+		return nil, nil, err
 	}
 
 	walkErr := walkScannable(root, opts.SkipRules, func(rel, abs string) error {

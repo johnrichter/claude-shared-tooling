@@ -11,7 +11,9 @@
 // (a path no scan reads at all), ScanPrivacy takes MarkerExemptRules and
 // SecretExemptRules, each suppressing only its own check, and ScanSecrets
 // takes that same secret-exempt ruleset - so exempting a path from one check
-// never exempts it from another.
+// never exempts it from another. An exempt ruleset carrying a pattern that is
+// not a valid glob is a hard error, returned before any file is read, never a
+// silent tree-wide exemption.
 //
 // ScanRawBinary carries two independent rules over the same candidate list,
 // both gated by skipRules and isLFSRouted:

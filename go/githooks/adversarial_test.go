@@ -284,3 +284,180 @@ func TestSecretsFileNotGitIgnored(t *testing.T) {
 			"(repo's generic 'secrets.*' credential-file pattern shadows this source file name)")
 	}
 }
+
+// malformedGlob is an unterminated character class, which doublestar (and
+// fsx.ClassifyPath) fails to compile — the shared fixture for every
+// malformed-exempt-rule test below.
+const malformedGlob = "fixtures/[unterminated"
+
+// TestScanPrivacyMalformedMarkerExemptRuleErrors confirms a malformed
+// MarkerExemptRules pattern makes ScanPrivacy fail loudly, naming the bad
+// pattern, instead of silently exempting every path from the marker check —
+// the fail-open outcome fsx.ClassifyPath's own fail-closed-as-match default
+// would otherwise produce for this ruleset.
+func TestScanPrivacyMalformedMarkerExemptRuleErrors(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "---\nprivacy: confidential\n---\n\nbody\n")
+	exempt := []fsx.Rule{{Pattern: malformedGlob, Class: SkipClass}}
+
+	_, _, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules, MarkerExemptRules: exempt})
+	if err == nil {
+		t.Fatal("want an error for a malformed MarkerExemptRules pattern, got nil")
+	}
+	if !strings.Contains(err.Error(), malformedGlob) {
+		t.Fatalf("error %q does not name the malformed pattern %q", err, malformedGlob)
+	}
+	if !strings.Contains(err.Error(), "MarkerExemptRules") {
+		t.Fatalf("error %q does not name MarkerExemptRules", err)
+	}
+}
+
+// TestScanPrivacyMalformedSecretExemptRuleErrors is the same proof for
+// SecretExemptRules on ScanPrivacy's own call path.
+func TestScanPrivacyMalformedSecretExemptRuleErrors(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", fixtureAWSKey+"\n")
+	exempt := []fsx.Rule{{Pattern: malformedGlob, Class: SkipClass}}
+
+	_, _, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules, SecretExemptRules: exempt})
+	if err == nil {
+		t.Fatal("want an error for a malformed SecretExemptRules pattern, got nil")
+	}
+	if !strings.Contains(err.Error(), malformedGlob) {
+		t.Fatalf("error %q does not name the malformed pattern %q", err, malformedGlob)
+	}
+	if !strings.Contains(err.Error(), "SecretExemptRules") {
+		t.Fatalf("error %q does not name SecretExemptRules", err)
+	}
+}
+
+// TestScanSecretsMalformedSecretExemptRuleErrors is the same proof on
+// ScanSecrets' own, independent call path into secretExemptRules.
+func TestScanSecretsMalformedSecretExemptRuleErrors(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "leak.txt", fixtureAWSKey+"\n")
+	exempt := []fsx.Rule{{Pattern: malformedGlob, Class: SkipClass}}
+
+	_, err := ScanSecrets(dir, DefaultSkipRules, exempt)
+	if err == nil {
+		t.Fatal("want an error for a malformed SecretExemptRules pattern, got nil")
+	}
+	if !strings.Contains(err.Error(), malformedGlob) {
+		t.Fatalf("error %q does not name the malformed pattern %q", err, malformedGlob)
+	}
+	if !strings.Contains(err.Error(), "SecretExemptRules") {
+		t.Fatalf("error %q does not name SecretExemptRules", err)
+	}
+}
+
+// TestScanPrivacyMalformedSkipRuleDoesNotError is the regression guard for
+// the ruleset this change deliberately leaves untouched: SkipRules' existing
+// fail-closed-as-skip behavior for a malformed pattern is a separate,
+// already-accepted design decision (cautious in that direction, not
+// fail-open), and must keep working exactly as before.
+func TestScanPrivacyMalformedSkipRuleDoesNotError(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "---\nprivacy: confidential\n---\n\nbody\n")
+	skip := []fsx.Rule{{Pattern: malformedGlob, Class: SkipClass}}
+
+	if _, _, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: skip}); err != nil {
+		t.Fatalf("ScanPrivacy: want no error for a malformed SkipRules pattern (fail-closed-as-skip is accepted here), got %v", err)
+	}
+}
+
+// TestScanSecretsMalformedSkipRuleDoesNotError is ScanSecrets' side of the
+// same regression guard.
+func TestScanSecretsMalformedSkipRuleDoesNotError(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "leak.txt", fixtureAWSKey+"\n")
+	skip := []fsx.Rule{{Pattern: malformedGlob, Class: SkipClass}}
+
+	if _, err := ScanSecrets(dir, skip, nil); err != nil {
+		t.Fatalf("ScanSecrets: want no error for a malformed SkipRules pattern (fail-closed-as-skip is accepted here), got %v", err)
+	}
+}
+
+// TestScanPrivacyWellFormedExemptRulesStillWork confirms this change adds no
+// regression to the already-shipped exemption features: valid
+// MarkerExemptRules and SecretExemptRules patterns still exempt exactly the
+// paths they name, with no spurious validation error.
+func TestScanPrivacyWellFormedExemptRulesStillWork(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "fixtures/case.md", "---\nprivacy: confidential\n---\n\n"+fixtureAWSKey+"\n")
+	markerExempt := []fsx.Rule{{Pattern: "fixtures/**", Class: SkipClass}}
+	secretExempt := []fsx.Rule{{Pattern: "fixtures/**", Class: SkipClass}}
+
+	failures, _, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{
+		SkipRules:         DefaultSkipRules,
+		MarkerExemptRules: markerExempt,
+		SecretExemptRules: secretExempt,
+	})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(failures) != 0 {
+		t.Fatalf("got %+v, want both exemptions to still apply to fixtures/case.md", failures)
+	}
+}
+
+// braceAlternativeMalformedGlob is the malformed pattern a per-path check
+// cannot see: doublestar matches the leading "**" alternative and returns
+// before it ever parses the unterminated class, so fsx.ClassifyPath reports it
+// as a clean, matching rule for every path - i.e. as a tree-wide exemption.
+// Only whole-pattern validation rejects it.
+const braceAlternativeMalformedGlob = "{**,[bad}"
+
+// TestScanPrivacyBraceAlternativeMalformedExemptRuleErrors guards the hole a
+// path-probing validity check leaves open: this pattern exempts every path it
+// is applied to while never being reported malformed for any path, so it must
+// be rejected on the pattern itself, not on what it matched.
+func TestScanPrivacyBraceAlternativeMalformedExemptRuleErrors(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "---\nprivacy: confidential\n---\n\nbody\n")
+	exempt := []fsx.Rule{{Pattern: braceAlternativeMalformedGlob, Class: SkipClass}}
+
+	_, _, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules, MarkerExemptRules: exempt})
+	if err == nil {
+		t.Fatal("want an error for a malformed brace alternative, got nil (the forbidden marker in doc.md just went unreported)")
+	}
+	if !strings.Contains(err.Error(), braceAlternativeMalformedGlob) {
+		t.Fatalf("error %q does not name the malformed pattern %q", err, braceAlternativeMalformedGlob)
+	}
+}
+
+// TestScanPrivacyValidatesExemptRulesBeforeWalking proves the validation is
+// eager rather than incidental: against a root that cannot be walked at all,
+// the malformed-pattern error is what comes back, so no file was read before
+// the ruleset was checked.
+func TestScanPrivacyValidatesExemptRulesBeforeWalking(t *testing.T) {
+	missingRoot := filepath.Join(t.TempDir(), "no-such-tree")
+	exempt := []fsx.Rule{{Pattern: malformedGlob, Class: SkipClass}}
+
+	_, _, err := ScanPrivacy(missingRoot, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules, SecretExemptRules: exempt})
+	if err == nil {
+		t.Fatal("want an error, got nil")
+	}
+	if !strings.Contains(err.Error(), malformedGlob) || strings.Contains(err.Error(), "walk") {
+		t.Fatalf("error %q is not the pre-walk validation error for %q", err, malformedGlob)
+	}
+}
+
+// TestScanPrivacyMalformedMarkerExemptAmongValidRules confirms one valid
+// ruleset never masks a malformed sibling: every exempt ruleset is validated
+// up front, and the error names the one that is actually broken.
+func TestScanPrivacyMalformedMarkerExemptAmongValidRules(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "---\nprivacy: confidential\n---\n\n"+fixtureAWSKey+"\n")
+
+	_, _, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{
+		SkipRules:         DefaultSkipRules,
+		MarkerExemptRules: []fsx.Rule{{Pattern: "fixtures/**", Class: SkipClass}, {Pattern: malformedGlob, Class: SkipClass}},
+		SecretExemptRules: []fsx.Rule{{Pattern: "fixtures/**", Class: SkipClass}},
+	})
+	if err == nil {
+		t.Fatal("want an error for the malformed MarkerExemptRules entry, got nil")
+	}
+	if !strings.Contains(err.Error(), "MarkerExemptRules") || !strings.Contains(err.Error(), malformedGlob) {
+		t.Fatalf("error %q does not name MarkerExemptRules and %q", err, malformedGlob)
+	}
+}
