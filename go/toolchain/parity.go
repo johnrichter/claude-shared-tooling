@@ -6,9 +6,74 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/johnrichter/claude-shared-tooling/go/sysops"
 )
+
+// RegenerateMatrix rebuilds the pair set from MATRIX (matrixSpec, section
+// 4.7's grid) alone: for each language it walks the checks the grid names,
+// expanding CheckTest into the subcommands testKindsByLanguage lists, and
+// returns every pair's canonical PairID sorted. It reads none of the
+// committed table, so comparing its result to the committed pairs
+// (VerifyMatrixParity) catches a pair dropped from, or invented in, that
+// table. It has no side effect.
+func RegenerateMatrix() []string {
+	var ids []string
+	for language, checks := range matrixSpec {
+		for _, check := range checks {
+			if check == CheckTest {
+				for _, kind := range testKindsByLanguage[language] {
+					ids = append(ids, MatrixEntry{Language: language, Check: check, Test: kind}.PairID())
+				}
+				continue
+			}
+			ids = append(ids, MatrixEntry{Language: language, Check: check}.PairID())
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// committedPairIDs returns every committed-table pair's PairID, sorted, so it
+// compares against RegenerateMatrix on the same footing.
+func committedPairIDs() []string {
+	ids := make([]string, len(committedMatrix))
+	for i, e := range committedMatrix {
+		ids[i] = e.PairID()
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// MatrixParity is the outcome of comparing the committed dispatch table
+// against the pair set regenerated from MATRIX.
+type MatrixParity struct {
+	// Match is true when the two sets are byte-for-byte identical.
+	Match bool
+	// Regenerated is the newline-joined sorted PairIDs MATRIX produces.
+	Regenerated string
+	// Committed is the newline-joined sorted PairIDs the committed table
+	// holds.
+	Committed string
+}
+
+// VerifyMatrixParity reports whether the committed dispatch table and the
+// pair set RegenerateMatrix produces are byte-for-byte identical. A mismatch
+// means the committed table drifted from MATRIX in one direction or the
+// other — a pair dropped from the table, or one invented in it — which is the
+// drift the REPRO check exists to catch. It runs nothing and has no side
+// effect.
+func VerifyMatrixParity() MatrixParity {
+	regenerated := strings.Join(RegenerateMatrix(), "\n")
+	committed := strings.Join(committedPairIDs(), "\n")
+	return MatrixParity{
+		Match:       regenerated == committed,
+		Regenerated: regenerated,
+		Committed:   committed,
+	}
+}
 
 // BinaryParity is the outcome of comparing a committed build artifact
 // against a fresh build from its current sources.

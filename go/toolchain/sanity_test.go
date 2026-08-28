@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/johnrichter/claude-shared-tooling/go/clikit"
@@ -300,4 +301,230 @@ func TestSanityVerifyBinaryParityMatchesFreshBuild(t *testing.T) {
 	if parity.Match {
 		t.Fatalf("parity.Match = true for a tampered binary, want false")
 	}
+}
+
+// TestMatrixPairCounts checks the dispatch table enumerates exactly the
+// twenty-seven pairs section 4.7 names, with the per-language split Go seven,
+// Rust eight, Python seven, shell five — SC1's after-value.
+func TestMatrixPairCounts(t *testing.T) {
+	m := Matrix()
+	if len(m) != 27 {
+		t.Fatalf("Matrix pair count = %d, want 27", len(m))
+	}
+	byLanguage := map[string]int{}
+	for _, e := range m {
+		byLanguage[e.Language]++
+	}
+	want := map[string]int{LanguageGo: 7, LanguageRust: 8, LanguagePython: 7, LanguageShell: 5}
+	for lang, n := range want {
+		if byLanguage[lang] != n {
+			t.Errorf("%s pair count = %d, want %d", lang, byLanguage[lang], n)
+		}
+	}
+	if len(byLanguage) != len(want) {
+		t.Errorf("Matrix covers languages %v, want exactly %v", byLanguage, want)
+	}
+}
+
+// TestMatrixImplementedCountMatchesBaseline checks the table marks exactly
+// the thirteen pairs F15 measured implemented today (Go five, Rust four,
+// Python four), so the other fourteen fail closed until their adapter lands.
+func TestMatrixImplementedCountMatchesBaseline(t *testing.T) {
+	implemented := map[string]int{}
+	total := 0
+	for _, e := range Matrix() {
+		if e.Implemented {
+			implemented[e.Language]++
+			total++
+		}
+	}
+	if total != 13 {
+		t.Fatalf("implemented pair count = %d, want 13 (F15)", total)
+	}
+	want := map[string]int{LanguageGo: 5, LanguageRust: 4, LanguagePython: 4}
+	for lang, n := range want {
+		if implemented[lang] != n {
+			t.Errorf("%s implemented count = %d, want %d", lang, implemented[lang], n)
+		}
+	}
+	if implemented[LanguageShell] != 0 {
+		t.Errorf("shell implemented count = %d, want 0 (no shell adapter yet)", implemented[LanguageShell])
+	}
+}
+
+// TestMatrixTestSubcommandLayer checks CheckTest is the only check carrying a
+// subcommand, always names one of the three kinds, and never appears as a
+// bare "test" pair — so coverage and structured reports have no pair of their
+// own and instead ride test unit.
+func TestMatrixTestSubcommandLayer(t *testing.T) {
+	for _, e := range Matrix() {
+		if e.Check == CheckTest {
+			switch e.Test {
+			case TestUnit, TestE2E, TestBenchmark:
+			default:
+				t.Errorf("%s test pair has kind %q, want one of unit/e2e/benchmark", e.Language, e.Test)
+			}
+			continue
+		}
+		if e.Test != "" {
+			t.Errorf("%s %s carries test kind %q, want none on a non-test check", e.Language, e.Check, e.Test)
+		}
+	}
+	// Rust alone takes benchmark; no other language does.
+	for _, e := range Matrix() {
+		if e.Test == TestBenchmark && e.Language != LanguageRust {
+			t.Errorf("%s takes a benchmark pair, want Rust only", e.Language)
+		}
+	}
+}
+
+// TestMatrixEveryPairResolvesToAnEntry checks every pair the grid regenerates
+// is present in the committed table via LookupPair — the "every MATRIX pair
+// resolves to an adapter entry" clause.
+func TestMatrixEveryPairResolvesToAnEntry(t *testing.T) {
+	for _, e := range Matrix() {
+		got, ok := LookupPair(e.Language, e.Check, e.Test)
+		if !ok {
+			t.Errorf("LookupPair(%q,%q,%q) = not found, want the pair's entry", e.Language, e.Check, e.Test)
+			continue
+		}
+		if got.PairID() != e.PairID() {
+			t.Errorf("LookupPair returned %q, want %q", got.PairID(), e.PairID())
+		}
+	}
+}
+
+// TestResolveCheckUnsupportedPairs checks every request that is not a
+// declared, implemented pair — an out-of-matrix language/check, and a
+// declared pair no adapter implements yet — resolves to the unsupported
+// diagnostic at EXIT 80 rather than a silent pass.
+func TestResolveCheckUnsupportedPairs(t *testing.T) {
+	cases := []struct {
+		name     string
+		language string
+		check    Check
+		test     TestKind
+	}{
+		{"shell build is out of matrix", LanguageShell, CheckBuild, ""},
+		{"go benchmark is out of matrix", LanguageGo, CheckTest, TestBenchmark},
+		{"unknown language", "ruby", CheckBuild, ""},
+		{"bare test is not a pair", LanguageGo, CheckTest, ""},
+		{"python vet declared but unimplemented", LanguagePython, CheckVet, ""},
+		{"shell lint declared but unimplemented", LanguageShell, CheckLint, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			entry, diag := ResolveCheck(c.language, c.check, c.test)
+			if diag == nil {
+				t.Fatalf("ResolveCheck(%q,%q,%q) = entry %+v, nil diag; want unsupported diagnostic", c.language, c.check, c.test, entry)
+			}
+			if diag.Code != DiagUnsupportedCheck {
+				t.Errorf("diagnostic code = %q, want %q", diag.Code, DiagUnsupportedCheck)
+			}
+			class := strings.SplitN(diag.Code, ".", 2)[0]
+			if got := clikit.Status(class).ExitCode(); got != ExitUnsupported {
+				t.Errorf("exit code for %q = %d, want %d", diag.Code, got, ExitUnsupported)
+			}
+		})
+	}
+}
+
+// TestResolveCheckImplementedPair checks an implemented pair resolves to its
+// entry with no diagnostic — the pass-through the unsupported cases invert.
+func TestResolveCheckImplementedPair(t *testing.T) {
+	entry, diag := ResolveCheck(LanguageGo, CheckBuild, "")
+	if diag != nil {
+		t.Fatalf("ResolveCheck(go,build) diag = %+v, want nil for an implemented pair", diag)
+	}
+	if entry.PairID() != "go build" {
+		t.Fatalf("entry PairID = %q, want %q", entry.PairID(), "go build")
+	}
+}
+
+// TestMatrixMultiToolPairs checks OD46 is encoded — a pair can name more than
+// one tool. Go lint names both golangci-lint and an import organiser, which
+// is the acceptance example, and Go security names two tools as well.
+func TestMatrixMultiToolPairs(t *testing.T) {
+	goLint, ok := LookupPair(LanguageGo, CheckLint, "")
+	if !ok {
+		t.Fatal("go lint pair not found")
+	}
+	if len(goLint.Tools) < 2 {
+		t.Fatalf("go lint tools = %v, want at least two (OD46)", goLint.Tools)
+	}
+	if !containsTool(goLint.Tools, "golangci-lint") || !containsTool(goLint.Tools, "goimports") {
+		t.Errorf("go lint tools = %v, want both golangci-lint and goimports", goLint.Tools)
+	}
+}
+
+// TestMatrixConfigSeam checks each pair whose tool reads a config records that
+// config's base name, resolved from the language-tools tree (OD47/SC37): the
+// four configs the fleet owns, and no config on a pair whose tools read none.
+func TestMatrixConfigSeam(t *testing.T) {
+	cases := []struct {
+		language string
+		check    Check
+		config   string
+	}{
+		{LanguageGo, CheckLint, ".golangci.yml"},
+		{LanguageRust, CheckLint, "clippy.toml"},
+		{LanguagePython, CheckLint, "ruff.toml"},
+		{LanguagePython, CheckFormat, "ruff.toml"},
+		{LanguageShell, CheckLint, ".shellcheckrc"},
+		{LanguageGo, CheckBuild, ""},
+		{LanguageRust, CheckFormat, ""},
+	}
+	for _, c := range cases {
+		e, ok := LookupPair(c.language, c.check, "")
+		if !ok {
+			t.Errorf("pair %s %s not found", c.language, c.check)
+			continue
+		}
+		if e.Config != c.config {
+			t.Errorf("%s %s config = %q, want %q", c.language, c.check, e.Config, c.config)
+		}
+	}
+}
+
+// TestMatrixReproParity is the REPRO regenerate-check: the pair set rebuilt
+// from MATRIX must equal the committed table byte-for-byte, so a pair dropped
+// from the table or invented in it fails this test (E9, both directions).
+func TestMatrixReproParity(t *testing.T) {
+	parity := VerifyMatrixParity()
+	if !parity.Match {
+		t.Fatalf("committed table drifted from MATRIX:\nregenerated:\n%s\ncommitted:\n%s",
+			parity.Regenerated, parity.Committed)
+	}
+	if got := len(strings.Split(parity.Committed, "\n")); got != 27 {
+		t.Fatalf("committed pair count = %d, want 27", got)
+	}
+}
+
+// TestExitCodeConstantsMatchClikit checks the EXIT-code constants the contract
+// restates still agree with clikit's exit taxonomy, so the two never drift.
+func TestExitCodeConstantsMatchClikit(t *testing.T) {
+	cases := []struct {
+		status clikit.Status
+		want   int
+	}{
+		{clikit.StatusSuccess, ExitSuccess},
+		{clikit.StatusGateNegative, ExitCheckFailed},
+		{clikit.StatusUnsupported, ExitUnsupported},
+		{clikit.StatusInternal, ExitRunFailed},
+	}
+	for _, c := range cases {
+		if got := c.status.ExitCode(); got != c.want {
+			t.Errorf("clikit %s exit code = %d, contract constant = %d", c.status, got, c.want)
+		}
+	}
+}
+
+// containsTool reports whether tools holds want.
+func containsTool(tools []string, want string) bool {
+	for _, t := range tools {
+		if t == want {
+			return true
+		}
+	}
+	return false
 }

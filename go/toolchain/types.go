@@ -99,16 +99,79 @@ type RunResult struct {
 }
 
 // Check is a language-tool run's kind: what the tool was asked to verify.
+// CheckTest is the one check with a subcommand layer (TestKind); every other
+// check names its whole pair on its own.
 type Check string
 
-// The checks an Adapter may support, though Command may reject one a
-// particular language tool has no equivalent for.
+// The check set — the closed list of check kinds the dispatch table
+// (Matrix) is built from. A given language takes only the subset its column
+// in the standard names; Command on an adapter may still reject one, and a
+// pair no adapter implements resolves to the unsupported diagnostic
+// (DiagUnsupportedCheck, EXIT 80) rather than a silent pass.
 const (
-	CheckBuild  Check = "build"
-	CheckTest   Check = "test"
-	CheckLint   Check = "lint"
-	CheckFormat Check = "format"
-	CheckVet    Check = "vet"
+	CheckBuild    Check = "build"
+	CheckFormat   Check = "format"
+	CheckLint     Check = "lint"
+	CheckVet      Check = "vet"
+	CheckSecurity Check = "security"
+	CheckTest     Check = "test"
+)
+
+// TestKind is the subcommand layer CheckTest carries: a test pair is one of
+// these three, never a bare "test". Coverage and structured reports are not
+// separate kinds — both ride TestUnit in the same run, so no pair exists for
+// either.
+type TestKind string
+
+const (
+	// TestUnit is the unit-test pair. Coverage and structured (JUnit)
+	// reports are produced in this same run, not as their own pairs.
+	TestUnit TestKind = "unit"
+	// TestE2E is the end-to-end / integration-test pair.
+	TestE2E TestKind = "e2e"
+	// TestBenchmark is the benchmark pair, taken by Rust alone in the
+	// standard.
+	TestBenchmark TestKind = "benchmark"
+)
+
+// The language set — the four languages the dispatch table covers. A
+// Target.Language and an Adapter.Language() key on one of these strings.
+const (
+	LanguageGo     = "go"
+	LanguageRust   = "rust"
+	LanguagePython = "python"
+	LanguageShell  = "shell"
+)
+
+// The diagnostic codes an adapter's outcome carries into the binary's
+// command surface. Each is a clikit exit-taxonomy code: its leading class
+// fixes the process EXIT code (clikit.Status.ExitCode), so the binary never
+// invents a mapping. DiagUnsupportedCheck is the one this package builds
+// directly (UnsupportedDiagnostic); the other two name the classes an
+// adapter's normalized findings resolve to once Run has classified them.
+const (
+	// DiagUnsupportedCheck marks a pair no adapter implements, or a
+	// language/check the Matrix does not cover. Class unsupported → EXIT 80.
+	// A caller fails closed on it; it is never a pass.
+	DiagUnsupportedCheck = "unsupported.toolchain.check_not_supported"
+	// DiagCheckFailed marks a check that ran and reported at least one
+	// must-fail finding. Class gate_negative → EXIT 20.
+	DiagCheckFailed = "gate_negative.toolchain.error"
+	// DiagRunFailed marks a check that could not be run or parsed at all —
+	// an infrastructure failure, never a code problem. Class internal →
+	// EXIT 90.
+	DiagRunFailed = "internal.toolchain.run_failed"
+)
+
+// The EXIT codes an adapter's outcome resolves to, one per outcome class the
+// dispatch contract uses. Each equals its clikit status's ExitCode; the
+// contract restates them here so a reader sees the whole set in one place,
+// and a sanity test asserts they still agree with clikit.
+const (
+	ExitSuccess     = 0  // clikit success
+	ExitCheckFailed = 20 // clikit gate_negative — DiagCheckFailed
+	ExitUnsupported = 80 // clikit unsupported — DiagUnsupportedCheck
+	ExitRunFailed   = 90 // clikit internal — DiagRunFailed
 )
 
 // Target names one thing Run can check: a language, a check kind, and the

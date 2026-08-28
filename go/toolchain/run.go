@@ -10,6 +10,50 @@ import (
 	"github.com/johnrichter/claude-shared-tooling/go/sysops"
 )
 
+// ResolveCheck decides how the command surface treats a (language, check,
+// test) request against the dispatch table. It returns the MatrixEntry and a
+// nil diagnostic for a pair the Matrix declares and an adapter implements.
+// For every other request — a language/check the Matrix does not cover, or a
+// declared pair no adapter implements yet — it returns the zero MatrixEntry
+// and the unsupported diagnostic (DiagUnsupportedCheck, EXIT 80). It never
+// returns a success for a pair that would not actually run, so a caller fails
+// closed rather than reporting a silent pass. It runs nothing and has no side
+// effect; it reads the committed table only.
+func ResolveCheck(language string, check Check, test TestKind) (MatrixEntry, *clikit.Diagnostic) {
+	entry, ok := LookupPair(language, check, test)
+	if !ok || !entry.Implemented {
+		d := UnsupportedDiagnostic(language, check, test)
+		return MatrixEntry{}, &d
+	}
+	return entry, nil
+}
+
+// UnsupportedDiagnostic builds the diagnostic a caller returns for a pair the
+// dispatch contract does not run: code DiagUnsupportedCheck, whose class maps
+// to EXIT 80 (ExitUnsupported). Its context names the language and check so a
+// reader sees which pair was refused, and its triage is manual — no
+// re-invocation makes an unimplemented or out-of-matrix pair run. It has no
+// side effect.
+func UnsupportedDiagnostic(language string, check Check, test TestKind) clikit.Diagnostic {
+	pair := string(check)
+	if check == CheckTest {
+		pair = string(check) + " " + string(test)
+	}
+	d, err := clikit.NewError(
+		DiagUnsupportedCheck,
+		fmt.Sprintf("no adapter supports the %s %s check", language, pair),
+		clikit.Manual("choose a language-and-check pair the toolchain matrix supports"),
+		map[string]any{"language": language, "check": pair},
+	)
+	if err != nil {
+		// NewError only rejects a malformed code, message, triage or context;
+		// all four are fixed constants here, so a failure is a programming
+		// error in this package rather than a runtime condition.
+		panic(fmt.Sprintf("toolchain: building unsupported diagnostic: %v", err))
+	}
+	return d
+}
+
 // Run executes target's check through its language's registered Adapter and
 // returns the normalized, capped RunResult. The adapter picks the route —
 // a spawned tool or in-process analysis — and Run owns everything after it:
