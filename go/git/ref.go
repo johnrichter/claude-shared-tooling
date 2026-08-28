@@ -49,6 +49,13 @@ type RewriteOutcome struct {
 // SHA it currently points at: unique per call via a nanosecond timestamp, so
 // repeated rewrites of the same ref never collide or silently overwrite an
 // earlier recovery point.
+//
+// The returned name is a short tag name (no refs/tags/ prefix): every caller
+// hands it straight to `git tag <name> <sha>`, which places it under
+// refs/tags/ itself. Prefixing it here too would nest the ref under
+// refs/tags/refs/tags/. Callers that need the fully-qualified ref (e.g. to
+// pass to rev-parse) get the same resolution either way, since git searches
+// refs/tags/<name> for an unqualified name.
 func backupTagName(ref, oldSHA string) string {
 	base := ref
 	if i := strings.LastIndexByte(ref, '/'); i >= 0 {
@@ -58,7 +65,7 @@ func backupTagName(ref, oldSHA string) string {
 	if len(short) > 12 {
 		short = short[:12]
 	}
-	return fmt.Sprintf("refs/tags/backup/%s/%d-%s", base, time.Now().UTC().UnixNano(), short)
+	return fmt.Sprintf("backup/%s/%d-%s", base, time.Now().UTC().UnixNano(), short)
 }
 
 // MoveRef lands newSHA onto ref as a compare-and-swap against oldSHA,

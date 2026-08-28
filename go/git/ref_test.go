@@ -2,8 +2,14 @@ package git
 
 import (
 	"context"
+	"regexp"
+	"strings"
 	"testing"
 )
+
+// backupTagRefPattern matches the exact single-prefixed form a backup tag
+// must resolve to: refs/tags/backup/<base>/<ns>-<short>.
+var backupTagRefPattern = regexp.MustCompile(`^refs/tags/backup/[^/]+/\d+-[0-9a-f]+$`)
 
 // TestMoveRef_RejectsStaleExpectedOld checks a compare-and-swap against an
 // out-of-date expected value is refused, leaves the ref untouched, and
@@ -111,6 +117,114 @@ func TestMoveRef_DryRunWritesNothing(t *testing.T) {
 	}
 	if tags := runGit(t, dir, "tag", "-l", "backup/*"); tags != "" {
 		t.Fatalf("backup tag created during dry run: %s", tags)
+	}
+}
+
+// TestBackupTagName_SinglePrefixedInEveryWritingPath checks the backup tag
+// written by MoveRef, DeleteBranch, and Rebase resolves to exactly
+// refs/tags/backup/<base>/<ns>-<short> with no nesting under refs/tags/ —
+// the failure mode this guards is backupTagName returning a name already
+// prefixed with refs/tags/, which `git tag` then prefixes a second time.
+func TestBackupTagName_SinglePrefixedInEveryWritingPath(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("MoveRef", func(t *testing.T) {
+		r := newScratchRepo(t)
+		dir := r.Dir
+		oldHead := commitFile(t, dir, "a.txt", "a\n", "first")
+		newHead := commitFile(t, dir, "b.txt", "b\n", "second")
+		runGit(t, dir, "update-ref", "refs/heads/main", oldHead)
+
+		out, err := r.MoveRef(ctx, "refs/heads/main", oldHead, newHead, SyncLocalOnly, "", false)
+		if err != nil {
+			t.Fatalf("MoveRef: %v", err)
+		}
+		assertSinglePrefixedBackupTag(t, dir, out.BackupTag, oldHead)
+	})
+
+	t.Run("DeleteBranch", func(t *testing.T) {
+		r := newScratchRepo(t)
+		dir := r.Dir
+		head := commitFile(t, dir, "a.txt", "a\n", "first")
+		runGit(t, dir, "branch", "feature", head)
+
+		out, err := r.DeleteBranch(ctx, "feature", head, false)
+		if err != nil {
+			t.Fatalf("DeleteBranch: %v", err)
+		}
+		assertSinglePrefixedBackupTag(t, dir, out.BackupTag, head)
+	})
+
+	t.Run("Rebase", func(t *testing.T) {
+		r := newScratchRepo(t)
+		dir := r.Dir
+		base := commitFile(t, dir, "base.txt", "base\n", "base")
+		runGit(t, dir, "branch", "feature", base)
+		runGit(t, dir, "checkout", "-q", "feature")
+		oldFeatureHead := commitFile(t, dir, "feature.txt", "feature\n", "feature work")
+		runGit(t, dir, "checkout", "-q", "main")
+		commitFile(t, dir, "main.txt", "main\n", "main advanced")
+		runGit(t, dir, "checkout", "-q", "feature")
+
+		res, err := r.Rebase(ctx, "main", RebaseOptions{})
+		if err != nil {
+			t.Fatalf("Rebase: %v", err)
+		}
+		assertSinglePrefixedBackupTag(t, dir, res.BackupTag, oldFeatureHead)
+	})
+}
+
+// TestBackupTagName_DryRunAndWriteAgreeOnFormat checks a dry run computes a
+// backup tag name of the same single-prefixed shape MoveRef would actually
+// write, so the two paths never disagree about what git tag would do with
+// it.
+func TestBackupTagName_DryRunAndWriteAgreeOnFormat(t *testing.T) {
+	ctx := context.Background()
+	r := newScratchRepo(t)
+	dir := r.Dir
+	oldHead := commitFile(t, dir, "a.txt", "a\n", "first")
+
+	dryOut, err := r.MoveRef(ctx, "refs/heads/main", oldHead, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", SyncLocalOnly, "", true)
+	if err != nil {
+		t.Fatalf("MoveRef dry-run: %v", err)
+	}
+	if strings.HasPrefix(dryOut.BackupTag, "refs/tags/") {
+		t.Fatalf("dry-run backup tag %q is already refs/tags/-prefixed; git tag would nest it", dryOut.BackupTag)
+	}
+	if !backupTagRefPattern.MatchString("refs/tags/" + dryOut.BackupTag) {
+		t.Fatalf("dry-run backup tag %q, want form matching %s once qualified", dryOut.BackupTag, backupTagRefPattern)
+	}
+}
+
+// TestBackupTagName_NeverDoublePrefixed is a negative regression test for
+// F45: backupTagName must never return a name that already starts with
+// refs/tags/, since every caller passes it straight to `git tag <name>`,
+// which prefixes refs/tags/ on its own.
+func TestBackupTagName_NeverDoublePrefixed(t *testing.T) {
+	name := backupTagName("refs/heads/main", "0123456789abcdef")
+	if strings.HasPrefix(name, "refs/tags/") {
+		t.Fatalf("backupTagName(...) = %q, must not carry a refs/tags/ prefix", name)
+	}
+}
+
+// assertSinglePrefixedBackupTag checks tag resolves under dir to wantSHA and
+// that its fully-qualified ref is exactly refs/tags/backup/<base>/<ns>-<short>
+// — not nested a second time under refs/tags/.
+func assertSinglePrefixedBackupTag(t *testing.T, dir, tag, wantSHA string) {
+	t.Helper()
+	if strings.HasPrefix(tag, "refs/tags/") {
+		t.Fatalf("BackupTag %q is already refs/tags/-prefixed; git tag would nest it", tag)
+	}
+	qualified := "refs/tags/" + tag
+	if !backupTagRefPattern.MatchString(qualified) {
+		t.Fatalf("backup tag %q, want form matching %s", qualified, backupTagRefPattern)
+	}
+	if resolved := runGit(t, dir, "rev-parse", qualified); resolved != wantSHA {
+		t.Fatalf("backup tag %s = %s, want %s", qualified, resolved, wantSHA)
+	}
+	nested := "refs/tags/" + qualified
+	if _, err := (&Repo{Dir: dir}).resolveRef(context.Background(), nested); err == nil {
+		t.Fatalf("nested backup ref %s unexpectedly exists", nested)
 	}
 }
 

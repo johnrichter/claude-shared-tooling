@@ -158,7 +158,7 @@ func TestRebase_BackupTagWrittenBeforeConflictingRebase(t *testing.T) {
 	if _, ok := err.(*ConflictError); !ok {
 		t.Fatalf("Rebase error = %v (%T), want *ConflictError", err, err)
 	}
-	tags := strings.Fields(runGit(t, dir, "tag", "-l", "refs/tags/backup/feature/*"))
+	tags := strings.Fields(runGit(t, dir, "tag", "-l", "backup/feature/*"))
 	if len(tags) != 1 {
 		t.Fatalf("backup tags = %v, want exactly 1 pre-rebase backup tag even on conflict", tags)
 	}
