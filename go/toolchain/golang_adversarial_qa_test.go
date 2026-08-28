@@ -11,7 +11,7 @@ import (
 // "go" — `go fmt` invokes `gofmt -l -w` and rewrites files, which this
 // adapter must never do.
 func TestQAGoAdapterToolNamesGofmtNotGoFmt(t *testing.T) {
-	a := NewGoAdapter(&fakeLintDriver{})
+	a := NewGoAdapter()
 	if got := a.Tool(CheckFormat); got != "gofmt" {
 		t.Fatalf("Tool(format) = %q, want %q", got, "gofmt")
 	}
@@ -30,15 +30,15 @@ func TestQAGoAdapterToolNamesGofmtNotGoFmt(t *testing.T) {
 }
 
 // TestQAGoAdapterLintReportsInProcessRouteAndFixedTool checks lint routes
-// in-process and Tool answers the fixed "go-analysis" label there,
-// independent of whatever driver is supplied.
+// in-process and Tool answers the fixed golangci-lint+goimports composite
+// there, independent of what target it is asked about.
 func TestQAGoAdapterLintReportsInProcessRouteAndFixedTool(t *testing.T) {
-	a := NewGoAdapter(&fakeLintDriver{})
+	a := NewGoAdapter()
 	if got := a.Route(CheckLint); got != RouteInProcess {
 		t.Fatalf("Route(lint) = %q, want in-process", got)
 	}
-	if got := a.Tool(CheckLint); got != "go-analysis" {
-		t.Fatalf("Tool(lint) = %q, want go-analysis", got)
+	if got := a.Tool(CheckLint); got != lintResultTool {
+		t.Fatalf("Tool(lint) = %q, want %q", got, lintResultTool)
 	}
 }
 
@@ -47,7 +47,7 @@ func TestQAGoAdapterLintReportsInProcessRouteAndFixedTool(t *testing.T) {
 // a bare gofmt -l path, since it carries a similar .go-looking prefix but
 // with trailing diagnostic text and a space.
 func TestQAGoAdapterParseDoesNotFalsePositiveOnVetOrBuildErrorLines(t *testing.T) {
-	a := NewGoAdapter(&fakeLintDriver{})
+	a := NewGoAdapter()
 	stdout := []byte("./main.go:10:2: undefined: foo\n# example.com/pkg\n./other.go:3:1: missing return\n")
 	diags, err := a.Parse(1, stdout, nil)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestQAGoAdapterParseDoesNotFalsePositiveOnVetOrBuildErrorLines(t *testing.T
 // unformatted paths on stdout yields one error diagnostic per path rather
 // than a clean result.
 func TestQAGoAdapterParseUnformattedTreeIsNeverAQuietSuccess(t *testing.T) {
-	a := NewGoAdapter(&fakeLintDriver{})
+	a := NewGoAdapter()
 	diags, err := a.Parse(0, []byte("dirty.go\n"), nil)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -81,14 +81,14 @@ func TestQAGoAdapterParseUnformattedTreeIsNeverAQuietSuccess(t *testing.T) {
 	}
 }
 
-// TestQAGoAdapterRunInProcessRejectsEveryNonLintCheck checks every check
-// other than lint is rejected by RunInProcess with the ErrUnsupportedCheck
-// sentinel, since Route only ever sends lint down this path — a caller
-// invoking RunInProcess directly for another check is a misuse the
-// adapter must still reject correctly.
-func TestQAGoAdapterRunInProcessRejectsEveryNonLintCheck(t *testing.T) {
-	a := NewGoAdapter(&fakeLintDriver{})
-	for _, c := range []Check{CheckFormat, CheckBuild, CheckTest, CheckVet} {
+// TestQAGoAdapterRunInProcessRejectsSubprocessOnlyChecks checks the two
+// checks Route sends through the subprocess path (build, format) are
+// rejected by RunInProcess with the ErrUnsupportedCheck sentinel — a direct
+// caller bypassing Route must still be refused correctly rather than
+// silently getting an empty result.
+func TestQAGoAdapterRunInProcessRejectsSubprocessOnlyChecks(t *testing.T) {
+	a := NewGoAdapter()
+	for _, c := range []Check{CheckFormat, CheckBuild} {
 		_, err := a.RunInProcess(context.Background(), Target{Check: c})
 		if err == nil {
 			t.Fatalf("RunInProcess(%s) = nil error, want ErrUnsupportedCheck", c)
@@ -99,45 +99,12 @@ func TestQAGoAdapterRunInProcessRejectsEveryNonLintCheck(t *testing.T) {
 	}
 }
 
-// TestQAGoAdapterDriverErrorPropagates checks a driver-side error (analysis
-// itself failed to run, distinct from findings) surfaces as an error from
-// RunInProcess rather than being swallowed or turned into a diagnostic.
-func TestQAGoAdapterDriverErrorPropagates(t *testing.T) {
-	wantErr := errors.New("driver exploded")
-	a := NewGoAdapter(&fakeLintDriver{err: wantErr})
-	diags, err := a.RunInProcess(context.Background(), Target{Check: CheckLint})
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("RunInProcess error = %v, want %v", err, wantErr)
-	}
-	if diags != nil {
-		t.Fatalf("RunInProcess diagnostics = %+v, want nil alongside driver error", diags)
-	}
-}
-
-// TestQAGoAdapterNilDriverIsAnErrorNotAPanic checks an adapter built with a
-// nil driver — the one misconfiguration NewGoAdapter's pinned signature
-// cannot reject at construction — reports the lint check as an error instead
-// of panicking through Run, and still answers every other check normally.
-func TestQAGoAdapterNilDriverIsAnErrorNotAPanic(t *testing.T) {
-	a := NewGoAdapter(nil)
-	diags, err := a.RunInProcess(context.Background(), Target{Check: CheckLint, Dir: "."})
-	if err == nil {
-		t.Fatalf("RunInProcess(lint) with nil driver = %+v, want an error", diags)
-	}
-	if diags != nil {
-		t.Fatalf("RunInProcess(lint) diagnostics = %+v, want nil alongside the error", diags)
-	}
-	if got := a.Tool(CheckFormat); got != "gofmt" {
-		t.Fatalf("Tool(format) with nil driver = %q, want gofmt", got)
-	}
-}
-
 // TestQAGoAdapterCommandUnsupportedCheckMatchesSentinel checks Command's
-// error for an unrecognized check satisfies errors.Is against
-// ErrUnsupportedCheck, matching the contract every other adapter's Command
-// upholds.
+// error for a check routed in-process (never reached through Run's
+// subprocess path) satisfies errors.Is against ErrUnsupportedCheck, matching
+// the contract every other adapter's Command upholds.
 func TestQAGoAdapterCommandUnsupportedCheckMatchesSentinel(t *testing.T) {
-	a := NewGoAdapter(&fakeLintDriver{})
+	a := NewGoAdapter()
 	_, err := a.Command(CheckLint)
 	if !errors.Is(err, ErrUnsupportedCheck) {
 		t.Fatalf("Command(lint): errors.Is(err, ErrUnsupportedCheck) = false; err = %v", err)

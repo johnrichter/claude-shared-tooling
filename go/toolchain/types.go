@@ -179,7 +179,14 @@ const (
 type Target struct {
 	Language string
 	Check    Check
-	Dir      string
+	// Test is the CheckTest subcommand this target asks for, mirroring
+	// MatrixEntry.Test — empty for every non-test check. It is the one piece
+	// of a request Adapter.Tool and Adapter.Command never see, since their
+	// signature carries only Check; an adapter whose test pair varies by
+	// kind (e.g. one that wraps unit in a coverage tool but runs e2e plain)
+	// reads it from RunInProcess or its own in-process dispatch instead.
+	Test TestKind
+	Dir  string
 	// Args carries a build profile and a target triple (e.g. "--release",
 	// "x86_64-unknown-linux-gnu") — nothing else. Run appends Args verbatim
 	// to the end of the adapter's argv, and runID folds it into the run

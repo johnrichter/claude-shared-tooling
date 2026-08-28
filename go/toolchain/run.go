@@ -254,17 +254,19 @@ func classifyStatus(exitCode int, counts Counts, allowWarnings bool) clikit.Stat
 }
 
 // runID derives RunResult.ID deterministically from what identifies a
-// target: its language, check, directory, and args. The same target always
-// produces the same ID, which doubles as the cache key (cache.go) and the
-// log file's base name (log.go) — a re-run of the identical target
-// overwrites its own prior log rather than accumulating one file per run.
-// Two targets that differ only in Args (e.g. a release build vs. a debug
-// build of the same dir) hash to distinct IDs, so they get distinct cache
-// entries and log files rather than colliding on one.
+// target: its language, check, test kind, directory, and args. The same
+// target always produces the same ID, which doubles as the cache key
+// (cache.go) and the log file's base name (log.go) — a re-run of the
+// identical target overwrites its own prior log rather than accumulating
+// one file per run. Two targets that differ only in Args (e.g. a release
+// build vs. a debug build of the same dir), or only in Test (e.g. the unit
+// and e2e pairs of the same CheckTest target), hash to distinct IDs, so they
+// get distinct cache entries and log files rather than colliding on one.
 func runID(target Target) (string, error) {
 	key := map[string]any{
 		"language": target.Language,
 		"check":    string(target.Check),
+		"test":     string(target.Test),
 		"dir":      target.Dir,
 		"args":     target.Args,
 	}

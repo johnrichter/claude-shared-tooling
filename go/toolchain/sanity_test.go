@@ -327,8 +327,8 @@ func TestMatrixPairCounts(t *testing.T) {
 }
 
 // TestMatrixImplementedCountMatchesBaseline checks the table marks exactly
-// the thirteen pairs F15 measured implemented today (Go five, Rust four,
-// Python four), so the other fourteen fail closed until their adapter lands.
+// the fifteen pairs implemented today (Go seven, Rust four, Python four), so
+// the other twelve fail closed until their adapter lands.
 func TestMatrixImplementedCountMatchesBaseline(t *testing.T) {
 	implemented := map[string]int{}
 	total := 0
@@ -338,10 +338,10 @@ func TestMatrixImplementedCountMatchesBaseline(t *testing.T) {
 			total++
 		}
 	}
-	if total != 13 {
-		t.Fatalf("implemented pair count = %d, want 13 (F15)", total)
+	if total != 15 {
+		t.Fatalf("implemented pair count = %d, want 15", total)
 	}
-	want := map[string]int{LanguageGo: 5, LanguageRust: 4, LanguagePython: 4}
+	want := map[string]int{LanguageGo: 7, LanguageRust: 4, LanguagePython: 4}
 	for lang, n := range want {
 		if implemented[lang] != n {
 			t.Errorf("%s implemented count = %d, want %d", lang, implemented[lang], n)

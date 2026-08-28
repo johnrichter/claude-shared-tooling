@@ -182,18 +182,18 @@ var testKindsByLanguage = map[string][]TestKind{
 // (MATRIX) by VerifyMatrixParity, so a pair dropped here or invented here
 // fails the parity test. Config base names resolve from the language-tools
 // tree (OD47): .golangci.yml, clippy.toml, ruff.toml, .shellcheckrc.
-// Implemented marks the thirteen pairs the adapters perform today (F15, Go
-// five, Rust four, Python four); the other fourteen resolve to EXIT 80 until
-// their adapter lands.
+// Implemented marks the fifteen pairs the adapters perform today (Go seven,
+// Rust four, Python four); the other twelve resolve to EXIT 80 until their
+// adapter lands.
 var committedMatrix = []MatrixEntry{
-	// Go — seven pairs.
+	// Go — seven pairs, all implemented.
 	{Language: LanguageGo, Check: CheckBuild, Tools: []string{"go build"}, Implemented: true},
 	{Language: LanguageGo, Check: CheckFormat, Tools: []string{"gofmt", "goimports"}, Implemented: true},
 	{Language: LanguageGo, Check: CheckLint, Tools: []string{"golangci-lint", "goimports"}, Config: ".golangci.yml", Implemented: true},
 	{Language: LanguageGo, Check: CheckVet, Tools: []string{"go vet", "staticcheck"}, Implemented: true},
-	{Language: LanguageGo, Check: CheckSecurity, Tools: []string{"gosec", "govulncheck"}},
+	{Language: LanguageGo, Check: CheckSecurity, Tools: []string{"gosec", "govulncheck"}, Implemented: true},
 	{Language: LanguageGo, Check: CheckTest, Test: TestUnit, Tools: []string{"go test", "gotestsum"}, Implemented: true},
-	{Language: LanguageGo, Check: CheckTest, Test: TestE2E, Tools: []string{"go test"}},
+	{Language: LanguageGo, Check: CheckTest, Test: TestE2E, Tools: []string{"go test"}, Implemented: true},
 
 	// Rust — eight pairs.
 	{Language: LanguageRust, Check: CheckBuild, Tools: []string{"cargo build"}, Implemented: true},
