@@ -182,9 +182,9 @@ var testKindsByLanguage = map[string][]TestKind{
 // (MATRIX) by VerifyMatrixParity, so a pair dropped here or invented here
 // fails the parity test. Config base names resolve from the language-tools
 // tree (OD47): .golangci.yml, clippy.toml, ruff.toml, .shellcheckrc.
-// Implemented marks the fifteen pairs the adapters perform today (Go seven,
-// Rust four, Python four); the other twelve resolve to EXIT 80 until their
-// adapter lands.
+// Implemented marks the nineteen pairs the adapters perform today (Go
+// seven, Rust eight, Python four); the other eight resolve to EXIT 80 until
+// their adapter lands.
 var committedMatrix = []MatrixEntry{
 	// Go — seven pairs, all implemented.
 	{Language: LanguageGo, Check: CheckBuild, Tools: []string{"go build"}, Implemented: true},
@@ -195,15 +195,15 @@ var committedMatrix = []MatrixEntry{
 	{Language: LanguageGo, Check: CheckTest, Test: TestUnit, Tools: []string{"go test", "gotestsum"}, Implemented: true},
 	{Language: LanguageGo, Check: CheckTest, Test: TestE2E, Tools: []string{"go test"}, Implemented: true},
 
-	// Rust — eight pairs.
+	// Rust — eight pairs, all implemented.
 	{Language: LanguageRust, Check: CheckBuild, Tools: []string{"cargo build"}, Implemented: true},
 	{Language: LanguageRust, Check: CheckFormat, Tools: []string{"cargo fmt"}, Implemented: true},
 	{Language: LanguageRust, Check: CheckLint, Tools: []string{"cargo clippy"}, Config: "clippy.toml", Implemented: true},
-	{Language: LanguageRust, Check: CheckVet, Tools: []string{"cargo check"}},
-	{Language: LanguageRust, Check: CheckSecurity, Tools: []string{"cargo audit", "cargo deny"}},
+	{Language: LanguageRust, Check: CheckVet, Tools: []string{"cargo check"}, Implemented: true},
+	{Language: LanguageRust, Check: CheckSecurity, Tools: []string{"cargo audit", "cargo deny"}, Implemented: true},
 	{Language: LanguageRust, Check: CheckTest, Test: TestUnit, Tools: []string{"cargo nextest", "cargo llvm-cov"}, Implemented: true},
-	{Language: LanguageRust, Check: CheckTest, Test: TestE2E, Tools: []string{"cargo nextest"}},
-	{Language: LanguageRust, Check: CheckTest, Test: TestBenchmark, Tools: []string{"cargo bench"}},
+	{Language: LanguageRust, Check: CheckTest, Test: TestE2E, Tools: []string{"cargo nextest"}, Implemented: true},
+	{Language: LanguageRust, Check: CheckTest, Test: TestBenchmark, Tools: []string{"cargo bench"}, Implemented: true},
 
 	// Python — seven pairs.
 	{Language: LanguagePython, Check: CheckBuild, Tools: []string{"uv build"}, Implemented: true},

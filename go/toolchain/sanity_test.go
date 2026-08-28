@@ -327,8 +327,8 @@ func TestMatrixPairCounts(t *testing.T) {
 }
 
 // TestMatrixImplementedCountMatchesBaseline checks the table marks exactly
-// the fifteen pairs implemented today (Go seven, Rust four, Python four), so
-// the other twelve fail closed until their adapter lands.
+// the nineteen pairs implemented today (Go seven, Rust eight, Python four),
+// so the other eight fail closed until their adapter lands.
 func TestMatrixImplementedCountMatchesBaseline(t *testing.T) {
 	implemented := map[string]int{}
 	total := 0
@@ -338,10 +338,10 @@ func TestMatrixImplementedCountMatchesBaseline(t *testing.T) {
 			total++
 		}
 	}
-	if total != 15 {
-		t.Fatalf("implemented pair count = %d, want 15", total)
+	if total != 19 {
+		t.Fatalf("implemented pair count = %d, want 19", total)
 	}
-	want := map[string]int{LanguageGo: 7, LanguageRust: 4, LanguagePython: 4}
+	want := map[string]int{LanguageGo: 7, LanguageRust: 8, LanguagePython: 4}
 	for lang, n := range want {
 		if implemented[lang] != n {
 			t.Errorf("%s implemented count = %d, want %d", lang, implemented[lang], n)
@@ -438,6 +438,41 @@ func TestResolveCheckImplementedPair(t *testing.T) {
 	}
 	if entry.PairID() != "go build" {
 		t.Fatalf("entry PairID = %q, want %q", entry.PairID(), "go build")
+	}
+}
+
+// TestResolveCheckRustEightPairsNeverExit80 checks every Rust MATRIX pair —
+// build, format, lint, vet, security and all three test kinds — resolves to
+// its declared entry with no diagnostic, the table-level evidence for AC1
+// (Rust dispatches its eight MATRIX pairs, none returning EXIT 80). This is
+// the pure dispatch check, with no tool spawned; the adapter's own probe
+// suite exercises the real cargo subcommands.
+func TestResolveCheckRustEightPairsNeverExit80(t *testing.T) {
+	pairs := []struct {
+		check Check
+		test  TestKind
+	}{
+		{CheckBuild, ""},
+		{CheckFormat, ""},
+		{CheckLint, ""},
+		{CheckVet, ""},
+		{CheckSecurity, ""},
+		{CheckTest, TestUnit},
+		{CheckTest, TestE2E},
+		{CheckTest, TestBenchmark},
+	}
+	if len(pairs) != 8 {
+		t.Fatalf("test table lists %d pairs, want 8", len(pairs))
+	}
+	for _, p := range pairs {
+		entry, diag := ResolveCheck(LanguageRust, p.check, p.test)
+		if diag != nil {
+			t.Errorf("ResolveCheck(rust,%s,%s) = diag %+v, want nil (implemented pair)", p.check, p.test, diag)
+			continue
+		}
+		if entry.Language != LanguageRust || entry.Check != p.check || entry.Test != p.test {
+			t.Errorf("ResolveCheck(rust,%s,%s) entry = %+v, want a matching Rust entry", p.check, p.test, entry)
+		}
 	}
 }
 

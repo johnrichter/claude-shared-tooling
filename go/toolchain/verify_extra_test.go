@@ -219,15 +219,17 @@ func TestVerifyConcurrentCacheWritesForDifferentTargetsBothPersist(t *testing.T)
 }
 
 // TestVerifyCargoArgvTableLockedPerCheck pins cargoAdapter.Command's argv
-// for every check it supports: --locked on build, test and lint (so a stale
-// Cargo.lock fails the run instead of silently re-resolving), and its
-// absence on format — cargo fmt forwards unrecognized flags straight to
-// rustfmt, which has no --locked and would fail the check on that flag alone
-// rather than on anything about the code's formatting.
+// for every check it reaches through Run: --locked on build, lint and vet
+// (so a stale Cargo.lock fails the run instead of silently re-resolving),
+// and its absence on format — cargo fmt forwards unrecognized flags
+// straight to rustfmt, which has no --locked and would fail the check on
+// that flag alone rather than on anything about the code's formatting.
+// security and test route in-process and never reach Command, so neither
+// belongs in this table.
 func TestVerifyCargoArgvTableLockedPerCheck(t *testing.T) {
 	locked := map[Check]bool{
 		CheckBuild:  true,
-		CheckTest:   true,
+		CheckVet:    true,
 		CheckLint:   true,
 		CheckFormat: false,
 	}
