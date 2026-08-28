@@ -210,14 +210,14 @@ func TestAdversarialErrUnsupportedCheckMatchesSecurity(t *testing.T) {
 // TestAdversarialRunPropagatesErrUnsupportedCheck checks Run's own error for
 // a check the registered adapter rejects still satisfies errors.Is against
 // ErrUnsupportedCheck — the sentinel must survive Run's passthrough
-// (run.go's `if err != nil { return nil, err }` immediately after
-// adapter.Command), not just Command's own direct return. python vet is the
-// example here: pythonAdapter routes every check through the subprocess
-// path, and its Command has no equivalent for vet.
+// (run.go's runInProcess wrapping RunInProcess's own error with `%w`), not
+// just the adapter's own direct return. python test benchmark is the example
+// here: MATRIX names benchmark for Rust alone (testKindsByLanguage), so
+// pythonAdapter's runTest has no equivalent for a Python target naming it.
 func TestAdversarialRunPropagatesErrUnsupportedCheck(t *testing.T) {
-	_, err := Run(context.Background(), Target{Language: "python", Check: CheckVet, Dir: t.TempDir()}, Options{LogDir: t.TempDir()})
+	_, err := Run(context.Background(), Target{Language: "python", Check: CheckTest, Test: TestBenchmark, Dir: t.TempDir()}, Options{LogDir: t.TempDir()})
 	if err == nil {
-		t.Fatalf("Run: expected an error for CheckVet against uv, got nil")
+		t.Fatalf("Run: expected an error for python test benchmark, got nil")
 	}
 	if !errors.Is(err, ErrUnsupportedCheck) {
 		t.Fatalf("Run: errors.Is(err, ErrUnsupportedCheck) = false; err = %v", err)

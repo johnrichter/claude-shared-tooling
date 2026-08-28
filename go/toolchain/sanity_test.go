@@ -327,8 +327,9 @@ func TestMatrixPairCounts(t *testing.T) {
 }
 
 // TestMatrixImplementedCountMatchesBaseline checks the table marks exactly
-// the nineteen pairs implemented today (Go seven, Rust eight, Python four),
-// so the other eight fail closed until their adapter lands.
+// the twenty-two pairs implemented today (Go seven, Rust eight, Python
+// seven), so the other five (all shell) fail closed until their adapter
+// lands.
 func TestMatrixImplementedCountMatchesBaseline(t *testing.T) {
 	implemented := map[string]int{}
 	total := 0
@@ -338,10 +339,10 @@ func TestMatrixImplementedCountMatchesBaseline(t *testing.T) {
 			total++
 		}
 	}
-	if total != 19 {
-		t.Fatalf("implemented pair count = %d, want 19", total)
+	if total != 22 {
+		t.Fatalf("implemented pair count = %d, want 22", total)
 	}
-	want := map[string]int{LanguageGo: 7, LanguageRust: 8, LanguagePython: 4}
+	want := map[string]int{LanguageGo: 7, LanguageRust: 8, LanguagePython: 7}
 	for lang, n := range want {
 		if implemented[lang] != n {
 			t.Errorf("%s implemented count = %d, want %d", lang, implemented[lang], n)
@@ -409,7 +410,7 @@ func TestResolveCheckUnsupportedPairs(t *testing.T) {
 		{"go benchmark is out of matrix", LanguageGo, CheckTest, TestBenchmark},
 		{"unknown language", "ruby", CheckBuild, ""},
 		{"bare test is not a pair", LanguageGo, CheckTest, ""},
-		{"python vet declared but unimplemented", LanguagePython, CheckVet, ""},
+		{"shell security declared but unimplemented", LanguageShell, CheckSecurity, ""},
 		{"shell lint declared but unimplemented", LanguageShell, CheckLint, ""},
 	}
 	for _, c := range cases {
@@ -494,7 +495,7 @@ func TestMatrixMultiToolPairs(t *testing.T) {
 
 // TestMatrixConfigSeam checks each pair whose tool reads a config records that
 // config's base name, resolved from the language-tools tree (OD47/SC37): the
-// four configs the fleet owns, and no config on a pair whose tools read none.
+// five configs the fleet owns, and no config on a pair whose tools read none.
 func TestMatrixConfigSeam(t *testing.T) {
 	cases := []struct {
 		language string
@@ -505,6 +506,7 @@ func TestMatrixConfigSeam(t *testing.T) {
 		{LanguageRust, CheckLint, "clippy.toml"},
 		{LanguagePython, CheckLint, "ruff.toml"},
 		{LanguagePython, CheckFormat, "ruff.toml"},
+		{LanguagePython, CheckVet, "mypy.ini"},
 		{LanguageShell, CheckLint, ".shellcheckrc"},
 		{LanguageGo, CheckBuild, ""},
 		{LanguageRust, CheckFormat, ""},

@@ -181,10 +181,10 @@ var testKindsByLanguage = map[string][]TestKind{
 // file and its implementation status. It is asserted equal to matrixSpec
 // (MATRIX) by VerifyMatrixParity, so a pair dropped here or invented here
 // fails the parity test. Config base names resolve from the language-tools
-// tree (OD47): .golangci.yml, clippy.toml, ruff.toml, .shellcheckrc.
-// Implemented marks the nineteen pairs the adapters perform today (Go
-// seven, Rust eight, Python four); the other eight resolve to EXIT 80 until
-// their adapter lands.
+// tree (OD47/SC37): .golangci.yml, clippy.toml, ruff.toml, mypy.ini,
+// .shellcheckrc. Implemented marks the twenty-two pairs the adapters perform
+// today (Go seven, Rust eight, Python seven); the other five — all shell —
+// resolve to EXIT 80 until their adapter lands.
 var committedMatrix = []MatrixEntry{
 	// Go — seven pairs, all implemented.
 	{Language: LanguageGo, Check: CheckBuild, Tools: []string{"go build"}, Implemented: true},
@@ -205,14 +205,14 @@ var committedMatrix = []MatrixEntry{
 	{Language: LanguageRust, Check: CheckTest, Test: TestE2E, Tools: []string{"cargo nextest"}, Implemented: true},
 	{Language: LanguageRust, Check: CheckTest, Test: TestBenchmark, Tools: []string{"cargo bench"}, Implemented: true},
 
-	// Python — seven pairs.
+	// Python — seven pairs, all implemented.
 	{Language: LanguagePython, Check: CheckBuild, Tools: []string{"uv build"}, Implemented: true},
 	{Language: LanguagePython, Check: CheckFormat, Tools: []string{"ruff format"}, Config: "ruff.toml", Implemented: true},
 	{Language: LanguagePython, Check: CheckLint, Tools: []string{"ruff check"}, Config: "ruff.toml", Implemented: true},
-	{Language: LanguagePython, Check: CheckVet, Tools: []string{"mypy"}},
-	{Language: LanguagePython, Check: CheckSecurity, Tools: []string{"bandit"}},
+	{Language: LanguagePython, Check: CheckVet, Tools: []string{"mypy"}, Config: "mypy.ini", Implemented: true},
+	{Language: LanguagePython, Check: CheckSecurity, Tools: []string{"bandit"}, Implemented: true},
 	{Language: LanguagePython, Check: CheckTest, Test: TestUnit, Tools: []string{"pytest"}, Implemented: true},
-	{Language: LanguagePython, Check: CheckTest, Test: TestE2E, Tools: []string{"pytest", "playwright"}},
+	{Language: LanguagePython, Check: CheckTest, Test: TestE2E, Tools: []string{"pytest", "playwright"}, Implemented: true},
 
 	// Shell — five pairs. No build, no vet.
 	{Language: LanguageShell, Check: CheckFormat, Tools: []string{"shfmt"}},
