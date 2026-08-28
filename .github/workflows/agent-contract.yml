@@ -63,4 +63,4 @@ jobs:
         working-directory: go/agentcontract
         run: go build -o "$RUNNER_TEMP/agentcontract-lint" ./cmd/agentcontract-lint
       - name: Agent-contract lint (discriminator matrix + instruction properties)
-        run: "$RUNNER_TEMP/agentcontract-lint" .
+        run: '"$RUNNER_TEMP/agentcontract-lint" .'
