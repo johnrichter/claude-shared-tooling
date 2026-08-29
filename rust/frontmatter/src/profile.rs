@@ -617,6 +617,25 @@ pub(crate) struct NamespaceSpec {
     #[allow(dead_code)]
     #[serde(rename = "type", default)]
     pub(crate) facet_type: FacetType,
+    /// Optional unconditional allowed-value list for this namespace: when
+    /// present, [`crate::validate::validate`] checks EVERY file carrying a
+    /// tag in this namespace against it, regardless of any other tag or
+    /// rule-set match -- unlike a rule-set's `apply.value_formats` (only
+    /// checked for a file matching that rule-set's OWN `match` criterion).
+    /// `None` for a namespace that declares no such list -- every
+    /// pre-existing namespace, unaffected (`#[serde(default)]`).
+    #[serde(default)]
+    pub(crate) allowed_values: Option<AllowedValues>,
+}
+
+/// A namespace's `allowed_values` entry: the closed set of values a tag in
+/// that namespace may carry, plus the `message` template to render on a
+/// mismatch (`{value}` = the whole offending tag, `{namespace}` = this
+/// namespace's name).
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub(crate) struct AllowedValues {
+    pub(crate) values: Vec<String>,
+    pub(crate) message: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

@@ -13,7 +13,10 @@
 //! `DESCRIPTION_OVER_CAP`, `DESCRIPTION_NOT_TOP_LEVEL`, the five
 //! tag-namespace codes (`MISSING_REQUIRED_TAG`, `MULTIPLE_SINGLE_VALUE_TAGS`,
 //! `ORPHAN_NAMESPACE_TAG`, `REPORT_ONLY_TAG_MISUSED`,
-//! `INVALID_PERIOD_FORMAT`), and the tags-not-a-list code. Deliberately
+//! `INVALID_PERIOD_FORMAT`), the tags-not-a-list code, and
+//! `TAG_VALUE_NOT_ALLOWED` (a namespace's own `allowed_values` list,
+//! checked unconditionally on every file carrying that namespace -- see
+//! `allowed_values_phase`). Deliberately
 //! out of scope: `DESCRIPTION_INVALID_SCALAR` (raw YAML scalar-quoting
 //! style -- this crate's parser already normalizes scalar shape, so that
 //! raw-text quoting distinction doesn't exist here in the same form),
@@ -166,6 +169,14 @@ const CODE_TAGS_NOT_A_LIST: &str = "TAGS_NOT_A_LIST";
 /// under `workspace:`) rather than a cascade step -- so it is pinned here
 /// as a named constant.
 const CODE_DESCRIPTION_NOT_TOP_LEVEL: &str = "DESCRIPTION_NOT_TOP_LEVEL";
+
+/// The tag-value-not-allowed code, for [`allowed_values_phase`]. Like
+/// [`CODE_TAGS_NOT_A_LIST`]/[`CODE_DESCRIPTION_NOT_TOP_LEVEL`], it is not
+/// part of the declarative schema's cascade `codes` list -- the mechanism
+/// it guards (a namespace's own `allowed_values`, checked unconditionally)
+/// is deliberately separate from the conditional rule-set cascade -- so it
+/// is pinned here as a named constant rather than read from the profile.
+const CODE_TAG_VALUE_NOT_ALLOWED: &str = "TAG_VALUE_NOT_ALLOWED";
 
 // ---------------------------------------------------------------------------
 // The effective (workspace:-flattened) field view
@@ -358,6 +369,7 @@ fn tag_rule_violations(tags: &[String], profile: &Profile) -> Vec<Violation> {
     rule_set_forbidden_phase(&groups, profile, &mut violations);
     rule_set_required_phase(&groups, profile, &mut violations);
     rule_set_value_format_phase(&groups, profile, &mut violations);
+    allowed_values_phase(&groups, profile, &mut violations);
 
     violations
 }
@@ -589,6 +601,34 @@ fn rule_set_value_format_phase(
                         message,
                     });
                 }
+            }
+        }
+    }
+}
+
+/// Every namespace carrying `allowed_values` in the pack is checked
+/// unconditionally, against every file's tags in that namespace -- no other
+/// tag or rule-set match gates this, which is what distinguishes it from
+/// [`rule_set_value_format_phase`] (only checked for a file matching some
+/// OTHER rule-set's `match` criterion). A namespace with no `allowed_values`
+/// entry is untouched: today's behavior, unaffected.
+fn allowed_values_phase(
+    groups: &[(String, Vec<String>)],
+    profile: &Profile,
+    violations: &mut Vec<Violation>,
+) {
+    for ns in &profile.pack.namespaces {
+        let Some(allowed) = &ns.allowed_values else {
+            continue;
+        };
+        for tag in group_get(groups, &ns.name) {
+            let value = tag.split_once(':').map_or("", |(_, v)| v);
+            if !allowed.values.iter().any(|v| v == value) {
+                violations.push(Violation {
+                    code: CODE_TAG_VALUE_NOT_ALLOWED.to_string(),
+                    field: ns.name.clone(),
+                    message: render(&allowed.message, &[("value", tag), ("namespace", &ns.name)]),
+                });
             }
         }
     }
@@ -1910,6 +1950,96 @@ body\n"
                 .iter()
                 .any(|v| v.code == "MISSING_REQUIRED_TAG" && v.field == "status"),
             "a non-report rule-set's require_namespaces must fire generically: {:?}",
+            entry.violations
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // `allowed_values`: a namespace's own unconditional value allow-list.
+    // Synthetic vocabulary only -- no real pack's namespace is populated by
+    // this task; see the module doc's `TAG_VALUE_NOT_ALLOWED` entry.
+    // -----------------------------------------------------------------------
+
+    /// A pack with one namespace carrying `allowed_values` (`environment`)
+    /// and one without (`owner`) -- proves the check is per-namespace opt-in,
+    /// not global.
+    const WITH_ALLOWED_VALUES: &str = r#"{
+        "kind": "extension-pack",
+        "version": "allowed-values-test@1",
+        "extends": "core@2.0.0",
+        "required_fields": [],
+        "description_caps": {"context": 350},
+        "file_class": {"default": "context", "rules": []},
+        "namespaces": [
+            {"name": "type", "cardinality": "singleton"},
+            {
+                "name": "environment",
+                "cardinality": "optional",
+                "allowed_values": {
+                    "values": ["prod", "staging", "dev"],
+                    "message": "'{value}' is not an allowed {namespace} value"
+                }
+            },
+            {"name": "owner", "cardinality": "optional"}
+        ],
+        "rule_sets": [],
+        "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
+    }"#;
+
+    #[test]
+    fn allowed_value_in_the_list_has_no_tag_value_not_allowed_violation() {
+        let profile = Profile::from_pack_json(WITH_ALLOWED_VALUES)
+            .expect("a synthetic allowed_values pack must build");
+        let input =
+            "---\nname: \"x\"\ntags:\n  - type:knowledge\n  - environment:prod\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/doc.md", &profile);
+        assert!(
+            !entry
+                .violations
+                .iter()
+                .any(|v| v.code == "TAG_VALUE_NOT_ALLOWED"),
+            "an allowed value must not fire: {:?}",
+            entry.violations
+        );
+    }
+
+    #[test]
+    fn allowed_value_not_in_the_list_fires_tag_value_not_allowed() {
+        let profile = Profile::from_pack_json(WITH_ALLOWED_VALUES)
+            .expect("a synthetic allowed_values pack must build");
+        let input =
+            "---\nname: \"x\"\ntags:\n  - type:knowledge\n  - environment:sandbox\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/doc.md", &profile);
+        let violation = entry
+            .violations
+            .iter()
+            .find(|v| v.code == "TAG_VALUE_NOT_ALLOWED")
+            .expect("an out-of-list value must fire TAG_VALUE_NOT_ALLOWED");
+        assert_eq!(violation.field, "environment");
+        assert_eq!(
+            violation.message,
+            "'environment:sandbox' is not an allowed environment value"
+        );
+    }
+
+    /// A namespace with NO `allowed_values` entry (`owner`) is completely
+    /// unaffected -- any value is accepted, exactly today's behavior.
+    #[test]
+    fn namespace_without_allowed_values_is_unaffected_by_any_value() {
+        let profile = Profile::from_pack_json(WITH_ALLOWED_VALUES)
+            .expect("a synthetic allowed_values pack must build");
+        let input =
+            "---\nname: \"x\"\ntags:\n  - type:knowledge\n  - owner:anyone-at-all\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/doc.md", &profile);
+        assert!(
+            !entry
+                .violations
+                .iter()
+                .any(|v| v.code == "TAG_VALUE_NOT_ALLOWED"),
+            "a namespace with no allowed_values entry must never emit it: {:?}",
             entry.violations
         );
     }
