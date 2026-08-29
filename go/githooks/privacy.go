@@ -17,13 +17,18 @@ import (
 type PrivacyTier string
 
 // The closed set of privacy tiers, strictest to loosest. Public is a repo
-// shared outside the org; Datadog is shared inside the org; Personal is a
-// single owner's own private repo.
+// shared outside the org; Confidential is shared inside the org; Private is a
+// single repo not shared at all.
 const (
-	TierPublic   PrivacyTier = "public"
-	TierDatadog  PrivacyTier = "datadog"
-	TierPersonal PrivacyTier = "personal"
+	TierPublic       PrivacyTier = "public"
+	TierConfidential PrivacyTier = "confidential"
+	TierPrivate      PrivacyTier = "private"
 )
+
+// employeeEmailLabel is the internal-identifier label used by both the
+// employee-email pattern and its allowlist lookup, named once so the two
+// stay in sync by construction.
+const employeeEmailLabel = "internal employee email"
 
 // Known reports whether t is one of the three defined tiers.
 func (t PrivacyTier) Known() bool {
@@ -32,12 +37,14 @@ func (t PrivacyTier) Known() bool {
 }
 
 // privacyTierConfig is one tier's forbidden-marker set, whether the
-// "declares-but-not-tier-public" pair check applies, and which
-// internal-identifier posture it uses.
+// "declares-but-not-tier-public" pair check applies, which internal-
+// identifier posture it uses, and whether that posture is eligible for the
+// caller-configured employee-email check (see PrivacyOptions.EmployeeEmail).
 type privacyTierConfig struct {
-	forbiddenMarkers  []markerPattern
-	requirePublicPair bool
-	internalID        []markerPattern
+	forbiddenMarkers    []markerPattern
+	requirePublicPair   bool
+	internalID          []markerPattern
+	checksEmployeeEmail bool
 }
 
 type markerPattern struct {
@@ -49,20 +56,19 @@ var privacyTierConfigs = map[PrivacyTier]privacyTierConfig{
 	TierPublic: {
 		forbiddenMarkers: []markerPattern{
 			{regexp.MustCompile(`(?i)\bprivacy:\s*(internal|confidential)\b`), "forbidden frontmatter marker"},
-			{regexp.MustCompile(`(?i)\bowner:\s*(datadog|personal)\b`), "forbidden frontmatter marker"},
 		},
-		requirePublicPair: true,
-		internalID:        internalIDStrict,
+		requirePublicPair:   true,
+		internalID:          internalIDStrict,
+		checksEmployeeEmail: true,
 	},
-	TierDatadog: {
+	TierConfidential: {
 		forbiddenMarkers: []markerPattern{
 			{regexp.MustCompile(`(?i)\bprivacy:\s*confidential\b`), "forbidden frontmatter marker"},
-			{regexp.MustCompile(`(?i)\bowner:\s*personal\b`), "forbidden frontmatter marker"},
 		},
 		requirePublicPair: false,
 		internalID:        internalIDRelaxed,
 	},
-	TierPersonal: {
+	TierPrivate: {
 		forbiddenMarkers:  nil,
 		requirePublicPair: false,
 		internalID:        nil,
@@ -70,15 +76,14 @@ var privacyTierConfigs = map[PrivacyTier]privacyTierConfig{
 }
 
 // fmPairChecks are the public-tier "declares a tag but not its public value"
-// checks: a file whose frontmatter declares privacy/owner at all but not the
-// public value (catches an unenumerated value, e.g. "privacy: restricted").
+// checks: a file whose frontmatter declares privacy: at all but not
+// privacy:public (catches an unenumerated value, e.g. "privacy: restricted").
 var fmPairChecks = []struct {
 	any    *regexp.Regexp
 	public *regexp.Regexp
 	key    string
 }{
 	{regexp.MustCompile(`(?i)\bprivacy:\s*\w+`), regexp.MustCompile(`(?i)\bprivacy:\s*public\b`), "privacy"},
-	{regexp.MustCompile(`(?i)\bowner:\s*\w+`), regexp.MustCompile(`(?i)\bowner:\s*public\b`), "owner"},
 }
 
 // hostTerminator pins the private-network match to a true end-of-host: an
@@ -95,31 +100,53 @@ var privateNetworkURL = regexp.MustCompile(
 		hostTerminator)
 
 // internalIDStrict is the public-tier internal-identifier posture: internal
-// hostnames, private-network URLs, issue-tracker links and employee emails -
-// none of which match a bare company-name mention in prose.
+// hostnames, private-network URLs, and issue-tracker links - none of which
+// match a bare company-name mention in prose. The employee-email check is a
+// fourth, caller-configured member of this posture (see
+// PrivacyOptions.EmployeeEmail); it is appended per call, not baked in here,
+// since this module ships no default domain of its own.
 var internalIDStrict = []markerPattern{
 	{regexp.MustCompile(`(?i)\b[a-z0-9][a-z0-9-]*\.(?:corp|internal|intranet|lan)\b`), "internal hostname"},
 	{privateNetworkURL, "private/loopback network URL"},
 	{regexp.MustCompile(`(?i)\b(?:jira|atlassian|confluence)\.[\w.-]+/(?:browse|wiki)/[A-Za-z][\w-]*`), "internal issue-tracker/wiki link"},
-	{regexp.MustCompile(`(?i)\b[\w.+-]+@(?:datadoghq\.com|datadoghq\.internal)\b`), "internal employee email"},
 }
 
-// internalIDRelaxed is the datadog-tier posture: internal hostnames/emails/
-// wiki links are expected inside an org-shared repo, so only network-private
-// addresses stay flagged.
+// internalIDRelaxed is the confidential-tier posture: internal hostnames/
+// emails/wiki links are expected inside an org-shared repo, so only
+// network-private addresses stay flagged. The employee-email check never
+// applies at this tier, configured or not (see privacyTierConfig.
+// checksEmployeeEmail).
 var internalIDRelaxed = []markerPattern{
 	{privateNetworkURL, "private/loopback network URL"},
 }
 
-// publicEmailAllowlist holds the exact, enumerated public role addresses at
-// datadoghq.com (support, sales, press, ...) that the employee-email pattern
-// must never flag - a function anyone external is meant to reach, never an
-// individual. Exempt by exact address only, never by domain or wildcard.
-var publicEmailAllowlist = map[string]bool{
-	"support@datadoghq.com": true, "sales@datadoghq.com": true,
-	"press@datadoghq.com": true, "info@datadoghq.com": true,
-	"privacy@datadoghq.com": true, "security@datadoghq.com": true,
-	"legal@datadoghq.com": true, "careers@datadoghq.com": true,
+// EmployeeEmailCheck configures the optional employee-email member of the
+// public tier's internal-identifier posture: an address at one of Domains is
+// flagged as an internal identifier unless it exactly matches Allowlist (a
+// public role address anyone external is meant to reach, e.g.
+// support@example.com - never a wildcard or domain-wide exemption).
+//
+// The zero value disables the check entirely: this module ships no default
+// domain, so a caller that wants this check active must supply its own
+// Domains (and, optionally, Allowlist).
+type EmployeeEmailCheck struct {
+	Domains   []string
+	Allowlist map[string]bool
+}
+
+// employeeEmailPattern compiles c.Domains into the "internal employee email"
+// markerPattern, or returns false if c configures no domain (the check is
+// off).
+func (c EmployeeEmailCheck) employeeEmailPattern() (markerPattern, bool) {
+	if len(c.Domains) == 0 {
+		return markerPattern{}, false
+	}
+	escaped := make([]string, len(c.Domains))
+	for i, d := range c.Domains {
+		escaped[i] = regexp.QuoteMeta(d)
+	}
+	re := regexp.MustCompile(`(?i)\b[\w.+-]+@(?:` + strings.Join(escaped, "|") + `)\b`)
+	return markerPattern{re, employeeEmailLabel}, true
 }
 
 // PrivacyOptions parameterizes ScanPrivacy beyond the tier itself.
@@ -131,7 +158,7 @@ type PrivacyOptions struct {
 	// paths resolving to SkipClass here still get the secret/internal-id
 	// scan, but never the frontmatter-marker checks. Intended for source
 	// code and fixture/corpus directories that legitimately embed literal
-	// marker strings as data, not as a real sensitivity/owner declaration.
+	// marker strings as data, not as a real sensitivity declaration.
 	MarkerExemptRules []fsx.Rule
 	// SecretExemptRules is a third, independent fsx.ClassifyPath ruleset:
 	// paths resolving to SkipClass here still get the frontmatter-marker and
@@ -142,6 +169,11 @@ type PrivacyOptions struct {
 	// path doesn't have to be pulled out of every other check to fix one
 	// false positive.
 	SecretExemptRules []fsx.Rule
+	// EmployeeEmail configures the public tier's optional employee-email
+	// check (see EmployeeEmailCheck). Its zero value leaves the check off:
+	// this module ships no default domain or allowlist of its own, so a
+	// caller who wants it active supplies its own Domains and Allowlist.
+	EmployeeEmail EmployeeEmailCheck
 }
 
 // ScanPrivacy applies tier's forbidden-marker and internal-identifier
@@ -159,9 +191,9 @@ type PrivacyOptions struct {
 // resolves to SkipClass (see PrivacyOptions.SecretExemptRules); its other
 // exemptions are by exact matched value (see awsExampleAccessKeyIDs). The
 // internal-identifier check runs whole-file with no path exemption; its only
-// exemption is by exact matched value (see publicEmailAllowlist). Each of
-// the three checks has its own independent exemption mechanism, so
-// exempting a path from one never exempts it from the others.
+// exemption is by exact matched value (see PrivacyOptions.EmployeeEmail.
+// Allowlist). Each of the three checks has its own independent exemption
+// mechanism, so exempting a path from one never exempts it from the others.
 //
 // A pattern in MarkerExemptRules or SecretExemptRules that is not a valid
 // glob returns an error naming the ruleset and the pattern before any file is
@@ -178,6 +210,13 @@ func ScanPrivacy(root string, tier PrivacyTier, opts PrivacyOptions) (failures, 
 	}
 	if err := validateExemptRules(secretExemptRuleset, opts.SecretExemptRules); err != nil {
 		return nil, nil, err
+	}
+
+	internalID := cfg.internalID
+	if cfg.checksEmployeeEmail {
+		if p, on := opts.EmployeeEmail.employeeEmailPattern(); on {
+			internalID = append(append([]markerPattern{}, cfg.internalID...), p)
+		}
 	}
 
 	walkErr := walkScannable(root, opts.SkipRules, func(rel, abs string) error {
@@ -214,9 +253,9 @@ func ScanPrivacy(root string, tier PrivacyTier, opts PrivacyOptions) (failures, 
 			}
 		}
 
-		for _, m := range cfg.internalID {
+		for _, m := range internalID {
 			for _, match := range m.re.FindAllString(text, -1) {
-				if m.label == "internal employee email" && publicEmailAllowlist[strings.ToLower(match)] {
+				if m.label == employeeEmailLabel && opts.EmployeeEmail.Allowlist[strings.ToLower(match)] {
 					continue
 				}
 				warnings = append(warnings, Finding{Path: rel, Rule: "internal_identifier", Detail: fmt.Sprintf("internal identifier — %s", m.label)})

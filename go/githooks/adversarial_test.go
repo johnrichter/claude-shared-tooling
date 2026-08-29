@@ -153,52 +153,118 @@ func TestScanPrivacyUnknownTierErrors(t *testing.T) {
 	}
 }
 
-// TestScanPrivacyPersonalTierAllowsInternalMarkers confirms the loosest tier
+// TestScanPrivacyPrivateTierAllowsInternalMarkers confirms the loosest tier
 // raises neither a forbidden-marker failure nor an internal-identifier
-// warning for content the public/datadog tiers would flag.
-func TestScanPrivacyPersonalTierAllowsInternalMarkers(t *testing.T) {
+// warning for content the public/confidential tiers would flag.
+func TestScanPrivacyPrivateTierAllowsInternalMarkers(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "doc.md", "---\nprivacy: confidential\nowner: personal\n---\n\nsee host.corp and jane@datadoghq.com\n")
+	writeFile(t, dir, "doc.md", "---\nprivacy: confidential\n---\n\nsee host.corp and jane@example.com\n")
 
-	failures, warnings, err := ScanPrivacy(dir, TierPersonal, PrivacyOptions{SkipRules: DefaultSkipRules})
+	failures, warnings, err := ScanPrivacy(dir, TierPrivate, PrivacyOptions{SkipRules: DefaultSkipRules})
 	if err != nil {
 		t.Fatalf("ScanPrivacy: %v", err)
 	}
 	if len(failures) != 0 || len(warnings) != 0 {
-		t.Fatalf("got failures=%+v warnings=%+v, want personal tier fully permissive", failures, warnings)
+		t.Fatalf("got failures=%+v warnings=%+v, want private tier fully permissive", failures, warnings)
 	}
 }
 
-// TestScanPrivacyDatadogTierAllowsInternalHostnameButFlagsPrivateNetwork
-// confirms the relaxed datadog-tier internal-id posture: an internal
-// hostname/email is expected in an org-shared repo (no warning), but a
+// TestScanPrivacyConfidentialTierAllowsInternalHostnameButFlagsPrivateNetwork
+// confirms the relaxed confidential-tier internal-id posture: an internal
+// hostname is expected in an org-shared repo (no warning), but a
 // private-network URL is still flagged.
-func TestScanPrivacyDatadogTierAllowsInternalHostnameButFlagsPrivateNetwork(t *testing.T) {
+func TestScanPrivacyConfidentialTierAllowsInternalHostnameButFlagsPrivateNetwork(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "doc.md", "see host.corp and jane@datadoghq.com and http://10.0.0.5/admin\n")
+	writeFile(t, dir, "doc.md", "see host.corp and http://10.0.0.5/admin\n")
 
-	_, warnings, err := ScanPrivacy(dir, TierDatadog, PrivacyOptions{SkipRules: DefaultSkipRules})
+	_, warnings, err := ScanPrivacy(dir, TierConfidential, PrivacyOptions{SkipRules: DefaultSkipRules})
 	if err != nil {
 		t.Fatalf("ScanPrivacy: %v", err)
 	}
 	if len(warnings) != 1 || warnings[0].Rule != "internal_identifier" {
-		t.Fatalf("got %+v, want exactly one private-network warning under datadog tier", warnings)
+		t.Fatalf("got %+v, want exactly one private-network warning under confidential tier", warnings)
 	}
 }
 
-// TestScanPrivacyPublicEmailAllowlistExemptByExactAddressOnly confirms an
-// enumerated public role address at the org domain is never flagged, while a
-// different address at the same domain still is.
-func TestScanPrivacyPublicEmailAllowlistExemptByExactAddressOnly(t *testing.T) {
+// TestScanPrivacyEmployeeEmailCheckOffByDefault confirms that with no
+// caller-supplied PrivacyOptions.EmployeeEmail, no address at any domain -
+// including one a caller might plausibly configure later - is ever flagged.
+// This module ships no default domain of its own.
+func TestScanPrivacyEmployeeEmailCheckOffByDefault(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "doc.md", "contact support@datadoghq.com or jane@datadoghq.com\n")
+	writeFile(t, dir, "doc.md", "contact jane@example.com or root@another-example.com\n")
 
 	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
 	if err != nil {
 		t.Fatalf("ScanPrivacy: %v", err)
 	}
+	if len(warnings) != 0 {
+		t.Fatalf("got %+v, want no warnings with no caller-supplied EmployeeEmail config", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailCheckWithConfigExemptByExactAddressOnly
+// confirms that once a caller supplies EmployeeEmail.Domains and Allowlist,
+// the check fires on the configured domain exactly as the old hardcoded
+// version did: an enumerated public role address is never flagged, while a
+// different address at the same domain still is, and an address at an
+// unconfigured domain never is.
+func TestScanPrivacyEmployeeEmailCheckWithConfigExemptByExactAddressOnly(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact support@example.com or jane@example.com or root@other.com\n")
+
+	opts := PrivacyOptions{
+		SkipRules: DefaultSkipRules,
+		EmployeeEmail: EmployeeEmailCheck{
+			Domains:   []string{"example.com"},
+			Allowlist: map[string]bool{"support@example.com": true},
+		},
+	}
+	_, warnings, err := ScanPrivacy(dir, TierPublic, opts)
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
 	if len(warnings) != 1 {
-		t.Fatalf("got %+v, want exactly one warning (jane@), support@ allowlisted", warnings)
+		t.Fatalf("got %+v, want exactly one warning (jane@example.com), support@ allowlisted and other.com unconfigured", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailCheckNeverAppliesAtConfidentialTier confirms the
+// employee-email check stays public-tier-only even when a caller supplies
+// EmployeeEmail config: the confidential tier's relaxed posture never grows
+// this check.
+func TestScanPrivacyEmployeeEmailCheckNeverAppliesAtConfidentialTier(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact jane@example.com\n")
+
+	opts := PrivacyOptions{
+		SkipRules:     DefaultSkipRules,
+		EmployeeEmail: EmployeeEmailCheck{Domains: []string{"example.com"}},
+	}
+	_, warnings, err := ScanPrivacy(dir, TierConfidential, opts)
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("got %+v, want no warnings: employee-email check never applies at the confidential tier", warnings)
+	}
+}
+
+// TestScanPrivacyNoOwnerConceptReachable confirms an "owner:" frontmatter tag
+// - forbidden, or declared-but-not-public - is never flagged at any tier:
+// this module's privacy-tier checks no longer key on any owner concept.
+func TestScanPrivacyNoOwnerConceptReachable(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "---\nprivacy: public\nowner: confidential\n---\n\nbody\n")
+
+	for _, tier := range []PrivacyTier{TierPublic, TierConfidential, TierPrivate} {
+		failures, _, err := ScanPrivacy(dir, tier, PrivacyOptions{SkipRules: DefaultSkipRules})
+		if err != nil {
+			t.Fatalf("ScanPrivacy(%s): %v", tier, err)
+		}
+		if len(failures) != 0 {
+			t.Fatalf("tier %s: got %+v, want no owner-keyed failures", tier, failures)
+		}
 	}
 }
 

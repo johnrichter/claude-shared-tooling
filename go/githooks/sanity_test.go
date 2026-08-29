@@ -214,7 +214,7 @@ func TestScanRawBinaryCleanFixturePasses(t *testing.T) {
 }
 
 // TestScanPrivacyTierIsParameterized confirms the same file fails under the
-// stricter public tier and passes under the looser datadog and personal
+// stricter public tier and passes under the looser confidential and private
 // tiers - the tier is a caller-supplied parameter, not a hardcoded value.
 func TestScanPrivacyTierIsParameterized(t *testing.T) {
 	dir := t.TempDir()
@@ -228,20 +228,20 @@ func TestScanPrivacyTierIsParameterized(t *testing.T) {
 		t.Fatalf("want a public-tier failure for privacy:confidential")
 	}
 
-	ddFail, _, err := ScanPrivacy(dir, TierDatadog, PrivacyOptions{SkipRules: DefaultSkipRules})
+	confFail, _, err := ScanPrivacy(dir, TierConfidential, PrivacyOptions{SkipRules: DefaultSkipRules})
 	if err != nil {
-		t.Fatalf("ScanPrivacy(datadog): %v", err)
+		t.Fatalf("ScanPrivacy(confidential): %v", err)
 	}
-	if len(ddFail) == 0 {
-		t.Fatalf("want a datadog-tier failure for privacy:confidential")
+	if len(confFail) == 0 {
+		t.Fatalf("want a confidential-tier failure for privacy:confidential")
 	}
 
-	personalFail, _, err := ScanPrivacy(dir, TierPersonal, PrivacyOptions{SkipRules: DefaultSkipRules})
+	privateFail, _, err := ScanPrivacy(dir, TierPrivate, PrivacyOptions{SkipRules: DefaultSkipRules})
 	if err != nil {
-		t.Fatalf("ScanPrivacy(personal): %v", err)
+		t.Fatalf("ScanPrivacy(private): %v", err)
 	}
-	if len(personalFail) != 0 {
-		t.Fatalf("got %+v, want personal tier to allow any privacy value", personalFail)
+	if len(privateFail) != 0 {
+		t.Fatalf("got %+v, want private tier to allow any privacy value", privateFail)
 	}
 }
 
@@ -297,7 +297,7 @@ func TestScanPrivacyMarkerExemptDirSkipsMarkerCheckOnly(t *testing.T) {
 func TestScanPrivacySecretExemptDirSkipsSecretCheckOnly(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "corpus/case.md", "---\nprivacy: confidential\n---\n\n"+
-		fixtureAWSKey+"\ncontact: eng@datadoghq.com\n")
+		fixtureAWSKey+"\nsee host.corp for details\n")
 	exempt := []fsx.Rule{{Pattern: "corpus/**", Class: SkipClass}}
 
 	failures, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules, SecretExemptRules: exempt})
@@ -397,7 +397,7 @@ func TestScanSecretsHonorsSecretExemptRules(t *testing.T) {
 // file yields no failures and no warnings.
 func TestScanPrivacyCleanFixturePasses(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "doc.md", "---\nprivacy: public\nowner: public\n---\n\nNothing sensitive.\n")
+	writeFile(t, dir, "doc.md", "---\nprivacy: public\n---\n\nNothing sensitive.\n")
 
 	failures, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
 	if err != nil {
