@@ -315,6 +315,59 @@ class TestOctopusBuildBranch(SigningTestCase):
         self.assertEqual(len(resign_commits.parents(new_tip, cwd=self.cwd)), 4)  # octopus preserved
 
 
+class TestOctopusElisionTopologyCheck(SigningTestCase):
+    """LED-033 regression: an octopus merge where one requested branch is already an
+    ancestor of another one merges git silently elides that parent, changing the
+    merge's own recorded parent count without dropping a single commit. A verification
+    check that compares a raw commit/merge count would misread this as lost topology;
+    a reachability check correctly does not."""
+
+    def test_elided_parent_stays_reachable_after_resign(self):
+        r = self.repo
+        r.commit("main.txt", "0\n", "main base", sign=True)
+        r.git("checkout", "-q", "-b", "build")
+        r.git("checkout", "-q", "-b", "t1")
+        t1 = r.commit("t1.txt", "x\n", "t1 checkpoint (UNSIGNED)", sign=False)
+        # t3 branches off t1, so t1 is already an ancestor of t3 by the time of the merge.
+        r.git("checkout", "-q", "-b", "t3")
+        r.commit("t3.txt", "x\n", "t3 checkpoint (UNSIGNED)", sign=False)
+        r.git("checkout", "-q", "build")
+        r.git("checkout", "-q", "-b", "t2")
+        r.commit("t2.txt", "x\n", "t2 checkpoint (UNSIGNED)", sign=False)
+        r.git("checkout", "-q", "build")
+
+        _run(["merge", "-S", "--no-ff", "-m", "octopus merge t1 t2 t3", "t1", "t2", "t3"],
+             r.path, env=_env("2026-03-03T00:00:00"))
+        old_tip = r.sha()
+
+        # git elided t1: it merged 3 branches but recorded only 3 parents (HEAD + t2 + t3),
+        # not 4, because t1 is already reachable through t3. Nothing was lost -- t1 is
+        # still an ancestor of old_tip via t3.
+        recorded_parents = resign_commits.parents(old_tip, cwd=self.cwd)
+        self.assertEqual(len(recorded_parents), 3)
+        self.assertTrue(resign_commits.git_ok(["merge-base", "--is-ancestor", t1, old_tip], cwd=self.cwd))
+
+        # A raw count-based check ("recorded parents == branches merged + first-parent")
+        # would misread this elision as a topology loss.
+        naive_expected_parents = 1 + 3  # HEAD plus the 3 branches named on the merge command
+        self.assertNotEqual(len(recorded_parents), naive_expected_parents)
+
+        unsigned = resign_commits.find_unsigned("build", cwd=self.cwd)
+        self.assertEqual(len(unsigned), 3)
+        base = resign_commits.compute_base(unsigned, cwd=self.cwd)
+        new_tip, mapping = resign_commits.rebuild(base, old_tip, cwd=self.cwd)
+
+        # The reachability check does not misfire: t1's rebuilt counterpart is still
+        # reachable from new_tip, via t3, even though it is not a direct parent.
+        lost = resign_commits._lost_commits(new_tip, mapping, cwd=self.cwd)
+        self.assertEqual(lost, [])
+        results = self._verify_map(old_tip, new_tip, base, mapping)
+        self.assertTrue(all(results.values()), msg=str(results))
+        self.assertNotIn("N", r.flags(new_tip))
+        # The elision itself is preserved exactly, since rebuild reuses recorded parents.
+        self.assertEqual(len(resign_commits.parents(new_tip, cwd=self.cwd)), 3)
+
+
 class TestCli(SigningTestCase):
     def test_no_unsigned_is_noop(self):
         r = self.repo
@@ -341,7 +394,11 @@ class TestCli(SigningTestCase):
         self.assertNotEqual(before, after)
         self.assertNotIn("N", r.flags("main"))
         self.assertEqual(r.git("status", "--porcelain").stdout, "")
-        self.assertTrue(r.git("tag", "-l", "backup/main-pre-resign-*").stdout.strip())
+        # The backup marker is a plain ref under refs/backup/, not a tag object.
+        self.assertTrue(
+            r.git("for-each-ref", "--format=%(refname)", "refs/backup/").stdout.strip()
+        )
+        self.assertEqual(r.git("tag", "-l").stdout.strip(), "")
         out2 = io.StringIO()
         with contextlib.redirect_stdout(out2):
             rc2 = resign_commits.main(["--ref", "main", "--repo", self.cwd, "--apply"])

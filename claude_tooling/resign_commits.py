@@ -17,17 +17,19 @@ preserved verbatim, and the commit message is reproduced byte-for-byte.
 
 Safety model
 ------------
-Default is a DRY RUN. The tool detects unsigned commits, tags a backup of the current tip,
-rebuilds the signed history into a PARKED ref (``refs/rewrite/<ref>-signed``), verifies it
-exhaustively, and prints a report -- the target ref is NOT moved and nothing is pushed.
-Moving the branch requires ``--apply`` (and only if verification passed). The branch move is a
-compare-and-swap against the tip observed at detection, so a branch that advanced meanwhile is
-refused rather than clobbered. Pushing is left to the operator: force-push is guardrailed by
-design, so ``--print-push-cmd`` merely emits the exact ``--force-with-lease`` command to run.
+Default is a DRY RUN. The tool detects unsigned commits, writes a backup ref pointing at the
+current tip (a plain ``refs/backup/...`` ref via ``git update-ref`` -- never a tag object, so it
+never needs a GPG signature even when ``tag.gpgSign`` is on), rebuilds the signed history into a
+PARKED ref (``refs/rewrite/<ref>-signed``), verifies it exhaustively, and prints a report -- the
+target ref is NOT moved and nothing is pushed. Moving the branch requires ``--apply`` (and only
+if verification passed). The branch move is a compare-and-swap against the tip observed at
+detection, so a branch that advanced meanwhile is refused rather than clobbered. Pushing is left
+to the operator: force-push is guardrailed by design, so ``--print-push-cmd`` merely emits the
+exact ``--force-with-lease`` command to run.
 
 Verification (all must pass before --apply moves anything):
   * tip tree byte-identical to the original (``git diff`` empty)     -- content unchanged
-  * commit count and merge count preserved                           -- topology intact
+  * every rewritten commit still reachable from the new tip          -- topology intact
   * zero unsigned (``N``) and zero bad (``B``) signatures remain      -- the actual goal
   * every rebuilt commit's tree + author/committer/date/message match -- per-commit fidelity
   * the boundary commit is still an ancestor of the new tip           -- nothing below moved
@@ -37,7 +39,7 @@ Usage:
     python3 resign_commits.py --ref some-branch     # dry run over another ref
     python3 resign_commits.py --apply               # move the local ref after verify passes
     python3 resign_commits.py --apply --print-push-cmd
-    python3 resign_commits.py --no-backup           # skip the backup tag (not advised)
+    python3 resign_commits.py --no-backup           # skip the backup ref (not advised)
 
 Stdlib-only; shells out to `git`. Requires a working commit-signing config (`git commit -S`).
 """
@@ -170,6 +172,18 @@ def rebuild(base: str | None, tip: str, *, cwd: str, sign: bool = True):
     return mapping.get(tip, tip), mapping
 
 
+def _lost_commits(new_tip: str, mapping: dict[str, str], *, cwd: str) -> list[str]:
+    """Old SHAs whose rebuilt counterpart is not reachable from new_tip.
+
+    Reachability (`merge-base --is-ancestor`), not a raw commit/merge count, is what
+    actually proves no commit was dropped. A legitimate octopus merge can change its
+    own recorded parent count -- git elides a parent that is already reachable through
+    another parent in the same merge -- without losing a single commit, and a bare
+    count comparison cannot tell that apart from a real loss.
+    """
+    return [old for old, new in mapping.items() if not git_ok(["merge-base", "--is-ancestor", new, new_tip], cwd=cwd)]
+
+
 def verify(old_tip: str, new_tip: str, base: str | None, mapping: dict[str, str], *, cwd: str):
     """Return a list of ``(check_name, passed, detail)`` tuples. Empty-detail passes stay quiet."""
     results: list[tuple[str, bool, str]] = []
@@ -183,11 +197,12 @@ def verify(old_tip: str, new_tip: str, base: str | None, mapping: dict[str, str]
     diff = git(["diff", "--stat", old_tip, new_tip], cwd=cwd)
     check("tip content diff empty", diff == "", diff.splitlines()[-1] if diff else "")
 
-    oc, nc = git(["rev-list", "--count", old_tip], cwd=cwd), git(["rev-list", "--count", new_tip], cwd=cwd)
-    check("commit count preserved", oc == nc, f"old={oc} new={nc}")
-    om = git(["rev-list", "--merges", "--count", old_tip], cwd=cwd)
-    nm = git(["rev-list", "--merges", "--count", new_tip], cwd=cwd)
-    check("merge count preserved", om == nm, f"old={om} new={nm}")
+    lost = _lost_commits(new_tip, mapping, cwd=cwd)
+    check(
+        "every rewritten commit remains reachable from the new tip",
+        not lost,
+        f"lost: {', '.join(s[:12] for s in lost)}" if lost else "",
+    )
 
     tally = git(["log", "--format=%G?", new_tip], cwd=cwd).splitlines()
     n_unsigned = sum(1 for f in tally if f == "N")
@@ -225,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--repo", default=None, help="Repo path (default: enclosing work tree).")
     ap.add_argument("--apply", action="store_true", help="Move the local branch to the re-signed tip after verification passes.")
     ap.add_argument("--print-push-cmd", action="store_true", help="Print the exact --force-with-lease push command (does not push).")
-    ap.add_argument("--no-backup", action="store_true", help="Skip creating the backup tag (not advised).")
+    ap.add_argument("--no-backup", action="store_true", help="Skip creating the backup ref (not advised).")
     args = ap.parse_args(argv)
 
     cwd = args.repo or git(["rev-parse", "--show-toplevel"], cwd=".")
@@ -241,9 +256,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.no_backup:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        backup = f"backup/{_sanitize(args.ref)}-pre-resign-{stamp}"
-        git(["tag", "-f", backup, tip], cwd=cwd)
-        print(f"Backup tag: {backup} -> {tip[:12]}")
+        # A plain ref under refs/backup/, written via update-ref -- not `git tag`. A tag
+        # object would (a) require a real GPG signature for this disposable marker whenever
+        # tag.gpgSign is on, and (b) live in refs/tags/, a namespace this tool has no business
+        # writing to for a throwaway recovery point.
+        backup = f"refs/backup/{_sanitize(args.ref)}-pre-resign-{stamp}"
+        git(["update-ref", backup, tip], cwd=cwd)
+        print(f"Backup ref: {backup} -> {tip[:12]}")
 
     new_tip, mapping = rebuild(base, tip, cwd=cwd)
     parked = f"refs/rewrite/{_sanitize(args.ref)}-signed"
