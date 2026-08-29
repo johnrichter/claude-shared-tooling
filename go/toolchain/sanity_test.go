@@ -326,10 +326,9 @@ func TestMatrixPairCounts(t *testing.T) {
 	}
 }
 
-// TestMatrixImplementedCountMatchesBaseline checks the table marks exactly
-// the twenty-two pairs implemented today (Go seven, Rust eight, Python
-// seven), so the other five (all shell) fail closed until their adapter
-// lands.
+// TestMatrixImplementedCountMatchesBaseline checks the table marks all
+// twenty-seven pairs implemented (Go seven, Rust eight, Python seven, shell
+// five) now that every language's adapter has landed.
 func TestMatrixImplementedCountMatchesBaseline(t *testing.T) {
 	implemented := map[string]int{}
 	total := 0
@@ -339,17 +338,14 @@ func TestMatrixImplementedCountMatchesBaseline(t *testing.T) {
 			total++
 		}
 	}
-	if total != 22 {
-		t.Fatalf("implemented pair count = %d, want 22", total)
+	if total != 27 {
+		t.Fatalf("implemented pair count = %d, want 27", total)
 	}
-	want := map[string]int{LanguageGo: 7, LanguageRust: 8, LanguagePython: 7}
+	want := map[string]int{LanguageGo: 7, LanguageRust: 8, LanguagePython: 7, LanguageShell: 5}
 	for lang, n := range want {
 		if implemented[lang] != n {
 			t.Errorf("%s implemented count = %d, want %d", lang, implemented[lang], n)
 		}
-	}
-	if implemented[LanguageShell] != 0 {
-		t.Errorf("shell implemented count = %d, want 0 (no shell adapter yet)", implemented[LanguageShell])
 	}
 }
 
@@ -396,9 +392,10 @@ func TestMatrixEveryPairResolvesToAnEntry(t *testing.T) {
 }
 
 // TestResolveCheckUnsupportedPairs checks every request that is not a
-// declared, implemented pair — an out-of-matrix language/check, and a
-// declared pair no adapter implements yet — resolves to the unsupported
-// diagnostic at EXIT 80 rather than a silent pass.
+// declared, implemented pair — an out-of-matrix language/check — resolves to
+// the unsupported diagnostic at EXIT 80 rather than a silent pass. Shell
+// carries no build and no vet (OD3), so those two remain out of matrix even
+// though shell's other five pairs are now implemented.
 func TestResolveCheckUnsupportedPairs(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -407,11 +404,10 @@ func TestResolveCheckUnsupportedPairs(t *testing.T) {
 		test     TestKind
 	}{
 		{"shell build is out of matrix", LanguageShell, CheckBuild, ""},
+		{"shell vet is out of matrix", LanguageShell, CheckVet, ""},
 		{"go benchmark is out of matrix", LanguageGo, CheckTest, TestBenchmark},
 		{"unknown language", "ruby", CheckBuild, ""},
 		{"bare test is not a pair", LanguageGo, CheckTest, ""},
-		{"shell security declared but unimplemented", LanguageShell, CheckSecurity, ""},
-		{"shell lint declared but unimplemented", LanguageShell, CheckLint, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

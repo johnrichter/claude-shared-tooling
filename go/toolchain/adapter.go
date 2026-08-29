@@ -182,9 +182,9 @@ var testKindsByLanguage = map[string][]TestKind{
 // (MATRIX) by VerifyMatrixParity, so a pair dropped here or invented here
 // fails the parity test. Config base names resolve from the language-tools
 // tree (OD47/SC37): .golangci.yml, clippy.toml, ruff.toml, mypy.ini,
-// .shellcheckrc. Implemented marks the twenty-two pairs the adapters perform
-// today (Go seven, Rust eight, Python seven); the other five — all shell —
-// resolve to EXIT 80 until their adapter lands.
+// .shellcheckrc. Implemented now marks all twenty-seven pairs (Go seven,
+// Rust eight, Python seven, shell five) — shell's five, the last to land,
+// dispatch through shellAdapter exactly like every other language's.
 var committedMatrix = []MatrixEntry{
 	// Go — seven pairs, all implemented.
 	{Language: LanguageGo, Check: CheckBuild, Tools: []string{"go build"}, Implemented: true},
@@ -214,12 +214,13 @@ var committedMatrix = []MatrixEntry{
 	{Language: LanguagePython, Check: CheckTest, Test: TestUnit, Tools: []string{"pytest"}, Implemented: true},
 	{Language: LanguagePython, Check: CheckTest, Test: TestE2E, Tools: []string{"pytest", "playwright"}, Implemented: true},
 
-	// Shell — five pairs. No build, no vet.
-	{Language: LanguageShell, Check: CheckFormat, Tools: []string{"shfmt"}},
-	{Language: LanguageShell, Check: CheckLint, Tools: []string{"shellcheck", "checkbashisms"}, Config: ".shellcheckrc"},
-	{Language: LanguageShell, Check: CheckSecurity, Tools: []string{"semgrep"}},
-	{Language: LanguageShell, Check: CheckTest, Test: TestUnit, Tools: []string{"bats", "kcov"}},
-	{Language: LanguageShell, Check: CheckTest, Test: TestE2E, Tools: []string{"bats"}},
+	// Shell — five pairs, all implemented. No build, no vet: a script
+	// neither compiles nor type-checks (OD3).
+	{Language: LanguageShell, Check: CheckFormat, Tools: []string{"shfmt"}, Implemented: true},
+	{Language: LanguageShell, Check: CheckLint, Tools: []string{"shellcheck", "checkbashisms"}, Config: ".shellcheckrc", Implemented: true},
+	{Language: LanguageShell, Check: CheckSecurity, Tools: []string{"semgrep"}, Implemented: true},
+	{Language: LanguageShell, Check: CheckTest, Test: TestUnit, Tools: []string{"bats", "kcov"}, Implemented: true},
+	{Language: LanguageShell, Check: CheckTest, Test: TestE2E, Tools: []string{"bats"}, Implemented: true},
 }
 
 // Matrix returns a copy of the committed dispatch table — all twenty-seven
