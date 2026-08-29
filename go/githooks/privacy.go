@@ -130,23 +130,54 @@ var internalIDRelaxed = []markerPattern{
 // domain, so a caller that wants this check active must supply its own
 // Domains (and, optionally, Allowlist).
 type EmployeeEmailCheck struct {
-	Domains   []string
+	// Domains are matched as literal text, never as patterns: a regex
+	// metacharacter in an entry is escaped and matches only itself, so an
+	// entry that is not a real domain simply never matches. A blank or
+	// whitespace-only entry is dropped rather than compiled, since an empty
+	// alternation branch would match every address at every domain; if no
+	// entry survives, the check stays off.
+	Domains []string
+	// Allowlist exempts an address by its full text, compared
+	// case-insensitively, so a key's casing never silently defeats the
+	// caller's own exemption. There is no wildcard or domain-wide form: an
+	// entry exempts exactly one address.
 	Allowlist map[string]bool
 }
 
 // employeeEmailPattern compiles c.Domains into the "internal employee email"
-// markerPattern, or returns false if c configures no domain (the check is
-// off).
+// markerPattern, or returns false if c configures no usable domain (the check
+// is off). Each domain is escaped, so a caller-supplied string is always
+// matched literally and can never inject regex syntax into the pattern.
 func (c EmployeeEmailCheck) employeeEmailPattern() (markerPattern, bool) {
-	if len(c.Domains) == 0 {
-		return markerPattern{}, false
+	escaped := make([]string, 0, len(c.Domains))
+	for _, d := range c.Domains {
+		if d = strings.TrimSpace(d); d == "" {
+			continue
+		}
+		escaped = append(escaped, regexp.QuoteMeta(d))
 	}
-	escaped := make([]string, len(c.Domains))
-	for i, d := range c.Domains {
-		escaped[i] = regexp.QuoteMeta(d)
+	if len(escaped) == 0 {
+		return markerPattern{}, false
 	}
 	re := regexp.MustCompile(`(?i)\b[\w.+-]+@(?:` + strings.Join(escaped, "|") + `)\b`)
 	return markerPattern{re, employeeEmailLabel}, true
+}
+
+// allowlistIndex returns c.Allowlist rekeyed by lowercased address, matching
+// how a matched address is looked up. Exempt entries are kept and non-exempt
+// ones dropped, so two keys differing only in case resolve to "exempt"
+// deterministically rather than by map iteration order.
+func (c EmployeeEmailCheck) allowlistIndex() map[string]bool {
+	if len(c.Allowlist) == 0 {
+		return nil
+	}
+	index := make(map[string]bool, len(c.Allowlist))
+	for addr, exempt := range c.Allowlist {
+		if exempt {
+			index[strings.ToLower(addr)] = true
+		}
+	}
+	return index
 }
 
 // PrivacyOptions parameterizes ScanPrivacy beyond the tier itself.
@@ -213,9 +244,11 @@ func ScanPrivacy(root string, tier PrivacyTier, opts PrivacyOptions) (failures, 
 	}
 
 	internalID := cfg.internalID
+	var emailAllowlist map[string]bool
 	if cfg.checksEmployeeEmail {
 		if p, on := opts.EmployeeEmail.employeeEmailPattern(); on {
 			internalID = append(append([]markerPattern{}, cfg.internalID...), p)
+			emailAllowlist = opts.EmployeeEmail.allowlistIndex()
 		}
 	}
 
@@ -255,7 +288,7 @@ func ScanPrivacy(root string, tier PrivacyTier, opts PrivacyOptions) (failures, 
 
 		for _, m := range internalID {
 			for _, match := range m.re.FindAllString(text, -1) {
-				if m.label == employeeEmailLabel && opts.EmployeeEmail.Allowlist[strings.ToLower(match)] {
+				if m.label == employeeEmailLabel && emailAllowlist[strings.ToLower(match)] {
 					continue
 				}
 				warnings = append(warnings, Finding{Path: rel, Rule: "internal_identifier", Detail: fmt.Sprintf("internal identifier — %s", m.label)})

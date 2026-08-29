@@ -250,6 +250,75 @@ func TestScanPrivacyEmployeeEmailCheckNeverAppliesAtConfidentialTier(t *testing.
 	}
 }
 
+// TestScanPrivacyEmployeeEmailBlankDomainEntryDoesNotMatchEveryAddress
+// confirms a blank or whitespace-only Domains entry - the shape a caller gets
+// from splitting a trailing-comma config string - is dropped rather than
+// compiled into an empty alternation branch, which would otherwise flag every
+// address at every domain in the tree.
+func TestScanPrivacyEmployeeEmailBlankDomainEntryDoesNotMatchEveryAddress(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact jane@unrelated.example or bob@other.example\n")
+
+	for _, domains := range [][]string{{""}, {"   "}, {"example.com", ""}, {"", "example.com"}} {
+		opts := PrivacyOptions{
+			SkipRules:     DefaultSkipRules,
+			EmployeeEmail: EmployeeEmailCheck{Domains: domains},
+		}
+		_, warnings, err := ScanPrivacy(dir, TierPublic, opts)
+		if err != nil {
+			t.Fatalf("ScanPrivacy(domains=%q): %v", domains, err)
+		}
+		if len(warnings) != 0 {
+			t.Fatalf("domains=%q: got %+v, want no warnings - a blank entry must never match an unconfigured domain", domains, warnings)
+		}
+	}
+}
+
+// TestScanPrivacyEmployeeEmailDomainIsMatchedLiterally confirms a caller
+// domain carrying regex metacharacters is escaped, not interpreted: the
+// wildcard-looking entry matches only its own literal text, so a caller
+// cannot widen (or corrupt) the pattern through configuration.
+func TestScanPrivacyEmployeeEmailDomainIsMatchedLiterally(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact jane@unrelated.example and bob@a.example\n")
+
+	opts := PrivacyOptions{
+		SkipRules:     DefaultSkipRules,
+		EmployeeEmail: EmployeeEmailCheck{Domains: []string{".*", "(a|b).example", `\w+.example`}},
+	}
+	_, warnings, err := ScanPrivacy(dir, TierPublic, opts)
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("got %+v, want no warnings - a metacharacter in a domain must match only itself", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailAllowlistIsCaseInsensitive confirms a caller's
+// allowlist key exempts its address regardless of the casing either side is
+// written in, so key casing never silently defeats the caller's own
+// exemption.
+func TestScanPrivacyEmployeeEmailAllowlistIsCaseInsensitive(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact Support@Example.com or jane@example.com\n")
+
+	opts := PrivacyOptions{
+		SkipRules: DefaultSkipRules,
+		EmployeeEmail: EmployeeEmailCheck{
+			Domains:   []string{"example.com"},
+			Allowlist: map[string]bool{"SUPPORT@example.com": true},
+		},
+	}
+	_, warnings, err := ScanPrivacy(dir, TierPublic, opts)
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("got %+v, want exactly one warning (jane@) - the allowlisted address must be exempt at any casing", warnings)
+	}
+}
+
 // TestScanPrivacyNoOwnerConceptReachable confirms an "owner:" frontmatter tag
 // - forbidden, or declared-but-not-public - is never flagged at any tier:
 // this module's privacy-tier checks no longer key on any owner concept.
