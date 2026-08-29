@@ -159,12 +159,12 @@ func TestCreateBranch_ForceMovesExistingBranch(t *testing.T) {
 	}
 }
 
-// TestDeleteBranch_BackupRefExistsEvenIfUpdateRefWereToFail simulates the
+// TestDeleteBranch_BackupRefPointsAtExactPreDeleteSHA simulates the
 // ordering invariant directly: DeleteBranch must write the backup ref before
 // attempting the ref removal, so a caller can always recover the old value
 // even if the delete itself is interrupted. We can't force update-ref to
 // fail after a successful CAS check without racing the process, so instead
-// this asserts the documented order by checking the tag exists immediately
+// this asserts the documented order by checking the ref exists immediately
 // after a successful delete and still resolves to the exact pre-delete SHA
 // (not some other value taken after a hypothetical retry).
 func TestDeleteBranch_BackupRefPointsAtExactPreDeleteSHA(t *testing.T) {

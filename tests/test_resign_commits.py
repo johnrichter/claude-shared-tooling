@@ -18,6 +18,9 @@ Test strategy (mirrors the tool's acceptance criteria):
        zero unsigned remain, every rebuilt commit's tree + author/committer/date/message match.
     3. compute_base correctness — chained unsigned and parallel-branch unsigned both covered.
     4. CLI — no-unsigned is a clean no-op; --apply moves the branch and is idempotent.
+    5. Topology (LED-033) — a rebuild that legitimately collapses commits passes the
+       reachability check while the removed count-based one would have refused it; a
+       genuine unreachability is still refused, with both counts named.
 
 Run with: python3 -m unittest tests.test_resign_commits
        or: python3 -m unittest discover -s tests -p "test_*.py"
@@ -315,12 +318,93 @@ class TestOctopusBuildBranch(SigningTestCase):
         self.assertEqual(len(resign_commits.parents(new_tip, cwd=self.cwd)), 4)  # octopus preserved
 
 
-class TestOctopusElisionTopologyCheck(SigningTestCase):
-    """LED-033 regression: an octopus merge where one requested branch is already an
-    ancestor of another one merges git silently elides that parent, changing the
-    merge's own recorded parent count without dropping a single commit. A verification
-    check that compares a raw commit/merge count would misread this as lost topology;
-    a reachability check correctly does not."""
+class TestTopologyCheckReachabilityVsCount(SigningTestCase):
+    """LED-033: `verify()` used to gate the rewrite on raw `rev-list --count` totals of the
+    old tip versus the new one. The rebuild does NOT preserve graph shape -- `commit-tree`
+    rebuilds each commit from scratch and drops headers it did not generate, so commits
+    that differed only in being signed collapse into one and a merge's now-duplicate parent
+    edges dedup away. Counts fall, nothing is lost, and the old check refused a safe
+    rewrite. These tests pin both halves: the collapse the old check false-flagged, and the
+    unrelated merge-time elision that must keep passing.
+
+    `test_rebuild_collapse_...` is the reproduction: it asserts the removed count checks
+    would refuse this rewrite while the reachability check and the rest of `verify()` pass.
+    """
+
+    def test_rebuild_collapse_refused_by_the_old_count_check_not_by_reachability(self):
+        r = self.repo
+        c0 = r.commit("base.txt", "0\n", "c0 root", sign=True)
+
+        # The same scripted checkpoint recorded twice off the same base: identical tree,
+        # message, author/committer identity and both dates. One got signed, one did not,
+        # so they are two distinct objects differing only in the gpgsig header -- which is
+        # exactly the header `commit-tree` regenerates rather than copies.
+        r.git("checkout", "-q", "-b", "t1")
+        signed = r.commit("ckpt.txt", "x\n", "checkpoint", sign=True, date="2026-02-02T00:00:00")
+        r.git("checkout", "-q", c0)
+        r.git("checkout", "-q", "-b", "t2")
+        twin = r.commit("ckpt.txt", "x\n", "checkpoint", sign=False, date="2026-02-02T00:00:00")
+        self.assertNotEqual(signed, twin)
+        self.assertEqual(r.tree(signed), r.tree(twin))
+
+        r.git("checkout", "-q", "t1")
+        _run(["merge", "-S", "--no-ff", "-m", "merge the checkpoint twin", "t2"],
+             r.path, env=_env("2026-02-03T00:00:00"))
+        old_tip = r.sha()
+        self.assertEqual(len(resign_commits.parents(old_tip, cwd=self.cwd)), 2)
+
+        unsigned = resign_commits.find_unsigned("t1", cwd=self.cwd)
+        base = resign_commits.compute_base(unsigned, cwd=self.cwd)
+        new_tip, mapping = resign_commits.rebuild(base, old_tip, cwd=self.cwd)
+
+        # Both twins rebuild to one commit, so the merge's two parent edges dedup to one.
+        self.assertEqual(mapping[signed], mapping[twin])
+        self.assertEqual(len(resign_commits.parents(new_tip, cwd=self.cwd)), 1)
+
+        # The two removed checks, verbatim: BOTH would have refused this safe rewrite.
+        def count(*args):
+            return resign_commits.git(["rev-list", "--count", *args], cwd=self.cwd)
+
+        self.assertNotEqual(count(old_tip), count(new_tip))
+        self.assertNotEqual(count("--merges", old_tip), count("--merges", new_tip))
+
+        # Reachability does not refuse it, and every other check agrees nothing was lost.
+        self.assertEqual(resign_commits._lost_commits(new_tip, mapping, cwd=self.cwd), [])
+        results = self._verify_map(old_tip, new_tip, base, mapping)
+        self.assertTrue(all(results.values()), msg=str(results))
+        self.assertNotIn("N", r.flags(new_tip))
+
+    def test_genuine_unreachability_is_refused_and_reports_both_counts(self):
+        """The check must still refuse real loss, and name the numbers when it does --
+        LED-033's operator cost was a refusal that reported neither."""
+        r = self.repo
+        r.commit("base.txt", "0\n", "c0 root", sign=True)
+        r.commit("a.txt", "a\n", "a1 (UNSIGNED)", sign=False)
+        old_tip = r.sha()
+        unsigned = resign_commits.find_unsigned("main", cwd=self.cwd)
+        base = resign_commits.compute_base(unsigned, cwd=self.cwd)
+        new_tip, mapping = resign_commits.rebuild(base, old_tip, cwd=self.cwd)
+        self.assertEqual(resign_commits._lost_commits(new_tip, mapping, cwd=self.cwd), [])
+
+        # Stand in for a rebuild that dropped a commit: map the boundary commit to one
+        # parked off to the side, which is genuinely not reachable from new_tip.
+        r.git("checkout", "-q", "-b", "sidetrack", base)
+        orphan = r.commit("orphan.txt", "o\n", "not reachable from new_tip", sign=True)
+        stranded = dict(mapping, **{base: orphan})
+        self.assertEqual(
+            resign_commits._lost_commits(new_tip, stranded, cwd=self.cwd), [base]
+        )
+        detail = {
+            name: text
+            for name, ok, text in resign_commits.verify(
+                old_tip, new_tip, base, stranded, cwd=self.cwd
+            )
+            if not ok
+        }
+        reach = "every rewritten commit remains reachable from the new tip"
+        self.assertIn(reach, detail)
+        self.assertIn(f"1 of {len(stranded)} rebuilt commits unreachable", detail[reach])
+        self.assertIn(base[:12], detail[reach])
 
     def test_elided_parent_stays_reachable_after_resign(self):
         r = self.repo
@@ -347,11 +431,10 @@ class TestOctopusElisionTopologyCheck(SigningTestCase):
         self.assertEqual(len(recorded_parents), 3)
         self.assertTrue(resign_commits.git_ok(["merge-base", "--is-ancestor", t1, old_tip], cwd=self.cwd))
 
-        # A raw count-based check ("recorded parents == branches merged + first-parent")
-        # would misread this elision as a topology loss.
-        naive_expected_parents = 1 + 3  # HEAD plus the 3 branches named on the merge command
-        self.assertNotEqual(len(recorded_parents), naive_expected_parents)
-
+        # This elision happened at merge time, before the tool ever saw the history, so
+        # the rebuild reproduces it verbatim and the old count check would have passed
+        # too. What is pinned here is the other direction: a merge whose recorded parents
+        # already omit a reachable ancestor must not read as loss to the new check.
         unsigned = resign_commits.find_unsigned("build", cwd=self.cwd)
         self.assertEqual(len(unsigned), 3)
         base = resign_commits.compute_base(unsigned, cwd=self.cwd)

@@ -176,10 +176,13 @@ def _lost_commits(new_tip: str, mapping: dict[str, str], *, cwd: str) -> list[st
     """Old SHAs whose rebuilt counterpart is not reachable from new_tip.
 
     Reachability (`merge-base --is-ancestor`), not a raw commit/merge count, is what
-    actually proves no commit was dropped. A legitimate octopus merge can change its
-    own recorded parent count -- git elides a parent that is already reachable through
-    another parent in the same merge -- without losing a single commit, and a bare
-    count comparison cannot tell that apart from a real loss.
+    actually proves no commit was dropped. The rebuild is NOT a shape-preserving remap:
+    `commit-tree` rebuilds each commit from scratch and does not carry over headers it
+    did not generate, so two commits that differed only in being signed collapse into a
+    single rebuilt commit, and a merge's two parent edges to them then dedup into one
+    (`commit-tree` drops duplicate parents). Total commit and merge counts drop while
+    every commit's content and metadata survive -- a bare count comparison reads that
+    legitimate simplification as data loss (LED-033), reachability does not.
     """
     return [old for old, new in mapping.items() if not git_ok(["merge-base", "--is-ancestor", new, new_tip], cwd=cwd)]
 
@@ -197,11 +200,14 @@ def verify(old_tip: str, new_tip: str, base: str | None, mapping: dict[str, str]
     diff = git(["diff", "--stat", old_tip, new_tip], cwd=cwd)
     check("tip content diff empty", diff == "", diff.splitlines()[-1] if diff else "")
 
+    # A refusal reports both numbers and names the offending commits, so an operator never
+    # has to re-derive either by hand (the reason LED-033 cost a manual tree-hash audit).
     lost = _lost_commits(new_tip, mapping, cwd=cwd)
+    shown = ", ".join(s[:12] for s in lost[:10]) + (", ..." if len(lost) > 10 else "")
     check(
         "every rewritten commit remains reachable from the new tip",
         not lost,
-        f"lost: {', '.join(s[:12] for s in lost)}" if lost else "",
+        f"{len(lost)} of {len(mapping)} rebuilt commits unreachable: {shown}" if lost else "",
     )
 
     tally = git(["log", "--format=%G?", new_tip], cwd=cwd).splitlines()

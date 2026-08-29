@@ -12,7 +12,7 @@ import (
 // TestRebase_PreserveMergesKeepsMergeCommitAndBackupRef checks
 // RebaseOptions.PreserveMerges (--rebase-merges) keeps a merge commit intact
 // during replay instead of linearizing it away, and still writes a backup
-// tag before touching the branch — PreserveMerges was declared but had no
+// ref before touching the branch — PreserveMerges was declared but had no
 // direct test coverage.
 func TestRebase_PreserveMergesKeepsMergeCommitAndBackupRef(t *testing.T) {
 	ctx := context.Background()
