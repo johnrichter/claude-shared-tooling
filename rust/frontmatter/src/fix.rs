@@ -86,7 +86,13 @@ pub struct FixProposal {
 /// itself an edit); every other original top-level field passes through
 /// untouched, in its original relative order, after the schema's required
 /// fields. The result always re-validates via [`crate::validate::validate`]
-/// as conformant, modulo any placeholder Tier-2 still owes.
+/// as conformant, modulo any placeholder Tier-2 still owes -- and modulo a
+/// namespace whose pack entry carries a closed `allowed_values` vocabulary,
+/// which this pass deliberately leaves alone: picking a value out of a
+/// closed vocabulary is a judgement call, not a structural repair, so an
+/// out-of-vocabulary value (or the `namespace:TODO` stub this pass adds for
+/// an absent required namespace) stays flagged as `TAG_VALUE_NOT_ALLOWED`
+/// for a human to resolve.
 #[must_use]
 pub fn propose_fix(
     parsed: &ParsedFrontmatter,
@@ -880,6 +886,65 @@ mod sdet_adversarial {
             "period:TODO must NOT satisfy an incompatible period regex -- if this now \
              passes, either validate's regex check regressed or the fixer started \
              guessing a value it cannot prove matches"
+        );
+    }
+
+    /// A pack that puts a closed `allowed_values` vocabulary on a REQUIRED
+    /// (singleton) namespace. Tier-1 stubs the absent namespace as
+    /// `privacy:TODO` and must NOT reach into the vocabulary for a value:
+    /// choosing one is a judgement call (here, a wrong guess would mislabel
+    /// a document's sensitivity), not a structural repair. Pins the
+    /// documented limitation both ways -- the stub does not re-validate
+    /// clean, while a value the author already supplied from the vocabulary
+    /// survives the round-trip conformant. See `propose_fix`'s doc and
+    /// `crate::validate`'s `allowed_values_phase`.
+    #[test]
+    fn a_closed_vocabulary_namespaces_todo_stub_stays_invalid_but_a_real_value_round_trips() {
+        let mut pack: serde_json::Value =
+            serde_json::from_str(crate::test_support::SYNTHETIC_PACK_JSON).unwrap();
+        let privacy = pack["namespaces"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|ns| ns["name"] == "privacy")
+            .expect("the synthetic pack must declare a `privacy` namespace");
+        privacy["allowed_values"] = serde_json::json!({
+            "values": ["public", "internal"],
+            "message": "'{value}' is not an allowed {namespace} value"
+        });
+        let profile = Profile::from_pack_json(&pack.to_string()).unwrap();
+
+        let stubbed = "---\nname: \"x\"\ntags:\n  - type:knowledge\n---\nbody\n";
+        let parsed = parse::parse(stubbed).unwrap();
+        let proposal = propose_fix(&parsed, "some/doc.md", &profile, NOW);
+        let FrontmatterValue::Sequence(tags) = proposal.fields.get("tags").unwrap() else {
+            panic!("expected a sequence");
+        };
+        assert!(
+            tags.contains(&"privacy:TODO".to_string()),
+            "expected a bare TODO stub, never a guessed vocabulary value, got: {tags:?}"
+        );
+        let reparsed = parse::parse(&render(&proposal.fields)).unwrap();
+        let entry = validate(&reparsed, "some/doc.md", &profile);
+        assert!(
+            entry
+                .violations
+                .iter()
+                .any(|v| v.code == "TAG_VALUE_NOT_ALLOWED" && v.field == "privacy"),
+            "the TODO stub must stay flagged for a human: {:?}",
+            entry.violations
+        );
+
+        let authored =
+            "---\nname: \"x\"\ntags:\n  - type:knowledge\n  - privacy:internal\n---\nbody\n";
+        let parsed = parse::parse(authored).unwrap();
+        let proposal = propose_fix(&parsed, "some/doc.md", &profile, NOW);
+        let reparsed = parse::parse(&render(&proposal.fields)).unwrap();
+        let entry = validate(&reparsed, "some/doc.md", &profile);
+        assert!(
+            entry.is_valid,
+            "a value already in the vocabulary must survive the fix round-trip: {:?}",
+            entry.violations
         );
     }
 

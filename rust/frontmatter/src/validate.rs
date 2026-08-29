@@ -13,9 +13,12 @@
 //! `DESCRIPTION_OVER_CAP`, `DESCRIPTION_NOT_TOP_LEVEL`, the five
 //! tag-namespace codes (`MISSING_REQUIRED_TAG`, `MULTIPLE_SINGLE_VALUE_TAGS`,
 //! `ORPHAN_NAMESPACE_TAG`, `REPORT_ONLY_TAG_MISUSED`,
-//! `INVALID_PERIOD_FORMAT`), and the tags-not-a-list code. Deliberately
-//! out of scope: `DESCRIPTION_INVALID_SCALAR` (raw YAML scalar-quoting
-//! style -- this crate's parser already normalizes scalar shape, so that
+//! `INVALID_PERIOD_FORMAT`), the tags-not-a-list code, and
+//! `TAG_VALUE_NOT_ALLOWED` (a namespace's own `allowed_values` closed
+//! vocabulary, checked unconditionally on every file carrying a tag in
+//! that namespace, after the cascade -- see `allowed_values_phase`).
+//! Deliberately out of scope: `DESCRIPTION_INVALID_SCALAR` (raw YAML
+//! scalar-quoting style -- this crate's parser already normalizes scalar shape, so that
 //! raw-text quoting distinction doesn't exist here in the same form),
 //! `INVALID_UPDATED_FORMAT` (timestamp format), and
 //! `MISSING_FRONTMATTER`/`MALFORMED_FRONTMATTER` (raw-text-level concerns
@@ -167,6 +170,14 @@ const CODE_TAGS_NOT_A_LIST: &str = "TAGS_NOT_A_LIST";
 /// as a named constant.
 const CODE_DESCRIPTION_NOT_TOP_LEVEL: &str = "DESCRIPTION_NOT_TOP_LEVEL";
 
+/// The tag-value-not-allowed code, for [`allowed_values_phase`]. Like
+/// [`CODE_TAGS_NOT_A_LIST`]/[`CODE_DESCRIPTION_NOT_TOP_LEVEL`], it is not
+/// part of the declarative schema's cascade `codes` list -- the mechanism
+/// it guards (a namespace's own `allowed_values`, checked unconditionally)
+/// is deliberately separate from the conditional rule-set cascade -- so it
+/// is pinned here as a named constant rather than read from the profile.
+const CODE_TAG_VALUE_NOT_ALLOWED: &str = "TAG_VALUE_NOT_ALLOWED";
+
 // ---------------------------------------------------------------------------
 // The effective (workspace:-flattened) field view
 // ---------------------------------------------------------------------------
@@ -263,7 +274,11 @@ fn is_exempt(rel_path: &str, profile: &Profile) -> bool {
 
 /// Substitutes `{key}` placeholders in `template` with their string value --
 /// the byte-identical-rendering contract `schemas/frontmatter/README.md`
-/// specifies for a message template.
+/// specifies for a message template. A placeholder no substitution is
+/// supplied for -- one this call site doesn't offer, or a misspelling like
+/// `{Value}` -- is deliberately left in the output verbatim rather than
+/// erroring: a pack's template typo then shows up in the message text a
+/// reader sees, and never turns into a validation failure or a panic.
 fn render(template: &str, subs: &[(&str, &str)]) -> String {
     let mut out = template.to_string();
     for (key, value) in subs {
@@ -358,6 +373,7 @@ fn tag_rule_violations(tags: &[String], profile: &Profile) -> Vec<Violation> {
     rule_set_forbidden_phase(&groups, profile, &mut violations);
     rule_set_required_phase(&groups, profile, &mut violations);
     rule_set_value_format_phase(&groups, profile, &mut violations);
+    allowed_values_phase(&groups, profile, &mut violations);
 
     violations
 }
@@ -589,6 +605,53 @@ fn rule_set_value_format_phase(
                         message,
                     });
                 }
+            }
+        }
+    }
+}
+
+/// Every namespace carrying `allowed_values` in the pack is checked
+/// unconditionally, against every file's tags in that namespace -- no other
+/// tag or rule-set match gates this, which is what distinguishes it from
+/// [`rule_set_value_format_phase`] (only checked for a file matching some
+/// OTHER rule-set's `match` criterion). A namespace with no `allowed_values`
+/// entry is untouched: today's behavior, unaffected.
+///
+/// The compared value is everything after the tag's FIRST `:` -- the same
+/// split [`group_by_namespace`] keys on, so a value that itself contains
+/// `:` or `/` (e.g. a `date_interval`'s `2024-01-01/2024-12-31`) compares
+/// whole, and `namespace:` compares as the empty string.
+///
+/// Runs LAST, after every cascade phase: its code is not one of the
+/// cascade's, so appending it leaves the cascade's own pinned emission
+/// order byte-identical. Like every other phase it is independent -- no
+/// phase here reads or suppresses what an earlier one emitted, so a file
+/// that both breaks a namespace's cardinality and carries an
+/// out-of-vocabulary value in it reports both, one per root cause.
+///
+/// `crate::fix` has no counterpart repair step, deliberately: correcting a
+/// closed-vocabulary value means CHOOSING one, which Tier-1 never does (cf.
+/// the shape-valid-but-unreal calendar interval it likewise leaves for
+/// `validate` to flag). A pack putting `allowed_values` on a
+/// singleton/at-least-one namespace should expect the fixer's
+/// `namespace:TODO` stub to fail this check until a human picks a value.
+fn allowed_values_phase(
+    groups: &[(String, Vec<String>)],
+    profile: &Profile,
+    violations: &mut Vec<Violation>,
+) {
+    for ns in &profile.pack.namespaces {
+        let Some(allowed) = &ns.allowed_values else {
+            continue;
+        };
+        for tag in group_get(groups, &ns.name) {
+            let value = tag.split_once(':').map_or("", |(_, v)| v);
+            if !allowed.values.iter().any(|v| v == value) {
+                violations.push(Violation {
+                    code: CODE_TAG_VALUE_NOT_ALLOWED.to_string(),
+                    field: ns.name.clone(),
+                    message: render(&allowed.message, &[("value", tag), ("namespace", &ns.name)]),
+                });
             }
         }
     }
@@ -1912,5 +1975,135 @@ body\n"
             "a non-report rule-set's require_namespaces must fire generically: {:?}",
             entry.violations
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // `allowed_values`: a namespace's own unconditional value allow-list.
+    // Synthetic vocabulary only -- no real pack's namespace is populated by
+    // this task; see the module doc's `TAG_VALUE_NOT_ALLOWED` entry.
+    // -----------------------------------------------------------------------
+
+    /// A pack with namespaces carrying `allowed_values` (`environment`, and
+    /// `window` for punctuation-bearing values) and one without (`owner`) --
+    /// proves the check is per-namespace opt-in, not global.
+    const WITH_ALLOWED_VALUES: &str = r#"{
+        "kind": "extension-pack",
+        "version": "allowed-values-test@1",
+        "extends": "core@2.0.0",
+        "required_fields": [],
+        "description_caps": {"context": 350},
+        "file_class": {"default": "context", "rules": []},
+        "namespaces": [
+            {"name": "type", "cardinality": "singleton"},
+            {
+                "name": "environment",
+                "cardinality": "optional",
+                "allowed_values": {
+                    "values": ["prod", "staging", "dev"],
+                    "message": "'{value}' is not an allowed {namespace} value"
+                }
+            },
+            {
+                "name": "window",
+                "cardinality": "optional",
+                "allowed_values": {
+                    "values": ["2024-01-01/2024-12-31", "sub:divided"],
+                    "message": "'{value}' is not an allowed {namespace} value"
+                }
+            },
+            {"name": "owner", "cardinality": "optional"}
+        ],
+        "rule_sets": [],
+        "exempt": {"filenames": [], "dir_components": [], "path_globs": []}
+    }"#;
+
+    #[test]
+    fn allowed_value_in_the_list_has_no_tag_value_not_allowed_violation() {
+        let profile = Profile::from_pack_json(WITH_ALLOWED_VALUES)
+            .expect("a synthetic allowed_values pack must build");
+        let input =
+            "---\nname: \"x\"\ntags:\n  - type:knowledge\n  - environment:prod\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/doc.md", &profile);
+        assert!(
+            !entry
+                .violations
+                .iter()
+                .any(|v| v.code == "TAG_VALUE_NOT_ALLOWED"),
+            "an allowed value must not fire: {:?}",
+            entry.violations
+        );
+    }
+
+    #[test]
+    fn allowed_value_not_in_the_list_fires_tag_value_not_allowed() {
+        let profile = Profile::from_pack_json(WITH_ALLOWED_VALUES)
+            .expect("a synthetic allowed_values pack must build");
+        let input =
+            "---\nname: \"x\"\ntags:\n  - type:knowledge\n  - environment:sandbox\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/doc.md", &profile);
+        let violation = entry
+            .violations
+            .iter()
+            .find(|v| v.code == "TAG_VALUE_NOT_ALLOWED")
+            .expect("an out-of-list value must fire TAG_VALUE_NOT_ALLOWED");
+        assert_eq!(violation.field, "environment");
+        assert_eq!(
+            violation.message,
+            "'environment:sandbox' is not an allowed environment value"
+        );
+    }
+
+    /// A namespace with NO `allowed_values` entry (`owner`) is completely
+    /// unaffected -- any value is accepted, exactly today's behavior.
+    #[test]
+    fn namespace_without_allowed_values_is_unaffected_by_any_value() {
+        let profile = Profile::from_pack_json(WITH_ALLOWED_VALUES)
+            .expect("a synthetic allowed_values pack must build");
+        let input =
+            "---\nname: \"x\"\ntags:\n  - type:knowledge\n  - owner:anyone-at-all\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/doc.md", &profile);
+        assert!(
+            !entry
+                .violations
+                .iter()
+                .any(|v| v.code == "TAG_VALUE_NOT_ALLOWED"),
+            "a namespace with no allowed_values entry must never emit it: {:?}",
+            entry.violations
+        );
+    }
+
+    /// The compared value is everything after the tag's FIRST `:`, the same
+    /// split `group_by_namespace` keys a tag on -- so a value carrying `/`
+    /// or a further `:` (a `date_interval`'s `2024-01-01/2024-12-31`, a
+    /// sub-divided value) compares WHOLE, and a valueless `window:` compares
+    /// as the empty string and is rejected. Pinned because a pack author
+    /// populating a real vocabulary needs the split rule to be unambiguous.
+    #[test]
+    fn the_compared_value_is_everything_after_the_tags_first_colon() {
+        let profile = Profile::from_pack_json(WITH_ALLOWED_VALUES)
+            .expect("a synthetic allowed_values pack must build");
+        for (tag, allowed) in [
+            ("window:2024-01-01/2024-12-31", true),
+            ("window:sub:divided", true),
+            ("window:2024-01-01", false),
+            (r#""window:""#, false),
+        ] {
+            let input =
+                format!("---\nname: \"x\"\ntags:\n  - type:knowledge\n  - {tag}\n---\nbody\n");
+            let parsed = parse::parse(&input).unwrap();
+            let entry = validate(&parsed, "some/doc.md", &profile);
+            let fired = entry
+                .violations
+                .iter()
+                .any(|v| v.code == "TAG_VALUE_NOT_ALLOWED" && v.field == "window");
+            assert_eq!(
+                fired, !allowed,
+                "tag {tag}: expected allowed={allowed}, got violations {:?}",
+                entry.violations
+            );
+        }
     }
 }

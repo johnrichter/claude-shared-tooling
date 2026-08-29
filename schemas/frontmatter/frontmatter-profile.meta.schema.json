@@ -179,6 +179,24 @@
               "cardinality": { "type": "string", "enum": ["singleton", "at_least_one", "optional"] },
               "parents": { "type": "array", "items": { "type": "string" } },
               "type": { "type": "string", "enum": ["string", "date", "numeric", "date_interval"] },
+              "allowed_values": {
+                "type": "object",
+                "description": "This namespace's closed vocabulary, checked UNCONDITIONALLY: every file carrying a tag in this namespace must use one of `values`, with no rule-set match and no other tag as a gate — unlike a rule-set's `apply.value_formats`, which binds only to files matching that rule-set's own `match`. A mismatch emits `TAG_VALUE_NOT_ALLOWED` with `field` = this namespace's name. Omit for an open-vocabulary namespace: a namespace without this key has its values unchecked.",
+                "required": ["values", "message"],
+                "properties": {
+                  "values": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": { "type": "string" },
+                    "description": "The permitted values — the part of a tag AFTER its first `:` (so a value may itself contain `:` or `/`, e.g. a `2024-01-01/2024-12-31` interval). Compared by exact string equality; an empty list would reject every value, so at least one entry is required."
+                  },
+                  "message": {
+                    "type": "string",
+                    "description": "Mismatch message template. Placeholders: `{value}` = the WHOLE offending tag (e.g. `privacy:oops`, matching the `value_formats` convention), `{namespace}` = this namespace's name. Rendering is literal substitution — an unrecognized or misspelled placeholder is emitted verbatim rather than erroring."
+                  }
+                }
+              },
               "source": { "type": "string" }
             }
           }
