@@ -2180,6 +2180,65 @@ mod tests {
     }
 
     #[test]
+    fn meta_schema_namespaces_allowed_values_shape_matches_the_allowed_values_struct() {
+        // Pin the meta-schema's `namespaces[].allowed_values` declaration --
+        // the contract a PACK AUTHOR reads -- against what `AllowedValues`
+        // actually deserializes. Same LIMITATION as the `type` enum pin
+        // above: the expectation is a literal, not reflection, so a new
+        // field on the struct needs this list updated in lockstep. The
+        // round-trip at the end is what makes it more than a string compare:
+        // a pack written to exactly the meta-schema's declared shape must
+        // land in the struct.
+        let schema = meta_schema();
+        let declared = &schema["$defs"]["extensionPack"]["properties"]["namespaces"]["items"]
+            ["properties"]["allowed_values"];
+        let required: Vec<&str> = declared["required"]
+            .as_array()
+            .expect("meta-schema must declare allowed_values.required")
+            .iter()
+            .map(|v| v.as_str().expect("required entries must be strings"))
+            .collect();
+        assert_eq!(
+            required,
+            vec!["values", "message"],
+            "meta-schema's allowed_values.required must match AllowedValues' non-Option fields"
+        );
+        let mut properties: Vec<&str> = declared["properties"]
+            .as_object()
+            .expect("meta-schema must declare allowed_values.properties")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        properties.sort_unstable();
+        assert_eq!(properties, vec!["message", "values"]);
+
+        let mut pack: serde_json::Value = serde_json::from_str(EMBEDDED_DEFAULT_PACK_JSON)
+            .expect("embedded pack JSON must parse");
+        pack["namespaces"][0]["allowed_values"] = serde_json::json!({
+            "values": ["public", "internal"],
+            "message": "'{value}' is not an allowed {namespace} value"
+        });
+        let first = pack["namespaces"][0]["name"]
+            .as_str()
+            .expect("a namespace entry must carry a name")
+            .to_string();
+        let profile = Profile::from_pack_json(&pack.to_string())
+            .expect("a pack written to the meta-schema's allowed_values shape must load");
+        let allowed = profile
+            .pack
+            .namespaces
+            .iter()
+            .find(|ns| ns.name == first)
+            .and_then(|ns| ns.allowed_values.as_ref())
+            .expect("the declared shape must deserialize into AllowedValues");
+        assert_eq!(allowed.values, vec!["public", "internal"]);
+        assert_eq!(
+            allowed.message,
+            "'{value}' is not an allowed {namespace} value"
+        );
+    }
+
+    #[test]
     fn bundled_core_and_pack_json_satisfy_the_meta_schemas_top_level_kind_discriminant() {
         // Lightweight structural stand-in for full meta-schema validation:
         // the meta-schema's top-level `oneOf` discriminates core-profile vs
