@@ -42,11 +42,15 @@ func TestQAGoAdapterLintReportsInProcessRouteAndFixedTool(t *testing.T) {
 	}
 }
 
-// TestQAGoAdapterParseDoesNotFalsePositiveOnVetOrBuildErrorLines checks a
-// vet/build-shaped error line (file:line:col: message) is not mistaken for
-// a bare gofmt -l path, since it carries a similar .go-looking prefix but
-// with trailing diagnostic text and a space.
-func TestQAGoAdapterParseDoesNotFalsePositiveOnVetOrBuildErrorLines(t *testing.T) {
+// TestQAGoAdapterParseAttributesBuildErrorLinesWithFileAndLine checks a
+// build-shaped error line (file:line:col: message) is not mistaken for a
+// bare gofmt -l path — it carries a similar .go-looking prefix but with
+// trailing diagnostic text and a space — and is instead parsed into its own
+// diagnostic naming the failing file and line, one per line, rather than
+// collapsing into the generic fallback (AC2: a build failure Parse can
+// recognize is never an opaque "see log_ref" placeholder). The "# package"
+// header line matches neither shape and is skipped.
+func TestQAGoAdapterParseAttributesBuildErrorLinesWithFileAndLine(t *testing.T) {
 	a := NewGoAdapter()
 	stdout := []byte("./main.go:10:2: undefined: foo\n# example.com/pkg\n./other.go:3:1: missing return\n")
 	diags, err := a.Parse(1, stdout, nil)
@@ -55,14 +59,17 @@ func TestQAGoAdapterParseDoesNotFalsePositiveOnVetOrBuildErrorLines(t *testing.T
 	}
 	for _, d := range diags {
 		if d.Message == "not gofmt-formatted" {
-			t.Fatalf("Parse misclassified a build/vet error line as a gofmt path: %+v", diags)
+			t.Fatalf("Parse misclassified a build error line as a gofmt path: %+v", diags)
 		}
 	}
-	// None of these lines match the bare-path shape, and exit is non-zero,
-	// so Parse must fall back to exactly one synthetic diagnostic rather
-	// than silently reporting a clean run.
-	if len(diags) != 1 {
-		t.Fatalf("Parse = %+v, want exactly one synthetic fallback diagnostic", diags)
+	if len(diags) != 2 {
+		t.Fatalf("Parse = %+v, want exactly two build-error diagnostics (the header line matches neither shape)", diags)
+	}
+	if diags[0].File != "./main.go" || diags[0].Line != 10 {
+		t.Errorf("diags[0] = %+v, want File=./main.go Line=10", diags[0])
+	}
+	if diags[1].File != "./other.go" || diags[1].Line != 3 {
+		t.Errorf("diags[1] = %+v, want File=./other.go Line=3", diags[1])
 	}
 }
 

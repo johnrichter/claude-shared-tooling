@@ -330,12 +330,19 @@ func (goAdapter) runE2ETest(ctx context.Context, target Target) ([]Diagnostic, e
 // shape to admit one would admit that prose too.
 var gofmtUnformattedPathRE = regexp.MustCompile(`^\S+\.go$`)
 
-// Parse turns gofmt's raw stdout into diagnostics for the format check, and
-// falls back to one synthetic diagnostic for a failed build: gofmt -l
-// prints one unformatted path per line and exits 0 regardless of what it
-// found, so each printed path becomes its own error diagnostic — without
-// this step an unformatted tree would read as a clean run. Every other
-// check routes in-process (Route above) and never reaches Parse through Run.
+// Parse turns the raw stdout/stderr of whichever tool ran — gofmt for the
+// format check, go build for the build check, the two subprocess-routed
+// checks (Route above) — into diagnostics. Parse's signature carries no
+// check, so it tells the two apart by shape: gofmt -l prints one bare
+// unformatted path per line and exits 0 regardless of what it found, while a
+// failed build prints one "file:line:col: message" compiler error per line
+// (fileLineMessageRE, the same shape go vet's own output takes) and exits
+// non-zero. A line matching neither shape (e.g. build's leading "# package"
+// header) is skipped, and an exit code with nothing recognized falls back to
+// one synthetic diagnostic — without this step an unformatted tree would
+// read as a clean run, and a build failure Parse couldn't recognize would
+// read as a silent pass. Every other check routes in-process (Route above)
+// and never reaches Parse through Run.
 func (goAdapter) Parse(exitCode int, stdout, stderr []byte) ([]Diagnostic, error) {
 	var diags []Diagnostic
 	for _, chunk := range [][]byte{stdout, stderr} {
@@ -349,6 +356,15 @@ func (goAdapter) Parse(exitCode int, stdout, stderr []byte) ([]Diagnostic, error
 					Severity: SeverityError,
 					Message:  "not gofmt-formatted",
 					File:     string(line),
+				})
+				continue
+			}
+			if m := fileLineMessageRE.FindSubmatch(line); m != nil {
+				diags = append(diags, Diagnostic{
+					Severity: SeverityError,
+					Message:  fmt.Sprintf("%s: %s", "go build", string(m[4])),
+					File:     string(m[1]),
+					Line:     atoiOrZero(string(m[2])),
 				})
 			}
 		}
@@ -586,19 +602,75 @@ func parseGovulncheckStream(stdout []byte) []Diagnostic {
 // format re-rendered it (runUnitTest).
 var goTestFailureRE = regexp.MustCompile(`^--- FAIL: (\S+)`)
 
+// goTestLogLineRE matches the indented "file:line: message" line testing.T's
+// own Error/Errorf/Fatal/Fatalf prints at the caller's source location. It
+// carries no column — unlike fileLineMessageRE's three-part
+// compiler-diagnostic shape — since a test log line names a statement, not a
+// token position.
+var goTestLogLineRE = regexp.MustCompile(`^(\S+\.go):(\d+): (.+)$`)
+
+// goTestBlockBoundaryRE marks a line goTestFailureLocation never crosses
+// while hunting for a failing test's own log line: a blank separator, the
+// next test starting or finishing, or the package's own trailing summary
+// line. Plain (non-verbose) go test prints "=== RUN" for nothing, so a
+// boundary here means "some other test's or the package's own output",
+// never this failure's.
+var goTestBlockBoundaryRE = regexp.MustCompile(`^(=== RUN|--- (FAIL|PASS)|FAIL|PASS|ok)\b`)
+
+// goTestFailureLocation returns the file and line goTestLogLineRE names
+// nearest failIdx (the index of that failure's own "--- FAIL: Name" line)
+// within lines, or ("", 0) if none is found before a block boundary.
+// Verbose output (go test -v, and gotestsum's standard-verbose re-rendering
+// of it) flushes a failing test's Error/Fatal log lines immediately before
+// its "--- FAIL" header, separated from the prior test by that test's own
+// "=== RUN"; plain go test (no -v, what runE2ETest spawns) prints them
+// immediately after the header instead, with no "=== RUN" separating one
+// failure's trailing logs from the next failure's header. Forward is
+// searched first: in plain output that reads this failure's own logs, while
+// in verbose the forward scan hits a boundary at once and falls through to
+// the backward scan. A backward-first scan would misattribute the second of
+// two adjacent plain failures to the first's trailing log line.
+func goTestFailureLocation(lines [][]byte, failIdx int) (file string, line int) {
+	for j := failIdx + 1; j < len(lines); j++ {
+		l := bytes.TrimSpace(lines[j])
+		if len(l) == 0 || goTestBlockBoundaryRE.Match(l) {
+			break
+		}
+		if m := goTestLogLineRE.FindSubmatch(l); m != nil {
+			return string(m[1]), atoiOrZero(string(m[2]))
+		}
+	}
+	for j := failIdx - 1; j >= 0; j-- {
+		l := bytes.TrimSpace(lines[j])
+		if len(l) == 0 || goTestBlockBoundaryRE.Match(l) {
+			break
+		}
+		if m := goTestLogLineRE.FindSubmatch(l); m != nil {
+			return string(m[1]), atoiOrZero(string(m[2]))
+		}
+	}
+	return "", 0
+}
+
 // parseGoTestFailures turns go test's "--- FAIL: Name" lines into one
-// diagnostic per failing test, tagged with tool. A compile failure ahead of
-// any test running prints file:line:col lines instead (fileLineMessageRE),
-// which this also recognizes so a broken build doesn't read as a silently
-// clean test run.
+// diagnostic per failing test, tagged with tool. Each failure's diagnostic
+// carries the file and line goTestFailureLocation finds nearest it — the
+// caller's actual source location, not just which test failed. A compile
+// failure ahead of any test running prints file:line:col lines instead
+// (fileLineMessageRE), which this also recognizes so a broken build doesn't
+// read as a silently clean test run.
 func parseGoTestFailures(stdout []byte, tool string) []Diagnostic {
 	var diags []Diagnostic
-	for _, raw := range bytes.Split(stdout, []byte("\n")) {
-		line := bytes.TrimSpace(raw)
+	lines := bytes.Split(stdout, []byte("\n"))
+	for i := 0; i < len(lines); i++ {
+		line := bytes.TrimSpace(lines[i])
 		if m := goTestFailureRE.FindSubmatch(line); m != nil {
+			file, lineNo := goTestFailureLocation(lines, i)
 			diags = append(diags, Diagnostic{
 				Severity: SeverityError,
 				Message:  fmt.Sprintf("%s: test failed: %s", tool, string(m[1])),
+				File:     file,
+				Line:     lineNo,
 			})
 			continue
 		}
