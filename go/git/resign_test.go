@@ -39,13 +39,13 @@ func TestResign_PreservesTreesOverMergeHistory(t *testing.T) {
 	if treeOf(t, dir, out.NewHead) != treeOf(t, dir, oldHead) {
 		t.Fatalf("resigned head's tree differs from the original head's tree")
 	}
-	if resolved, err := r.resolveRef(ctx, out.BackupTag); err != nil || resolved != oldHead {
-		t.Fatalf("backup tag %s = %q, %v; want %q, nil", out.BackupTag, resolved, err, oldHead)
+	if resolved, err := r.resolveRef(ctx, out.BackupRef); err != nil || resolved != oldHead {
+		t.Fatalf("backup ref %s = %q, %v; want %q, nil", out.BackupRef, resolved, err, oldHead)
 	}
 
-	// Walk the original chain (still reachable via the backup tag Resign
+	// Walk the original chain (still reachable via the backup ref Resign
 	// created) against the resigned chain and compare trees pairwise.
-	oldChain := strings.Split(runGit(t, dir, "rev-list", "--reverse", "--topo-order", base+".."+out.BackupTag), "\n")
+	oldChain := strings.Split(runGit(t, dir, "rev-list", "--reverse", "--topo-order", base+".."+out.BackupRef), "\n")
 	newChain := strings.Split(runGit(t, dir, "rev-list", "--reverse", "--topo-order", base+"..refs/heads/main"), "\n")
 	if len(oldChain) != len(newChain) {
 		t.Fatalf("resigned chain has %d commits, original had %d", len(newChain), len(oldChain))
@@ -100,7 +100,7 @@ func TestResign_ConflictProofOverMergeHistory(t *testing.T) {
 }
 
 // TestResign_DryRunMovesNothing checks a dry run neither moves the ref nor
-// creates the backup tag it computes the name for.
+// creates the backup ref it computes the name for.
 func TestResign_DryRunMovesNothing(t *testing.T) {
 	ctx := context.Background()
 	r := newScratchRepo(t)
@@ -119,8 +119,8 @@ func TestResign_DryRunMovesNothing(t *testing.T) {
 	if got := runGit(t, dir, "rev-parse", "refs/heads/main"); got != oldHead {
 		t.Fatalf("ref moved during dry run: main = %s, want unchanged %s", got, oldHead)
 	}
-	if _, err := r.resolveRef(ctx, out.BackupTag); err == nil {
-		t.Fatalf("backup tag %s exists after a dry run, want none created", out.BackupTag)
+	if _, err := r.resolveRef(ctx, out.BackupRef); err == nil {
+		t.Fatalf("backup ref %s exists after a dry run, want none created", out.BackupRef)
 	}
 }
 

@@ -159,15 +159,15 @@ func TestCreateBranch_ForceMovesExistingBranch(t *testing.T) {
 	}
 }
 
-// TestDeleteBranch_BackupTagExistsEvenIfUpdateRefWereToFail simulates the
-// ordering invariant directly: DeleteBranch must write the backup tag before
+// TestDeleteBranch_BackupRefExistsEvenIfUpdateRefWereToFail simulates the
+// ordering invariant directly: DeleteBranch must write the backup ref before
 // attempting the ref removal, so a caller can always recover the old value
 // even if the delete itself is interrupted. We can't force update-ref to
 // fail after a successful CAS check without racing the process, so instead
 // this asserts the documented order by checking the tag exists immediately
 // after a successful delete and still resolves to the exact pre-delete SHA
 // (not some other value taken after a hypothetical retry).
-func TestDeleteBranch_BackupTagPointsAtExactPreDeleteSHA(t *testing.T) {
+func TestDeleteBranch_BackupRefPointsAtExactPreDeleteSHA(t *testing.T) {
 	ctx := context.Background()
 	r := newScratchRepo(t)
 	dir := r.Dir
@@ -181,8 +181,8 @@ func TestDeleteBranch_BackupTagPointsAtExactPreDeleteSHA(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteBranch: %v", err)
 	}
-	if resolved := runGit(t, dir, "rev-parse", out.BackupTag); resolved != second {
-		t.Fatalf("backup tag %s = %s, want %s", out.BackupTag, resolved, second)
+	if resolved := runGit(t, dir, "rev-parse", out.BackupRef); resolved != second {
+		t.Fatalf("backup ref %s = %s, want %s", out.BackupRef, resolved, second)
 	}
 	if _, err := r.resolveRef(ctx, "refs/heads/topic"); err == nil {
 		t.Fatalf("refs/heads/topic still resolves after DeleteBranch")
@@ -219,7 +219,7 @@ func TestResign_OctopusMergeRemapsAllParents(t *testing.T) {
 		t.Fatalf("Resign: %v", err)
 	}
 
-	oldOctopus := runGit(t, dir, "rev-parse", out.BackupTag+"~1")
+	oldOctopus := runGit(t, dir, "rev-parse", out.BackupRef+"~1")
 	newOctopus := runGit(t, dir, "rev-parse", "refs/heads/main~1")
 	oldParents := strings.Fields(runGit(t, dir, "rev-list", "--parents", "-n", "1", oldOctopus))[1:]
 	newParents := strings.Fields(runGit(t, dir, "rev-list", "--parents", "-n", "1", newOctopus))[1:]

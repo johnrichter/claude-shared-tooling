@@ -55,9 +55,9 @@ func TestDeleteBranch_RejectsStaleExpectedHead(t *testing.T) {
 	}
 }
 
-// TestDeleteBranch_CASSucceedsWithBackupTag checks a correct
-// compare-and-swap delete removes the branch and leaves a backup tag.
-func TestDeleteBranch_CASSucceedsWithBackupTag(t *testing.T) {
+// TestDeleteBranch_CASSucceedsWithBackupRef checks a correct
+// compare-and-swap delete removes the branch and leaves a backup ref.
+func TestDeleteBranch_CASSucceedsWithBackupRef(t *testing.T) {
 	ctx := context.Background()
 	r := newScratchRepo(t)
 	head := commitFile(t, r.Dir, "a.txt", "a\n", "first")
@@ -70,7 +70,7 @@ func TestDeleteBranch_CASSucceedsWithBackupTag(t *testing.T) {
 	if _, err := r.resolveRef(ctx, "refs/heads/feature"); err == nil {
 		t.Fatalf("feature ref still resolves after delete")
 	}
-	if resolved := runGit(t, r.Dir, "rev-parse", out.BackupTag); resolved != head {
-		t.Fatalf("backup tag %s = %s, want %s", out.BackupTag, resolved, head)
+	if resolved := runGit(t, r.Dir, "rev-parse", out.BackupRef); resolved != head {
+		t.Fatalf("backup ref %s = %s, want %s", out.BackupRef, resolved, head)
 	}
 }

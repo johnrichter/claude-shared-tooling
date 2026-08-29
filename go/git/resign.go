@@ -30,7 +30,7 @@ type ResignOptions struct {
 	// Defaults to "origin".
 	Remote string
 	// DryRun computes the rewrite and reports the resulting head without
-	// moving ref: no backup tag, no ref move. The recomputed commit objects
+	// moving ref: no backup ref, no ref move. The recomputed commit objects
 	// still land in git's object database (commit-tree always writes), but
 	// unreferenced by any ref they are ordinary unreachable objects left
 	// for a future git gc, not a repository-visible change.
@@ -129,7 +129,7 @@ func (r *Repo) Resign(ctx context.Context, ref string, opts ResignOptions) (*Rew
 	}
 
 	if opts.DryRun {
-		return &RewriteOutcome{Ref: ref, OldHead: oldHead, NewHead: newHead, BackupTag: backupTagName(ref, oldHead), DryRun: true, Post: report}, nil
+		return &RewriteOutcome{Ref: ref, OldHead: oldHead, NewHead: newHead, BackupRef: backupRefName(ref, oldHead), DryRun: true, Post: report}, nil
 	}
 	out, err := r.MoveRef(ctx, ref, oldHead, newHead, opts.Sync, opts.Remote, false)
 	if err != nil {

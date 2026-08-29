@@ -9,12 +9,12 @@ import (
 	"testing"
 )
 
-// TestRebase_PreserveMergesKeepsMergeCommitAndBackupTag checks
+// TestRebase_PreserveMergesKeepsMergeCommitAndBackupRef checks
 // RebaseOptions.PreserveMerges (--rebase-merges) keeps a merge commit intact
 // during replay instead of linearizing it away, and still writes a backup
 // tag before touching the branch — PreserveMerges was declared but had no
 // direct test coverage.
-func TestRebase_PreserveMergesKeepsMergeCommitAndBackupTag(t *testing.T) {
+func TestRebase_PreserveMergesKeepsMergeCommitAndBackupRef(t *testing.T) {
 	ctx := context.Background()
 	r := newScratchRepo(t)
 	dir := r.Dir
@@ -37,8 +37,8 @@ func TestRebase_PreserveMergesKeepsMergeCommitAndBackupTag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Rebase with PreserveMerges: %v", err)
 	}
-	if resolved := runGit(t, dir, "rev-parse", res.BackupTag); resolved != oldTopicHead {
-		t.Fatalf("backup tag %s = %s, want pre-rebase tip %s", res.BackupTag, resolved, oldTopicHead)
+	if resolved := runGit(t, dir, "rev-parse", res.BackupRef); resolved != oldTopicHead {
+		t.Fatalf("backup ref %s = %s, want pre-rebase tip %s", res.BackupRef, resolved, oldTopicHead)
 	}
 	// A linearizing rebase would have dropped the merge; PreserveMerges must
 	// leave a 2-parent commit reachable from the new tip.
@@ -139,11 +139,11 @@ func TestResign_EmptyRangeErrors(t *testing.T) {
 	}
 }
 
-// TestRebase_BackupTagWrittenBeforeConflictingRebase checks the backup tag
+// TestRebase_BackupRefWrittenBeforeConflictingRebase checks the backup ref
 // exists (and still resolves to the true pre-rebase tip) even when the
-// rebase itself goes on to conflict and get aborted — proving tag-before-
+// rebase itself goes on to conflict and get aborted — proving ref-before-
 // rewrite ordering holds on the failure path, not just the success path.
-func TestRebase_BackupTagWrittenBeforeConflictingRebase(t *testing.T) {
+func TestRebase_BackupRefWrittenBeforeConflictingRebase(t *testing.T) {
 	ctx := context.Background()
 	r := newScratchRepo(t)
 	dir := r.Dir
@@ -158,11 +158,11 @@ func TestRebase_BackupTagWrittenBeforeConflictingRebase(t *testing.T) {
 	if _, ok := err.(*ConflictError); !ok {
 		t.Fatalf("Rebase error = %v (%T), want *ConflictError", err, err)
 	}
-	tags := strings.Fields(runGit(t, dir, "tag", "-l", "backup/feature/*"))
-	if len(tags) != 1 {
-		t.Fatalf("backup tags = %v, want exactly 1 pre-rebase backup tag even on conflict", tags)
+	refs := strings.Fields(runGit(t, dir, "for-each-ref", "--format=%(refname)", "refs/backup/feature/"))
+	if len(refs) != 1 {
+		t.Fatalf("backup refs = %v, want exactly 1 pre-rebase backup ref even on conflict", refs)
 	}
-	if resolved := runGit(t, dir, "rev-parse", tags[0]); resolved != oldFeatureHead {
-		t.Fatalf("backup tag %s = %s, want pre-rebase tip %s", tags[0], resolved, oldFeatureHead)
+	if resolved := runGit(t, dir, "rev-parse", refs[0]); resolved != oldFeatureHead {
+		t.Fatalf("backup ref %s = %s, want pre-rebase tip %s", refs[0], resolved, oldFeatureHead)
 	}
 }
