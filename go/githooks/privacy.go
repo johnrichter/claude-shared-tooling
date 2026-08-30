@@ -119,9 +119,9 @@ var reservedSentinelSuffix = regexp.MustCompile(
 // internalIDStrict is the public-tier internal-identifier posture: internal
 // hostnames, private-network URLs, and issue-tracker links - none of which
 // match a bare company-name mention in prose. The employee-email check is a
-// fourth, caller-configured member of this posture (see
-// PrivacyOptions.EmployeeEmail); it is appended per call, not baked in here,
-// since this module ships no default domain of its own.
+// fourth member of this posture (see PrivacyOptions.EmployeeEmail); it is
+// appended per call, not baked in here, since it also carries a
+// caller-configurable allow-list on top of its one hardcoded default domain.
 //
 // The internal-hostname pattern's match ends right at the word boundary
 // after corp/internal/intranet/lan, so it matches equally whether that
@@ -145,64 +145,64 @@ var internalIDRelaxed = []markerPattern{
 	{privateNetworkURL, "private/loopback network URL"},
 }
 
-// EmployeeEmailCheck configures the optional employee-email member of the
-// public tier's internal-identifier posture: an address at one of Domains is
-// flagged as an internal identifier unless it exactly matches Allowlist (a
-// public role address anyone external is meant to reach, e.g.
-// support@example.com - never a wildcard or domain-wide exemption).
+// defaultAllowedEmailDomain is the one domain the employee-email check
+// allows unconditionally, regardless of any caller configuration: the RFC
+// 2606 reserved documentation-example domain, so a doc or test file's
+// user@example.com never false-positives.
+const defaultAllowedEmailDomain = "example.com"
+
+// employeeEmailPattern matches any email-address-shaped string in scanned
+// text. The check's polarity is allow-list, not deny-list: every real-looking
+// address is a candidate internal identifier, and EmployeeEmailCheck.
+// AllowedDomains (plus defaultAllowedEmailDomain) is what narrows that down,
+// not what the pattern alternates over.
+var employeeEmailPattern = regexp.MustCompile(
+	`(?i)\b[\w.+-]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+\b`)
+
+// EmployeeEmailCheck configures the public tier's employee-email member of
+// the internal-identifier posture: any email-address-shaped string found in
+// scanned text is flagged as an internal identifier unless its domain,
+// compared case-insensitively, is defaultAllowedEmailDomain or one of
+// AllowedDomains.
 //
-// The zero value disables the check entirely: this module ships no default
-// domain, so a caller that wants this check active must supply its own
-// Domains (and, optionally, Allowlist).
+// The zero value still runs the check at full strength: an address is flagged
+// unless it is at defaultAllowedEmailDomain, since this posture has no
+// caller-configured domain to fall back on being "off" - a caller who wants
+// no additional exemptions simply leaves AllowedDomains unset.
 type EmployeeEmailCheck struct {
-	// Domains are matched as literal text, never as patterns: a regex
-	// metacharacter in an entry is escaped and matches only itself, so an
-	// entry that is not a real domain simply never matches. A blank or
-	// whitespace-only entry is dropped rather than compiled, since an empty
-	// alternation branch would match every address at every domain; if no
-	// entry survives, the check stays off.
-	Domains []string
-	// Allowlist exempts an address by its full text, compared
-	// case-insensitively, so a key's casing never silently defeats the
-	// caller's own exemption. There is no wildcard or domain-wide form: an
-	// entry exempts exactly one address.
-	Allowlist map[string]bool
+	// AllowedDomains are matched as literal text, never as patterns, and
+	// case-insensitively against a detected address's domain: a domain here
+	// is compared, not compiled, so it can never inject regex syntax. A
+	// blank or whitespace-only entry is dropped rather than indexed, since an
+	// empty domain would otherwise match nothing anyway but is worth
+	// rejecting explicitly.
+	AllowedDomains []string
 }
 
-// employeeEmailPattern compiles c.Domains into the "internal employee email"
-// markerPattern, or returns false if c configures no usable domain (the check
-// is off). Each domain is escaped, so a caller-supplied string is always
-// matched literally and can never inject regex syntax into the pattern.
-func (c EmployeeEmailCheck) employeeEmailPattern() (markerPattern, bool) {
-	escaped := make([]string, 0, len(c.Domains))
-	for _, d := range c.Domains {
+// allowedDomains returns the domains the employee-email check must never
+// flag: defaultAllowedEmailDomain plus every entry of c.AllowedDomains,
+// lowercased, matching how a matched address's domain is looked up. The
+// returned set is never empty - defaultAllowedEmailDomain always applies,
+// even against the zero value.
+func (c EmployeeEmailCheck) allowedDomains() map[string]bool {
+	allowed := map[string]bool{defaultAllowedEmailDomain: true}
+	for _, d := range c.AllowedDomains {
 		if d = strings.TrimSpace(d); d == "" {
 			continue
 		}
-		escaped = append(escaped, regexp.QuoteMeta(d))
+		allowed[strings.ToLower(d)] = true
 	}
-	if len(escaped) == 0 {
-		return markerPattern{}, false
-	}
-	re := regexp.MustCompile(`(?i)\b[\w.+-]+@(?:` + strings.Join(escaped, "|") + `)\b`)
-	return markerPattern{re, employeeEmailLabel}, true
+	return allowed
 }
 
-// allowlistIndex returns c.Allowlist rekeyed by lowercased address, matching
-// how a matched address is looked up. Exempt entries are kept and non-exempt
-// ones dropped, so two keys differing only in case resolve to "exempt"
-// deterministically rather than by map iteration order.
-func (c EmployeeEmailCheck) allowlistIndex() map[string]bool {
-	if len(c.Allowlist) == 0 {
-		return nil
+// emailDomain returns the domain portion of an email-shaped match: the text
+// after its last "@". employeeEmailPattern guarantees exactly one "@", so
+// this is never ambiguous.
+func emailDomain(match string) string {
+	if i := strings.LastIndexByte(match, '@'); i >= 0 {
+		return match[i+1:]
 	}
-	index := make(map[string]bool, len(c.Allowlist))
-	for addr, exempt := range c.Allowlist {
-		if exempt {
-			index[strings.ToLower(addr)] = true
-		}
-	}
-	return index
+	return ""
 }
 
 // PrivacyOptions parameterizes ScanPrivacy beyond the tier itself.
@@ -225,10 +225,11 @@ type PrivacyOptions struct {
 	// path doesn't have to be pulled out of every other check to fix one
 	// false positive.
 	SecretExemptRules []fsx.Rule
-	// EmployeeEmail configures the public tier's optional employee-email
-	// check (see EmployeeEmailCheck). Its zero value leaves the check off:
-	// this module ships no default domain or allowlist of its own, so a
-	// caller who wants it active supplies its own Domains and Allowlist.
+	// EmployeeEmail configures the public tier's employee-email check (see
+	// EmployeeEmailCheck), which runs unconditionally at that tier: its zero
+	// value still flags any email-shaped address not at
+	// defaultAllowedEmailDomain, so a caller who wants additional exempt
+	// domains supplies AllowedDomains.
 	EmployeeEmail EmployeeEmailCheck
 }
 
@@ -247,9 +248,10 @@ type PrivacyOptions struct {
 // resolves to SkipClass (see PrivacyOptions.SecretExemptRules); its other
 // exemptions are by exact matched value (see awsExampleAccessKeyIDs). The
 // internal-identifier check runs whole-file with no path exemption; its only
-// exemption is by exact matched value (see PrivacyOptions.EmployeeEmail.
-// Allowlist). Each of the three checks has its own independent exemption
-// mechanism, so exempting a path from one never exempts it from the others.
+// exemption is by matched value's domain (see PrivacyOptions.EmployeeEmail.
+// AllowedDomains). Each of the three checks has its own independent
+// exemption mechanism, so exempting a path from one never exempts it from
+// the others.
 //
 // A pattern in MarkerExemptRules or SecretExemptRules that is not a valid
 // glob returns an error naming the ruleset and the pattern before any file is
@@ -269,12 +271,10 @@ func ScanPrivacy(root string, tier PrivacyTier, opts PrivacyOptions) (failures, 
 	}
 
 	internalID := cfg.internalID
-	var emailAllowlist map[string]bool
+	var allowedEmailDomains map[string]bool
 	if cfg.checksEmployeeEmail {
-		if p, on := opts.EmployeeEmail.employeeEmailPattern(); on {
-			internalID = append(append([]markerPattern{}, cfg.internalID...), p)
-			emailAllowlist = opts.EmployeeEmail.allowlistIndex()
-		}
+		internalID = append(append([]markerPattern{}, cfg.internalID...), markerPattern{employeeEmailPattern, employeeEmailLabel})
+		allowedEmailDomains = opts.EmployeeEmail.allowedDomains()
 	}
 
 	walkErr := walkScannable(root, opts.SkipRules, func(rel, abs string) error {
@@ -314,7 +314,7 @@ func ScanPrivacy(root string, tier PrivacyTier, opts PrivacyOptions) (failures, 
 		for _, m := range internalID {
 			for _, span := range m.re.FindAllStringIndex(text, -1) {
 				match := text[span[0]:span[1]]
-				if m.label == employeeEmailLabel && emailAllowlist[strings.ToLower(match)] {
+				if m.label == employeeEmailLabel && allowedEmailDomains[strings.ToLower(emailDomain(match))] {
 					continue
 				}
 				if m.label == internalHostnameLabel && reservedSentinelSuffix.MatchString(text[span[1]:]) {

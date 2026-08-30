@@ -186,62 +186,108 @@ func TestScanPrivacyConfidentialTierAllowsInternalHostnameButFlagsPrivateNetwork
 	}
 }
 
-// TestScanPrivacyEmployeeEmailCheckOffByDefault confirms that with no
-// caller-supplied PrivacyOptions.EmployeeEmail, no address at any domain -
-// including one a caller might plausibly configure later - is ever flagged.
-// This module ships no default domain of its own.
-func TestScanPrivacyEmployeeEmailCheckOffByDefault(t *testing.T) {
+// TestScanPrivacyEmployeeEmailFlagsAnyDomainByDefault confirms that with no
+// caller-supplied PrivacyOptions.EmployeeEmail, a real, non-example.com
+// address is flagged: the check's polarity is allow-list, so an unconfigured
+// domain is suspicious by default rather than exempt by default.
+func TestScanPrivacyEmployeeEmailFlagsAnyDomainByDefault(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "doc.md", "contact jane@example.com or root@another-example.com\n")
+	writeFile(t, dir, "doc.md", "contact jane@acme-corp.com\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("got %+v, want one warning for an address at an unallowed domain", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailExampleDomainNeverFlags confirms
+// user@example.com never flags, even with an empty or nil EmployeeEmail
+// config: the RFC 2606 reserved documentation-example domain is always
+// allowed, unconditionally.
+func TestScanPrivacyEmployeeEmailExampleDomainNeverFlags(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact jane@example.com or Jane@Example.Com\n")
 
 	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
 	if err != nil {
 		t.Fatalf("ScanPrivacy: %v", err)
 	}
 	if len(warnings) != 0 {
-		t.Fatalf("got %+v, want no warnings with no caller-supplied EmployeeEmail config", warnings)
+		t.Fatalf("got %+v, want no warnings - example.com is always allowed, at any casing", warnings)
 	}
 }
 
-// TestScanPrivacyEmployeeEmailCheckWithConfigExemptByExactAddressOnly
-// confirms that once a caller supplies EmployeeEmail.Domains and Allowlist,
-// the check fires on the configured domain exactly as the old hardcoded
-// version did: an enumerated public role address is never flagged, while a
-// different address at the same domain still is, and an address at an
-// unconfigured domain never is.
-func TestScanPrivacyEmployeeEmailCheckWithConfigExemptByExactAddressOnly(t *testing.T) {
+// TestScanPrivacyEmployeeEmailAllowedDomainConfigDoesNotFlag confirms a
+// caller-configured AllowedDomains entry exempts an address at that domain,
+// while an address at a different, unconfigured domain still flags.
+func TestScanPrivacyEmployeeEmailAllowedDomainConfigDoesNotFlag(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "doc.md", "contact support@example.com or jane@example.com or root@other.com\n")
+	writeFile(t, dir, "doc.md", "contact jane@acme-corp.com or root@other.com\n")
 
 	opts := PrivacyOptions{
-		SkipRules: DefaultSkipRules,
-		EmployeeEmail: EmployeeEmailCheck{
-			Domains:   []string{"example.com"},
-			Allowlist: map[string]bool{"support@example.com": true},
-		},
+		SkipRules:     DefaultSkipRules,
+		EmployeeEmail: EmployeeEmailCheck{AllowedDomains: []string{"acme-corp.com"}},
 	}
 	_, warnings, err := ScanPrivacy(dir, TierPublic, opts)
 	if err != nil {
 		t.Fatalf("ScanPrivacy: %v", err)
 	}
 	if len(warnings) != 1 {
-		t.Fatalf("got %+v, want exactly one warning (jane@example.com), support@ allowlisted and other.com unconfigured", warnings)
+		t.Fatalf("got %+v, want exactly one warning (root@other.com); jane@acme-corp.com is allowlisted", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailAllowedDomainIsCaseInsensitive confirms a
+// caller's AllowedDomains entry exempts a domain regardless of casing on
+// either side, so casing never silently defeats the caller's own exemption.
+func TestScanPrivacyEmployeeEmailAllowedDomainIsCaseInsensitive(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact jane@Acme-Corp.COM or root@other.com\n")
+
+	opts := PrivacyOptions{
+		SkipRules:     DefaultSkipRules,
+		EmployeeEmail: EmployeeEmailCheck{AllowedDomains: []string{"acme-corp.com"}},
+	}
+	_, warnings, err := ScanPrivacy(dir, TierPublic, opts)
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("got %+v, want exactly one warning (root@other.com); jane@Acme-Corp.COM is allowlisted regardless of casing", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailNoDomainMatchFlags confirms an address whose
+// domain matches neither defaultAllowedEmailDomain nor any caller-configured
+// AllowedDomains entry is flagged.
+func TestScanPrivacyEmployeeEmailNoDomainMatchFlags(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact root@unrelated.example\n")
+
+	opts := PrivacyOptions{
+		SkipRules:     DefaultSkipRules,
+		EmployeeEmail: EmployeeEmailCheck{AllowedDomains: []string{"acme-corp.com"}},
+	}
+	_, warnings, err := ScanPrivacy(dir, TierPublic, opts)
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("got %+v, want exactly one warning: the address's domain matches no allowed entry", warnings)
 	}
 }
 
 // TestScanPrivacyEmployeeEmailCheckNeverAppliesAtConfidentialTier confirms the
-// employee-email check stays public-tier-only even when a caller supplies
-// EmployeeEmail config: the confidential tier's relaxed posture never grows
-// this check.
+// employee-email check stays public-tier-only: the confidential tier's
+// relaxed posture never grows this check, configured or not.
 func TestScanPrivacyEmployeeEmailCheckNeverAppliesAtConfidentialTier(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "doc.md", "contact jane@example.com\n")
+	writeFile(t, dir, "doc.md", "contact jane@acme-corp.com\n")
 
-	opts := PrivacyOptions{
-		SkipRules:     DefaultSkipRules,
-		EmployeeEmail: EmployeeEmailCheck{Domains: []string{"example.com"}},
-	}
-	_, warnings, err := ScanPrivacy(dir, TierConfidential, opts)
+	_, warnings, err := ScanPrivacy(dir, TierConfidential, PrivacyOptions{SkipRules: DefaultSkipRules})
 	if err != nil {
 		t.Fatalf("ScanPrivacy: %v", err)
 	}
@@ -250,72 +296,26 @@ func TestScanPrivacyEmployeeEmailCheckNeverAppliesAtConfidentialTier(t *testing.
 	}
 }
 
-// TestScanPrivacyEmployeeEmailBlankDomainEntryDoesNotMatchEveryAddress
-// confirms a blank or whitespace-only Domains entry - the shape a caller gets
-// from splitting a trailing-comma config string - is dropped rather than
-// compiled into an empty alternation branch, which would otherwise flag every
-// address at every domain in the tree.
-func TestScanPrivacyEmployeeEmailBlankDomainEntryDoesNotMatchEveryAddress(t *testing.T) {
+// TestScanPrivacyEmployeeEmailBlankAllowedDomainEntryIgnored confirms a blank
+// or whitespace-only AllowedDomains entry - the shape a caller gets from
+// splitting a trailing-comma config string - is dropped rather than indexed,
+// so it never accidentally exempts anything.
+func TestScanPrivacyEmployeeEmailBlankAllowedDomainEntryIgnored(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "doc.md", "contact jane@unrelated.example or bob@other.example\n")
+	writeFile(t, dir, "doc.md", "contact jane@acme-corp.com\n")
 
-	for _, domains := range [][]string{{""}, {"   "}, {"example.com", ""}, {"", "example.com"}} {
+	for _, domains := range [][]string{{"acme-corp.com", ""}, {"", "acme-corp.com"}, {"acme-corp.com", "   "}} {
 		opts := PrivacyOptions{
 			SkipRules:     DefaultSkipRules,
-			EmployeeEmail: EmployeeEmailCheck{Domains: domains},
+			EmployeeEmail: EmployeeEmailCheck{AllowedDomains: domains},
 		}
 		_, warnings, err := ScanPrivacy(dir, TierPublic, opts)
 		if err != nil {
 			t.Fatalf("ScanPrivacy(domains=%q): %v", domains, err)
 		}
 		if len(warnings) != 0 {
-			t.Fatalf("domains=%q: got %+v, want no warnings - a blank entry must never match an unconfigured domain", domains, warnings)
+			t.Fatalf("domains=%q: got %+v, want no warnings - acme-corp.com is allowlisted regardless of a blank sibling entry", domains, warnings)
 		}
-	}
-}
-
-// TestScanPrivacyEmployeeEmailDomainIsMatchedLiterally confirms a caller
-// domain carrying regex metacharacters is escaped, not interpreted: the
-// wildcard-looking entry matches only its own literal text, so a caller
-// cannot widen (or corrupt) the pattern through configuration.
-func TestScanPrivacyEmployeeEmailDomainIsMatchedLiterally(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "doc.md", "contact jane@unrelated.example and bob@a.example\n")
-
-	opts := PrivacyOptions{
-		SkipRules:     DefaultSkipRules,
-		EmployeeEmail: EmployeeEmailCheck{Domains: []string{".*", "(a|b).example", `\w+.example`}},
-	}
-	_, warnings, err := ScanPrivacy(dir, TierPublic, opts)
-	if err != nil {
-		t.Fatalf("ScanPrivacy: %v", err)
-	}
-	if len(warnings) != 0 {
-		t.Fatalf("got %+v, want no warnings - a metacharacter in a domain must match only itself", warnings)
-	}
-}
-
-// TestScanPrivacyEmployeeEmailAllowlistIsCaseInsensitive confirms a caller's
-// allowlist key exempts its address regardless of the casing either side is
-// written in, so key casing never silently defeats the caller's own
-// exemption.
-func TestScanPrivacyEmployeeEmailAllowlistIsCaseInsensitive(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "doc.md", "contact Support@Example.com or jane@example.com\n")
-
-	opts := PrivacyOptions{
-		SkipRules: DefaultSkipRules,
-		EmployeeEmail: EmployeeEmailCheck{
-			Domains:   []string{"example.com"},
-			Allowlist: map[string]bool{"SUPPORT@example.com": true},
-		},
-	}
-	_, warnings, err := ScanPrivacy(dir, TierPublic, opts)
-	if err != nil {
-		t.Fatalf("ScanPrivacy: %v", err)
-	}
-	if len(warnings) != 1 {
-		t.Fatalf("got %+v, want exactly one warning (jane@) - the allowlisted address must be exempt at any casing", warnings)
 	}
 }
 
