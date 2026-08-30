@@ -354,7 +354,7 @@ fn group_get<'a>(groups: &'a [(String, Vec<String>)], ns: &str) -> &'a [String] 
         .map_or(&[], |(_, tags)| tags.as_slice())
 }
 
-/// The full ordered tag cascade -- singleton, at-least-one,
+/// The full ordered tag cascade -- singleton, at-least-one, at-most-one,
 /// parent-dependency, then the three conditional rule-set phases
 /// (forbidden-unless-matched, required, value-format) -- driven entirely by
 /// `profile.pack.namespaces`' array order and `profile.pack.rule_sets`, with
@@ -369,6 +369,7 @@ fn tag_rule_violations(tags: &[String], profile: &Profile) -> Vec<Violation> {
 
     singleton_cardinality_phase(&groups, profile, &mut violations);
     at_least_one_cardinality_phase(&groups, profile, &mut violations);
+    at_most_one_cardinality_phase(&groups, profile, &mut violations);
     parent_dependency_phase(&groups, profile, &mut violations);
     rule_set_forbidden_phase(&groups, profile, &mut violations);
     rule_set_required_phase(&groups, profile, &mut violations);
@@ -460,6 +461,44 @@ fn at_least_one_cardinality_phase(
                     code: emit.code.clone(),
                     field: ns.name.clone(),
                     message: render(&emit.message, &[("namespace", &ns.name)]),
+                });
+            }
+        }
+    }
+}
+
+/// Zero occurrences is fine (unlike `singleton_cardinality_phase`, which
+/// also flags absence); only two or more of an `at_most_one` namespace's
+/// tags is a violation.
+fn at_most_one_cardinality_phase(
+    groups: &[(String, Vec<String>)],
+    profile: &Profile,
+    violations: &mut Vec<Violation>,
+) {
+    let Some(step) = profile.core.cascade_step("at_most_one_cardinality") else {
+        return;
+    };
+    for ns in profile
+        .pack
+        .namespaces
+        .iter()
+        .filter(|n| n.cardinality == Cardinality::AtMostOne)
+    {
+        let count = group_get(groups, &ns.name).len();
+        if count > 1 {
+            if let Some(emit) = step.emit(0) {
+                let tags_repr = python_repr_list(group_get(groups, &ns.name));
+                violations.push(Violation {
+                    code: emit.code.clone(),
+                    field: ns.name.clone(),
+                    message: render(
+                        &emit.message,
+                        &[
+                            ("namespace", &ns.name),
+                            ("count", &count.to_string()),
+                            ("tags", &tags_repr),
+                        ],
+                    ),
                 });
             }
         }
@@ -947,6 +986,39 @@ body\n"
             .violations
             .iter()
             .any(|v| v.code == "TAGS_NOT_A_LIST" && v.field == "tags"));
+    }
+
+    #[test]
+    fn at_most_one_namespace_absent_is_not_a_violation() {
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:knowledge\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/doc.md", &profile());
+        assert!(entry.is_valid, "violations: {:?}", entry.violations);
+        assert!(!entry.violations.iter().any(|v| v.field == "lead"));
+    }
+
+    #[test]
+    fn at_most_one_namespace_with_exactly_one_occurrence_is_not_a_violation() {
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:knowledge\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - lead:alex\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/doc.md", &profile());
+        assert!(entry.is_valid, "violations: {:?}", entry.violations);
+    }
+
+    #[test]
+    fn at_most_one_namespace_with_two_or_more_occurrences_is_a_violation() {
+        let input = "---\nname: \"x\"\ndescription: \"d\"\nid: \"a:b:c\"\ntags:\n  - type:knowledge\n  - status:complete\n  - privacy:internal\n  - owner:example\n  - topic:t\n  - lead:alex\n  - lead:sam\nlinks: []\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let entry = validate(&parsed, "some/doc.md", &profile());
+        assert!(!entry.is_valid);
+        let violation = entry
+            .violations
+            .iter()
+            .find(|v| v.field == "lead")
+            .expect("expected a lead violation");
+        assert_eq!(violation.code, "MULTIPLE_SINGLE_VALUE_TAGS");
+        assert!(violation.message.contains("at most once"));
+        assert!(violation.message.contains('2'));
     }
 
     #[test]

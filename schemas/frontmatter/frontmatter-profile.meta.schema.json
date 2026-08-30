@@ -176,7 +176,7 @@
             "required": ["name", "cardinality"],
             "properties": {
               "name": { "type": "string" },
-              "cardinality": { "type": "string", "enum": ["singleton", "at_least_one", "optional"] },
+              "cardinality": { "type": "string", "enum": ["singleton", "at_least_one", "optional", "at_most_one"] },
               "parents": { "type": "array", "items": { "type": "string" } },
               "type": { "type": "string", "enum": ["string", "date", "numeric", "date_interval"] },
               "allowed_values": {

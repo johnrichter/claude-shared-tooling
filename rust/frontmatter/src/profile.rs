@@ -644,6 +644,10 @@ pub(crate) enum Cardinality {
     Singleton,
     AtLeastOne,
     Optional,
+    /// Zero or exactly one -- distinct from `Optional` (which tolerates two
+    /// or more with nothing to catch it) and from `Singleton` (which treats
+    /// absence itself as a violation).
+    AtMostOne,
 }
 
 /// A namespace's value type, per the pack's optional per-namespace `type`
@@ -2176,6 +2180,48 @@ mod tests {
             enum_values,
             vec!["string", "date", "numeric", "date_interval"],
             "meta-schema's type enum must match FacetType's String/Date/Numeric/DateInterval variants"
+        );
+    }
+
+    #[test]
+    fn meta_schema_namespaces_cardinality_enum_matches_the_cardinality_variants() {
+        // Pin the meta-schema's `namespaces[].cardinality` enum against the
+        // hardcoded list of `Cardinality` variants' serde
+        // `rename_all = "snake_case"` spellings, and against the bundled
+        // core profile's own `cardinality_types` keys -- three independent
+        // holders of the same vocabulary (Rust enum, meta-schema enum, core
+        // schema's mechanism table) that must never drift from each other.
+        // Same LIMITATION as the sibling `type`-enum pin above: literal
+        // expectations, not reflection, so a new `Cardinality` variant
+        // added without updating both lists below would slip through.
+        let schema = meta_schema();
+        let enum_values: Vec<&str> = schema["$defs"]["extensionPack"]["properties"]["namespaces"]
+            ["items"]["properties"]["cardinality"]["enum"]
+            .as_array()
+            .expect("meta-schema must declare namespaces[].cardinality.enum")
+            .iter()
+            .map(|v| v.as_str().expect("enum entries must be strings"))
+            .collect();
+        assert_eq!(
+            enum_values,
+            vec!["singleton", "at_least_one", "optional", "at_most_one"],
+            "meta-schema's cardinality enum must match Cardinality's Singleton/AtLeastOne/Optional/AtMostOne variants"
+        );
+
+        let core: serde_json::Value = serde_json::from_str(EMBEDDED_CORE_JSON)
+            .expect("embedded core profile must parse as JSON");
+        let mut core_keys: Vec<&str> = core["cardinality_types"]
+            .as_object()
+            .expect("core profile must declare cardinality_types")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        core_keys.sort_unstable();
+        let mut schema_enum_sorted = enum_values.clone();
+        schema_enum_sorted.sort_unstable();
+        assert_eq!(
+            core_keys, schema_enum_sorted,
+            "the bundled core profile's cardinality_types keys must match the meta-schema's cardinality enum"
         );
     }
 

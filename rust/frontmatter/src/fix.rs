@@ -218,7 +218,7 @@ fn trim_description(
 /// placeholder was appended (the signal [`propose_fix`] uses to decide
 /// whether `tags` belongs in [`FixProposal::human_authored_fields`]).
 /// Applies, in order: keep only namespaced (`ns:value`) entries; dedupe
-/// each singleton namespace to its first occurrence; drop a child
+/// each singleton or at-most-one namespace to its first occurrence; drop a child
 /// namespace's tags whose declared parent namespace is absent (to a fixed
 /// point, since dropping one child can never resurrect a parent, but a
 /// pack could declare a chain); resolve every conditional rule-set (on a
@@ -237,7 +237,7 @@ fn repair_tags(
     };
     tags.retain(|t| t.contains(':'));
 
-    dedupe_singletons(&mut tags, profile);
+    dedupe_single_valued(&mut tags, profile);
     drop_orphaned_children(&mut tags, profile);
 
     for (rule_index, rule_set) in profile.pack.rule_sets.iter().enumerate() {
@@ -269,16 +269,21 @@ fn rule_set_matched(tags: &[String], rule_set: &RuleSet) -> bool {
     tags.iter().any(|t| t == &needle)
 }
 
-fn dedupe_singletons(tags: &mut Vec<String>, profile: &Profile) {
+/// Dedupes any namespace whose cardinality caps it at one occurrence
+/// (`singleton` or `at_most_one`) to its first occurrence -- both cardinalities
+/// forbid two or more values, so both get the same repair.
+fn dedupe_single_valued(tags: &mut Vec<String>, profile: &Profile) {
     let mut seen: Vec<String> = Vec::new();
     tags.retain(|tag| {
         let ns = namespace_of(tag);
-        let is_singleton = profile
-            .pack
-            .namespaces
-            .iter()
-            .any(|n| n.name == ns && n.cardinality == Cardinality::Singleton);
-        if !is_singleton {
+        let is_single_valued = profile.pack.namespaces.iter().any(|n| {
+            n.name == ns
+                && matches!(
+                    n.cardinality,
+                    Cardinality::Singleton | Cardinality::AtMostOne
+                )
+        });
+        if !is_single_valued {
             return true;
         }
         if seen.iter().any(|s| s == ns) {
@@ -618,6 +623,36 @@ mod tests {
             "tags: {tags:?}"
         );
         assert!(tags.contains(&"status:complete".to_string()));
+    }
+
+    #[test]
+    fn at_most_one_namespace_dedupes_to_its_first_occurrence() {
+        let input = "---\nname: \"x\"\ntags:\n  - lead:alex\n  - lead:sam\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let proposal = propose_fix(&parsed, "some/doc.md", &profile(), NOW);
+        let FrontmatterValue::Sequence(tags) = proposal.fields.get("tags").unwrap() else {
+            panic!("expected a sequence");
+        };
+        assert_eq!(
+            tags.iter().filter(|t| t.starts_with("lead:")).count(),
+            1,
+            "tags: {tags:?}"
+        );
+        assert!(tags.contains(&"lead:alex".to_string()));
+    }
+
+    #[test]
+    fn at_most_one_namespace_absent_gets_no_placeholder() {
+        let input = "---\nname: \"x\"\ntags:\n  - status:complete\n---\nbody\n";
+        let parsed = parse::parse(input).unwrap();
+        let proposal = propose_fix(&parsed, "some/doc.md", &profile(), NOW);
+        let FrontmatterValue::Sequence(tags) = proposal.fields.get("tags").unwrap() else {
+            panic!("expected a sequence");
+        };
+        assert!(
+            !tags.iter().any(|t| t.starts_with("lead:")),
+            "tags: {tags:?}"
+        );
     }
 
     #[test]
