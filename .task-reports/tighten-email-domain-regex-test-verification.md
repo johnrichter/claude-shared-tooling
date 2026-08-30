@@ -17,14 +17,14 @@ plus the full existing suite.
   position, and real-address cases (plain, uppercase domain, uppercase local
   part, punycode IDN, hyphenated, single-char TLD).
 - Ran `gofmt -l .`, `go build ./...`, `go vet ./...`,
-  `go test ./... -count=1 -v`, scoped to `go/githooks` (this repo's Go
-  modules are per-directory; confirmed via `go/githooks/go.mod`).
+  `go test ./... -count=1 -v`, scoped to `go/githooks`. This repo's Go
+  modules are per-directory. Confirmed via `go/githooks/go.mod`.
 - Read the doc comment above `employeeEmailPattern` end to end.
 
 ## Acceptance / point-by-point findings
 
 1. **Diff read directly**: confirmed. Old/new patterns match exactly what
-   the task and report describe; local part (`[\w.+-]+`) and both `\b`
+   the task and report describe. The local part (`[\w.+-]+`) and both `\b`
    boundaries are byte-for-byte unchanged.
 
 2. **Three original false positives still excluded**: PASS.
@@ -44,7 +44,7 @@ plus the full existing suite.
 4. **63-character boundary, tested directly, not just trusted**: PASS for
    the non-final-label position, **FAIL/gap for the final-label (TLD)
    position** — see Failures below. The non-final label at exactly 63
-   characters matches; at 64 it does not (confirmed by direct probe, not
+   characters matches. At 64 it does not (confirmed by direct probe, not
    just the pre-existing 64-char test). But the *last* label — the TLD
    itself — is bound by `[a-zA-Z]{2,}` with **no upper bound**, so a
    TLD of 64, 100, or arbitrary length still matches. The doc comment's
@@ -72,8 +72,8 @@ plus the full existing suite.
    - `go build ./...` → success.
    - `go vet ./...` → success.
    - `go test ./... -count=1 -v` → all tests pass. 64 top-level `--- PASS`
-     lines, 0 `--- FAIL` (subtests bring the total higher; the report's
-     figure of "68 tests" is consistent with counting subtests). No flakes
+     lines, 0 `--- FAIL`. Subtests bring the total higher, so the report's
+     figure of "68 tests" is consistent with counting subtests. No flakes
      observed on this single run.
 
 8. **Doc comment coherence**: reads as one coherent explanation, not two
@@ -89,7 +89,7 @@ plus the full existing suite.
 ## Coverage
 Existing suite (68 tests including subtests) plus my own 16-case direct
 probe of `employeeEmailPattern`, covering all points in the dispatch. No
-coverage tool run (package has no coverage gate configured); scope was
+coverage tool run — the package has no coverage gate configured. Scope was
 narrow enough that direct enumeration is sufficient evidence.
 
 ## Failures
@@ -118,8 +118,8 @@ All other checks in the dispatch (points 1, 2, 3, 5, 6, 7) passed with no
 issues found.
 
 ## CI/e2e
-No CI/e2e pipeline defined for this scope beyond the Go test suite above;
-none run.
+No CI/e2e pipeline defined for this scope beyond the Go test suite above.
+None run.
 
 ## Verdict
 **FAIL** — one real gap: the 63-character DNS label cap the doc comment
