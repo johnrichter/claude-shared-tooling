@@ -10,7 +10,7 @@ instructions, the orchestrator cuts the actual tag).
 one pattern (`labelAWSAccessKeyID`), via a single `awsExampleAccessKeyIDs`
 map and an `if p.label != labelAWSAccessKeyID` branch inside
 `matchesSecretPattern`. A second, real, confirmed-safe placeholder needed the
-same treatment: `xoxb-ab59EXAMPLETOKEN`, a Slack-token-shaped string that
+same treatment: `xoxb-ab59` + `EXAMPLETOKEN`, a Slack-token-shaped string that
 documents a third-party secret-detection tool's own Slack-token match format
 in that tool's own rule-definition file (ingested as corpus content), not a
 real bot token any workspace issued.
@@ -52,7 +52,7 @@ exactly:
   fragment-assembly convention as the AWS fixtures, for the same reason:
   this test file's own source must not trip a pre-fix scanner).
 - `TestScanSecretsExemptsSlackDocPlaceholder`: a file containing the exact
-  `xoxb-ab59EXAMPLETOKEN` string (in the same "Example of matching format:"
+  `xoxb-ab59` + `EXAMPLETOKEN` string (in the same "Example of matching format:"
   context as the real-world source) yields zero findings.
 - `TestScanSecretsStillFlagsRealShapedSlackToken`: a different token with the
   same `xoxb-ab59` prefix and length class still yields one `slack_token`

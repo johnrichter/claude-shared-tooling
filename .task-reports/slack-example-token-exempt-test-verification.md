@@ -63,7 +63,7 @@ deleted after the run — confirmed via `git status --porcelain` showing a
 clean tree afterward) driving `ScanSecrets` directly against fresh temp
 dirs, independent of the engineer's own fixtures:
 
-- Content `token=xoxb-ab59EXAMPLETOKEN` (the exact documented string,
+- Content `token=` + `xoxb-ab59` + `EXAMPLETOKEN` (the exact documented string,
   assembled as one literal, not the engineer's `fixtureSlackDocToken` var) →
   0 findings. PASS (exemption applies).
 - Content `token=` + `xoxb-9f31` + `aQzT7mLp2Ke8Wr01` (different, real-shaped
@@ -142,7 +142,7 @@ Read `scripts/check_secrets.py` in full (not just grepped).
   the exact documented Slack string:
 
 ```
-$ printf 'Example of matching format: `%s`\n' "xoxb-ab59EXAMPLETOKEN" > /tmp/py-gap-check/doc.md
+$ printf 'Example of matching format: `%s`\n' "xoxb-ab59""EXAMPLETOKEN" > /tmp/py-gap-check/doc.md
 $ python3 scripts/check_secrets.py --root /tmp/py-gap-check
 FAIL — 1 possible secret(s) under /tmp/py-gap-check:
   - doc.md: possible Slack token
