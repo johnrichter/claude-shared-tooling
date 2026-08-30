@@ -354,6 +354,54 @@ func TestScanPrivacyEmployeeEmailDigitLeadingHostLabelStillFlags(t *testing.T) {
 	}
 }
 
+// TestScanPrivacyEmployeeEmailShortAlphanumericTLDIsNotAnAddress confirms a
+// TLD that starts with a letter but mixes in a digit (bar@a1) is not treated
+// as an address: the TLD must be letters-only, not merely letter-led.
+func TestScanPrivacyEmployeeEmailShortAlphanumericTLDIsNotAnAddress(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "resolve foo@bar.a1\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("got %+v, want no warnings - a letter-plus-digit TLD is never a real address", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailOverlongLabelIsNotAnAddress confirms a domain
+// label past DNS's 63-character limit is not treated as an address.
+func TestScanPrivacyEmployeeEmailOverlongLabelIsNotAnAddress(t *testing.T) {
+	dir := t.TempDir()
+	overlong := strings.Repeat("a", 64)
+	writeFile(t, dir, "doc.md", "contact jane@"+overlong+".com\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("got %+v, want no warnings - a 64-character label exceeds DNS's 63-character limit", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailIDNAndHyphenatedDomainsStillFlag confirms a
+// punycode IDN domain and a hyphenated domain still match as real addresses,
+// guarding against a future tightening of the pattern that narrows too far.
+func TestScanPrivacyEmployeeEmailIDNAndHyphenatedDomainsStillFlag(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact jane@sub.xn--80ak6aa92e.com or root@my-company.co\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 2 {
+		t.Fatalf("got %+v, want two warnings - both a punycode IDN domain and a hyphenated domain are real addresses", warnings)
+	}
+}
+
 // TestScanPrivacyNoOwnerConceptReachable confirms an "owner:" frontmatter tag
 // - forbidden, or declared-but-not-public - is never flagged at any tier:
 // this module's privacy-tier checks no longer key on any owner concept.
