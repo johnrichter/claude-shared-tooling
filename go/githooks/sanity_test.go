@@ -267,19 +267,20 @@ func TestScanRawBinaryCleanFixturePasses(t *testing.T) {
 	}
 }
 
-// TestScanPrivacyTierIsParameterized confirms the same file fails under the
-// stricter public tier and passes under the looser confidential and private
-// tiers - the tier is a caller-supplied parameter, not a hardcoded value.
+// TestScanPrivacyTierIsParameterized confirms the same privacy:private file
+// fails under both the public and confidential tiers - private is more
+// sensitive than either - and passes only under the private tier itself: the
+// tier is a caller-supplied parameter, not a hardcoded value.
 func TestScanPrivacyTierIsParameterized(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "doc.md", "---\nprivacy: confidential\n---\n\nbody\n")
+	writeFile(t, dir, "doc.md", "---\nprivacy: private\n---\n\nbody\n")
 
 	pubFail, _, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
 	if err != nil {
 		t.Fatalf("ScanPrivacy(public): %v", err)
 	}
 	if len(pubFail) == 0 {
-		t.Fatalf("want a public-tier failure for privacy:confidential")
+		t.Fatalf("want a public-tier failure for privacy:private")
 	}
 
 	confFail, _, err := ScanPrivacy(dir, TierConfidential, PrivacyOptions{SkipRules: DefaultSkipRules})
@@ -287,7 +288,7 @@ func TestScanPrivacyTierIsParameterized(t *testing.T) {
 		t.Fatalf("ScanPrivacy(confidential): %v", err)
 	}
 	if len(confFail) == 0 {
-		t.Fatalf("want a confidential-tier failure for privacy:confidential")
+		t.Fatalf("want a confidential-tier failure for privacy:private")
 	}
 
 	privateFail, _, err := ScanPrivacy(dir, TierPrivate, PrivacyOptions{SkipRules: DefaultSkipRules})
@@ -296,6 +297,45 @@ func TestScanPrivacyTierIsParameterized(t *testing.T) {
 	}
 	if len(privateFail) != 0 {
 		t.Fatalf("got %+v, want private tier to allow any privacy value", privateFail)
+	}
+}
+
+// TestScanPrivacyConfidentialTierAllowsOwnConfidentialMarker confirms a
+// confidential-tier repo's own privacy:confidential frontmatter tag is not a
+// violation - it matches the repo's own declared posture, not a more
+// sensitive one.
+func TestScanPrivacyConfidentialTierAllowsOwnConfidentialMarker(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "---\nprivacy: confidential\n---\n\nbody\n")
+
+	failures, _, err := ScanPrivacy(dir, TierConfidential, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(failures) != 0 {
+		t.Fatalf("got %+v, want no failure for privacy:confidential at the confidential tier", failures)
+	}
+}
+
+// TestScanPrivacyPublicTierForbidsPrivateMarker confirms the public tier
+// catches the most sensitive value even when it appears alone, without also
+// needing an intervening confidential tag - the gap this fix closes.
+func TestScanPrivacyPublicTierForbidsPrivateMarker(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "---\nprivacy: private\n---\n\nbody\n")
+
+	failures, _, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	var sawMarker bool
+	for _, f := range failures {
+		if f.Rule == "forbidden_marker" {
+			sawMarker = true
+		}
+	}
+	if !sawMarker {
+		t.Fatalf("got %+v, want a forbidden_marker failure for privacy:private at the public tier", failures)
 	}
 }
 

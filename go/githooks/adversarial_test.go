@@ -169,6 +169,64 @@ func TestScanPrivacyPrivateTierAllowsInternalMarkers(t *testing.T) {
 	}
 }
 
+// TestScanPrivacyForbiddenMarkerTierMatrix pins the whole forbidden-marker
+// rule in one place: a tier forbids exactly those privacy values naming a
+// tier MORE sensitive than its own, and nothing else. It covers the clauses
+// no single-case test reaches - that the public tier still catches the legacy
+// "internal" value, that the confidential tier forbids "private" alone (not
+// "internal", and not its own "confidential"), and that every alternative is
+// word-boundary-anchored, so a value merely prefixed by a forbidden one
+// ("privateish", "internally") is never a marker match.
+//
+// Only forbidden_marker findings are inspected: the public tier's separate
+// not_public_pair check fails most of these files for an unrelated reason,
+// and would otherwise mask a lost marker alternative.
+func TestScanPrivacyForbiddenMarkerTierMatrix(t *testing.T) {
+	// forbiddenAt is the set of tiers each value is a forbidden marker for.
+	cases := []struct {
+		value       string
+		forbiddenAt []PrivacyTier
+	}{
+		{"public", nil},
+		{"internal", []PrivacyTier{TierPublic}},
+		{"confidential", []PrivacyTier{TierPublic}},
+		{"private", []PrivacyTier{TierPublic, TierConfidential}},
+		{"PRIVATE", []PrivacyTier{TierPublic, TierConfidential}},
+		{"restricted", nil},
+		{"privateish", nil},
+		{"internally", nil},
+		{"confidentially", nil},
+	}
+	for _, tc := range cases {
+		for _, tier := range []PrivacyTier{TierPublic, TierConfidential, TierPrivate} {
+			t.Run(string(tier)+"/"+tc.value, func(t *testing.T) {
+				dir := t.TempDir()
+				writeFile(t, dir, "doc.md", "---\nprivacy: "+tc.value+"\n---\n\nbody\n")
+
+				failures, _, err := ScanPrivacy(dir, tier, PrivacyOptions{SkipRules: DefaultSkipRules})
+				if err != nil {
+					t.Fatalf("ScanPrivacy: %v", err)
+				}
+				var markers int
+				for _, f := range failures {
+					if f.Rule == "forbidden_marker" {
+						markers++
+					}
+				}
+				want := 0
+				for _, forbidden := range tc.forbiddenAt {
+					if forbidden == tier {
+						want = 1
+					}
+				}
+				if markers != want {
+					t.Fatalf("privacy: %s at tier %s: got %d forbidden_marker findings (%+v), want %d", tc.value, tier, markers, failures, want)
+				}
+			})
+		}
+	}
+}
+
 // TestScanPrivacyConfidentialTierAllowsInternalHostnameButFlagsPrivateNetwork
 // confirms the relaxed confidential-tier internal-id posture: an internal
 // hostname is expected in an org-shared repo (no warning), but a

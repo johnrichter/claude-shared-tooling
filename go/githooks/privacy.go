@@ -60,7 +60,7 @@ type markerPattern struct {
 var privacyTierConfigs = map[PrivacyTier]privacyTierConfig{
 	TierPublic: {
 		forbiddenMarkers: []markerPattern{
-			{regexp.MustCompile(`(?i)\bprivacy:\s*(internal|confidential)\b`), "forbidden frontmatter marker"},
+			{regexp.MustCompile(`(?i)\bprivacy:\s*(internal|confidential|private)\b`), "forbidden frontmatter marker"},
 		},
 		requirePublicPair:   true,
 		internalID:          internalIDStrict,
@@ -68,7 +68,7 @@ var privacyTierConfigs = map[PrivacyTier]privacyTierConfig{
 	},
 	TierConfidential: {
 		forbiddenMarkers: []markerPattern{
-			{regexp.MustCompile(`(?i)\bprivacy:\s*confidential\b`), "forbidden frontmatter marker"},
+			{regexp.MustCompile(`(?i)\bprivacy:\s*private\b`), "forbidden frontmatter marker"},
 		},
 		requirePublicPair: false,
 		internalID:        internalIDRelaxed,
