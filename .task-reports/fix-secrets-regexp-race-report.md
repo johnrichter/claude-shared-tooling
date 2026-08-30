@@ -46,7 +46,7 @@ themselves documented safe for concurrent use — moot here since there is
 exactly one caller. No `*regexp.Regexp` in either file is mutated after
 `regexp.MustCompile` (no `.Longest()`, no `SetPolicy`, no struct-literal
 reassignment). `git-tools/internal/cli/scan.go`'s `newScanPrivacyCmd` calls
-`githooks.ScanPrivacy` once, synchronously, in `RunE`; nothing upstream of it
+`githooks.ScanPrivacy` once, synchronously, in `RunE`. Nothing upstream of it
 (cobra's command dispatch, `loadConfig`) spawns a goroutine either. I grepped
 the full transitive dependency set actually reachable from this one code path
 (`go/githooks`, `go/fsx`, `go/clikit`, `go/logkit`, `go/sysops`,
@@ -62,7 +62,7 @@ source.
 
 Given no concurrency exists in the call path, a `*regexp.Regexp`-internal
 `sync.Pool` corruption from an application-level data race is not possible
-here: there is nothing for it to race against. I could not reproduce the
+here. There is nothing for it to race against. I could not reproduce the
 crash (0/45 runs, plus a clean `-race` build run and a clean `-race` test
 suite run), which is itself strong evidence against the "data race in this
 module" hypothesis — at the reported ~64% flake rate, 45 consecutive
@@ -73,7 +73,7 @@ crash-free runs on unmodified code has a probability on the order of 1 in
 
 No code in `go/githooks` was changed. Constraint 4/5 of the task (fix the
 actual root cause, prove it with ~20-30 repro runs) presupposes a root cause
-exists in this module to find; the honest result of the investigation is
+exists in this module to find. The honest result of the investigation is
 that it doesn't, at least not one reachable through static reading, a real
 `-race` build, and a real `-race` test run. Patching something anyway —
 e.g., adding a mutex nothing races on — would be exactly the "papering over
@@ -92,7 +92,7 @@ guessing.
   `go test ./... -race -count=1 -v` (all pass, no race), plus a `-race`-built
   `git-tools` binary run against `workspace` (clean).
 - Fix the actual root cause — **not applicable**: no root cause found in this
-  module's code; nothing patched.
+  module's code. Nothing patched.
 - Prove the fix with ~20-30+ repeated runs — **not applicable** (no fix), but
   the same run count was spent proving the *absence* of the reported
   behavior on unmodified code instead.
@@ -137,11 +137,11 @@ built via a temporary `replace` against this worktree, run 45× against
 - Worth checking whether the 11 original runs happened on a different
   GOARCH (amd64) or an older Go toolchain than what's pinned now — historic
   Go runtime/`sync.Pool` memory-model bugs on non-x86 architectures existed
-  in older Go versions and were fixed upstream; if the release binary was
+  in older Go versions and were fixed upstream. If the release binary was
   built with a stale toolchain, that's an infrastructure/pinning issue, not
   a `go/githooks` code issue, and out of this module's scope to fix.
 - If a future run does reproduce, capture the exact repro command's PID/core
-  dump before the process exits — `fatal error` crashes terminate immediately
-  and the stack trace in a log is often the only forensic evidence; a core
+  dump before the process exits. `fatal error` crashes terminate immediately,
+  and the stack trace in a log is often the only forensic evidence. A core
   dump would let a debugger identify the actually-corrupted allocation rather
   than inferring from the crash site.
