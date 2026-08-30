@@ -169,15 +169,25 @@ const defaultAllowedEmailDomain = "example.com"
 // and-hyphens-shaped past its "xn--" prefix (e.g. xn--80ak6aa92e) and would
 // otherwise be truncated at "xn" by the letters-only branch, leaving
 // emailDomain reporting only the truncated prefix - which meant such a
-// domain could never be allow-listed even though the address was still (
-// correctly) flagged. A bare "xn--" with nothing after it satisfies neither
+// domain could never be allow-listed even though the address was still
+// correctly flagged. A bare "xn--" with nothing after it satisfies neither
 // branch in full, so it never matches as a complete TLD.
+//
+// The punycode branch is listed first, and that order is load-bearing: Go's
+// regexp resolves an alternation leftmost-first, so the letters-only branch
+// would otherwise win at the same start position and re-truncate at "xn".
+// That same "xn" prefix always satisfies the letters-only branch anyway, so
+// the punycode branch only ever lengthens a match that already existed - it
+// cannot make a non-address start matching.
 //
 // Only the last label carries either of these requirements, since every
 // label before it legitimately may start with a digit (user@mail.3m.com) or
 // be punycode (user@sub.xn--80ak6aa92e.com) without needing special-casing.
 // Every label is also capped at 63 characters, matching DNS's own
 // label-length limit - the last label included, whichever branch it takes.
+// The punycode branch's bound is {0,57} rather than the {0,61} its siblings
+// carry because its literal "xn--" prefix already spends 4 of those 63
+// characters (4 + 1 + 57 + 1 = 63).
 var employeeEmailPattern = regexp.MustCompile(
 	`(?i)\b[\w.+-]+@(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+` +
 		`(?:xn--[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,57}[a-zA-Z0-9])?|[a-zA-Z]{2,63})\b`)

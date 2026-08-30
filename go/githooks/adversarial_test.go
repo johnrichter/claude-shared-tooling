@@ -517,6 +517,35 @@ func TestEmployeeEmailPatternBareXNPrefixDoesNotMatchAsTLD(t *testing.T) {
 	}
 }
 
+// TestEmployeeEmailPatternPunycodeLabelLengthCap is the punycode branch's own
+// half of the label-length boundary the letters-only positions already pair
+// (see TestScanPrivacyEmployeeEmailMaximumLengthLabelStillFlags and
+// TestScanPrivacyEmployeeEmailOverlongLabelIsNotAnAddress). That branch's
+// bound is {0,57} rather than the {0,61} its siblings carry, because the
+// literal "xn--" prefix already spends 4 of DNS's 63 characters - a derived
+// figure, so it needs a case that fails if it is ever "made consistent" with
+// the others and quietly lets a label run past the limit. Asserted on the
+// match extent rather than on warning count: an overlong punycode label
+// still falls back to the letters-only "xn" match, so it is still flagged
+// either way and only the extent distinguishes the two.
+func TestEmployeeEmailPatternPunycodeLabelLengthCap(t *testing.T) {
+	maxLabel := "xn--" + strings.Repeat("a", 59)
+	if len(maxLabel) != 63 {
+		t.Fatalf("test setup: got a %d-character label, want 63", len(maxLabel))
+	}
+	if got := employeeEmailPattern.FindString("contact jane@acme." + maxLabel); got != "jane@acme."+maxLabel {
+		t.Fatalf("got match %q, want the full address - a 63-character punycode label is within DNS's limit", got)
+	}
+
+	overlong := "xn--" + strings.Repeat("a", 60)
+	if len(overlong) != 64 {
+		t.Fatalf("test setup: got a %d-character label, want 64", len(overlong))
+	}
+	if got := employeeEmailPattern.FindString("contact jane@acme." + overlong); strings.Contains(got, overlong) {
+		t.Fatalf("got match %q, want a match stopping short of the label - 64 characters exceeds DNS's 63-character limit", got)
+	}
+}
+
 // TestScanPrivacyEmployeeEmailAllowedIDNDomainConfigDoesNotFlag is the
 // production-level regression: a caller-configured AllowedDomains entry for
 // a real punycode IDN domain must exempt an address at that domain end to
