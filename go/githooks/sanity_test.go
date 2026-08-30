@@ -19,10 +19,12 @@ import (
 // otherwise refuse the merge that ships the allowlist. The concatenation
 // changes nothing about the value under test.
 var (
-	fixtureAWSKey      = "AKIA" + "ABCDEFGHIJKLMNOP" // AKIA + 16 chars -> matches the AWS key pattern
-	fixtureAWSDocKey   = "AKIAIOSFODNN7" + "EXAMPLE" // AWS's reserved doc placeholder -> allowlisted
-	fixtureAWSNearMiss = "AKIAIOSFODNN7EXAMPL" + "F" // one char off the placeholder -> not allowlisted
-	fixturePEMKey      = "-----BEGIN " + "RSA PRIVATE " + "KEY-----"
+	fixtureAWSKey          = "AKIA" + "ABCDEFGHIJKLMNOP"    // AKIA + 16 chars -> matches the AWS key pattern
+	fixtureAWSDocKey       = "AKIAIOSFODNN7" + "EXAMPLE"    // AWS's reserved doc placeholder -> allowlisted
+	fixtureAWSNearMiss     = "AKIAIOSFODNN7EXAMPL" + "F"    // one char off the placeholder -> not allowlisted
+	fixtureSlackDocToken   = "xoxb-ab59" + "EXAMPLETOKEN"   // a scanner tool's own documented Slack-token example -> allowlisted
+	fixtureSlackRealShaped = "xoxb-ab59" + "REALLOOKINGABC" // same prefix and length class, not the placeholder -> not allowlisted
+	fixturePEMKey          = "-----BEGIN " + "RSA PRIVATE " + "KEY-----"
 )
 
 func writeFile(t *testing.T, dir, rel, content string) string {
@@ -84,6 +86,40 @@ func TestScanSecretsStillFlagsRealShapedKey(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Path != "src/leak.txt" || got[0].Rule != "aws_access_key_id" {
 		t.Fatalf("got %+v, want one aws_access_key_id finding at src/leak.txt", got)
+	}
+}
+
+// TestScanSecretsExemptsSlackDocPlaceholder confirms a third-party scanner
+// tool's own documented Slack-token example format never triggers a finding,
+// so it stops false-positiving in a corpus that ingests that tool's own
+// rule-definition file.
+func TestScanSecretsExemptsSlackDocPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "docs/example.md", "Example of matching format: `"+fixtureSlackDocToken+"`\n")
+
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	if err != nil {
+		t.Fatalf("ScanSecrets: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %+v, want no findings for the Slack doc placeholder token", got)
+	}
+}
+
+// TestScanSecretsStillFlagsRealShapedSlackToken confirms the placeholder
+// exemption is exact, not a weakening of the general Slack-token-shape
+// detection: a different token of the same prefix and length class still
+// triggers.
+func TestScanSecretsStillFlagsRealShapedSlackToken(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "src/leak.txt", "slack_token = "+fixtureSlackRealShaped+"\n")
+
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	if err != nil {
+		t.Fatalf("ScanSecrets: %v", err)
+	}
+	if len(got) != 1 || got[0].Path != "src/leak.txt" || got[0].Rule != "slack_token" {
+		t.Fatalf("got %+v, want one slack_token finding at src/leak.txt", got)
 	}
 }
 
