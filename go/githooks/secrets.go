@@ -22,13 +22,19 @@ type secretPattern struct {
 // Finding.Rule value callers key on, so its text is a public contract.
 const labelAWSAccessKeyID = "aws_access_key_id"
 
+// labelSlackToken is the Slack-token rule id, named for the same reason as
+// labelAWSAccessKeyID: matchesSecretPattern's exemption lookup dispatches on
+// it, and a rename here stays in sync with the pattern table by
+// construction.
+const labelSlackToken = "slack_token"
+
 // secretPatterns are the closed, high-confidence signatures ScanSecrets looks
 // for: private-key blocks and cloud/VCS/chat-host token shapes distinctive
 // enough that a match is never mistaken for ordinary source text.
 var secretPatterns = []secretPattern{
 	{regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`), "private_key_block"},
 	{regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`), labelAWSAccessKeyID},
-	{regexp.MustCompile(`\bxox[baprs]-[0-9A-Za-z-]{10,}`), "slack_token"},
+	{regexp.MustCompile(`\bxox[baprs]-[0-9A-Za-z-]{10,}`), labelSlackToken},
 	{regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{36,}`), "github_token"},
 }
 
@@ -47,16 +53,39 @@ var awsExampleAccessKeyIDs = map[string]bool{
 	"AKIAIOSFODNN7" + "EXAMPLE": true,
 }
 
+// slackExampleTokens holds the exact, enumerated Slack-token-shaped strings
+// that the Slack-token pattern must never flag - each one is a documented
+// example format from a third-party secret-detection tool's own
+// rule-definition file, illustrating what that tool's Slack-token rule
+// matches, not a bot token any Slack workspace ever issued. Exempt by exact
+// string only, never by substring or "contains EXAMPLE" heuristic.
+//
+// The value below is fragment-assembled for the same reason as
+// awsExampleAccessKeyIDs's: a pre-fix scanner landing this very commit has no
+// allowlist yet and would otherwise refuse the merge over its own source
+// line.
+var slackExampleTokens = map[string]bool{
+	"xoxb-ab59" + "EXAMPLETOKEN": true,
+}
+
+// exactExemptions maps a pattern's label to its exact-match exemption set.
+// A label with no entry here has no exact-match exemption at all.
+var exactExemptions = map[string]map[string]bool{
+	labelAWSAccessKeyID: awsExampleAccessKeyIDs,
+	labelSlackToken:     slackExampleTokens,
+}
+
 // matchesSecretPattern reports whether text contains a hit for p that isn't
-// covered by an exact-match exemption (see awsExampleAccessKeyIDs). Every
-// occurrence is checked; the file is flagged only if at least one occurrence
-// is not exempt.
+// covered by p's exact-match exemption set, if it has one (see
+// exactExemptions). Every occurrence is checked; the file is flagged only if
+// at least one occurrence is not exempt.
 func matchesSecretPattern(p secretPattern, text string) bool {
-	if p.label != labelAWSAccessKeyID {
+	exempt, ok := exactExemptions[p.label]
+	if !ok {
 		return p.re.MatchString(text)
 	}
 	for _, match := range p.re.FindAllString(text, -1) {
-		if !awsExampleAccessKeyIDs[match] {
+		if !exempt[match] {
 			return true
 		}
 	}
@@ -65,11 +94,12 @@ func matchesSecretPattern(p secretPattern, text string) bool {
 
 // ScanSecrets walks root and reports every file whose text matches one of the
 // closed set of high-confidence secret signatures - private-key blocks, AWS
-// access-key ids, Slack and GitHub tokens. One exemption is an exact match
-// against a vendor's own permanently reserved documentation placeholder (see
-// awsExampleAccessKeyIDs), which provably cannot be a real credential; a
-// near-miss or any other key shape is still reported. A second, independent
-// exemption is path-based: a file secretExemptRules resolves to SkipClass via
+// access-key ids, Slack and GitHub tokens. Two patterns carry an exact-match
+// exemption against a vendor's own permanently reserved documentation
+// placeholder value (see awsExampleAccessKeyIDs and slackExampleTokens),
+// which provably cannot be a real credential; a near-miss or any other key
+// shape is still reported. A second, independent exemption is path-based: a
+// file secretExemptRules resolves to SkipClass via
 // fsx.ClassifyPath is never scanned for secrets at all, for a corpus/fixture
 // path whose content is verified safe but happens to match a secret-shaped
 // regex - the same exemption ScanPrivacy's secret check honors via
