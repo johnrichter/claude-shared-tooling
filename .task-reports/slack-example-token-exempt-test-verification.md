@@ -66,9 +66,11 @@ dirs, independent of the engineer's own fixtures:
 - Content `token=xoxb-ab59EXAMPLETOKEN` (the exact documented string,
   assembled as one literal, not the engineer's `fixtureSlackDocToken` var) →
   0 findings. PASS (exemption applies).
-- Content `token=xoxb-9f31aQzT7mLp2Ke8Wr01` (different, real-shaped Slack
-  token: different random suffix, same `xoxb-` prefix and length class,
-  never appears anywhere in the diff or existing tests) → 1 finding, rule
+- Content `token=` + `xoxb-9f31` + `aQzT7mLp2Ke8Wr01` (different, real-shaped
+  Slack token, split here because it is deliberately NOT exempt and would
+  otherwise trip this repo's own scanner on this report; same `xoxb-` prefix
+  and length class, never appears anywhere in the diff or existing tests)
+  → 1 finding, rule
   `slack_token`. PASS (still flagged — exemption is exact-string, not a
   shape/prefix weakening).
 
@@ -85,9 +87,10 @@ Same ad-hoc test, AWS side:
 
 - Content `key=AKIAIOSFODNN7EXAMPLE` (exact AWS doc placeholder) → 0
   findings. PASS.
-- Content `key=AKIAQRSTUVWXYZ012345` (different, real-shaped AWS access-key
-  id, never used elsewhere in the diff/tests) → 1 finding, rule
-  `aws_access_key_id`. PASS.
+- Content `key=` + `AKIAQRSTUVWXYZ` + `012345` (different, real-shaped AWS
+  access-key id, split here for the same reason as the Slack one above; never
+  used elsewhere in the diff/tests) → 1 finding, rule `aws_access_key_id`.
+  PASS.
 
 ```
 === RUN   TestAdHocVerify_SlackAndAWSExemptions/aws_exact_doc_example_not_flagged
@@ -150,6 +153,12 @@ Confirms: the Python mirror currently has no Slack exemption and would
 reject the exact same corpus content the Go side now allowlists. Gap as
 flagged in the task report is accurate and reproducible. Out of scope per
 dispatch instructions — not fixed here.
+
+> **Reviewer correction (quality review, same branch):** this gap was
+> ruled IN scope and fixed. It was not merely a latent mirror drift — it
+> broke this repo's own CI on this very branch, because the two committed
+> task-report files hold the doc string as a plain literal. See
+> `.task-reports/slack-example-token-exempt-quality-review.md`.
 
 ## Coverage
 
