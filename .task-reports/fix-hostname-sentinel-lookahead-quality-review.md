@@ -410,3 +410,60 @@ Outcomes are in the execution log at the end of this file.
    `cd go/githooks && go test ./... -count=1 -v` (section 6).
 
 ## Execution log
+
+All four steps completed successfully.
+
+### ai-shared-lib
+| step | result |
+|---|---|
+| `git-tools merge chore/fix-hostname-sentinel-lookahead` | success, 4 commits, all already signed, fast-forward to `7ba4303` |
+| `git-tools push main` | success, `12198e0` -> `7ba4303` on `origin` |
+| `git-tools tag create 0.6.1 --shape go/githooks/vX.Y.Z` | success, signed annotated tag `go/githooks/v0.6.1` at `7ba4303`, pushed |
+| remote verification | `refs/heads/main` = `7ba4303`, `refs/tags/go/githooks/v0.6.1` = `b2061e0` |
+
+Branch commits landed: the implementer's fix, the test-engineer's verification
+report, my test-adequacy fix (`63075fc`), and this review (`7ba4303`).
+
+`tag create` is refused by the worktree gate from a primary checkout and takes no
+`--repo`, so it was run from the branch worktree, whose HEAD was identical to the
+post-merge main tip. Verified both refs pointed at `7ba4303` before tagging.
+
+### git-tools
+| step | result |
+|---|---|
+| branch point | `chore/consume-githooks-v0.6.1` off `main` at `f921f6e`, confirmed as the live tip |
+| tip contents confirmed | D4 lint fix (`f921f6e`), D8 native scan migration (merge `d4a604c`), errcheck fix (`e983e11`), test isolation (`e072bd9`, `37ad828`) |
+| pin | `go.mod` `go/githooks` `v0.6.0` -> `v0.6.1`; `go mod tidy` dropped the stale `go.sum` pair, giving the same 1-line/2-line diff shape as the previous bump `3d30a2d` |
+| resolved module carries the fix | `reservedSentinelSuffix` present in the module cache copy of `privacy.go` |
+| `gofmt -l .` | clean |
+| `go build ./...` | OK |
+| `go vet ./...` | OK |
+| `go test ./... -count=1` | all 11 packages pass (`internal/cli` 23.2s, `worktree-gate/lifecycle` 4.0s, rest sub-second) |
+| merge + push | success, `f921f6e` -> `b375b8d`; `origin/main` = `b375b8d` |
+
+### D-1 divergence closure — proved by A/B on freshly built binaries
+
+Both binaries built from source and run over one identical tree, so the only
+variable is the pinned `go/githooks` version.
+
+| binary | pin | privacy warnings |
+|---|---|---|
+| `gt-old`, built from `main` at `f921f6e` | `v0.6.0` | 15 |
+| `gt-new`, built from the bumped worktree | `v0.6.1` | **9** |
+
+Diff of the two caveat path lists — six warnings removed, none added:
+
+- 5 x `.task-reports/d8-privacy-scan-migration-test-verification.md` — the
+  pre-existing false positives inside the very document whose differential-corpus
+  proof found the D-1 divergence. The fix removes exactly what that document
+  recorded.
+- 1 x a scratch file containing a reserved-sentinel internal hostname, no longer
+  flagged.
+
+A sibling scratch file containing a genuine internal hostname stayed flagged
+under both binaries, confirming the closure is the false positive going away and
+not the check going quiet. D-1 is closed at the consumer.
+
+### Not done, deliberately
+Findings B and D ship unfixed in `v0.6.1`; both are pre-existing and outside this
+task's scope. See sections 3, 5, 10 and 11.
