@@ -7,12 +7,12 @@ tags:
   - topic:frontmatter
   - topic:git-governance
   - status:complete
-  - privacy:internal
+  - privacy:public
   - owner:operator
 links:
   - doc:ai-shared-lib:c2-owner-cardinality-report
   - doc:ai-shared-lib:c2-owner-cardinality-test-verification
-updated: 2026-08-30T00:00:00Z
+updated: 2026-08-30T09:10:00Z
 ---
 
 # C2 owner cardinality — quality review
