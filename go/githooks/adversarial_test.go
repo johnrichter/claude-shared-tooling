@@ -412,6 +412,83 @@ func TestScanPrivacyEmployeeEmailDigitLeadingHostLabelStillFlags(t *testing.T) {
 	}
 }
 
+// TestScanPrivacyEmployeeEmailShortAlphanumericTLDIsNotAnAddress confirms a
+// TLD that starts with a letter but mixes in a digit (bar@a1) is not treated
+// as an address: the TLD must be letters-only, not merely letter-led.
+func TestScanPrivacyEmployeeEmailShortAlphanumericTLDIsNotAnAddress(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "resolve foo@bar.a1\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("got %+v, want no warnings - a letter-plus-digit TLD is never a real address", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailOverlongLabelIsNotAnAddress confirms a domain
+// label past DNS's 63-character limit is not treated as an address, in the
+// last label position as well as before it. The two positions are matched by
+// different halves of the pattern, so the last label needs its own case: an
+// unbounded TLD would otherwise let an arbitrarily long all-letter label
+// through while every earlier label stayed capped.
+func TestScanPrivacyEmployeeEmailOverlongLabelIsNotAnAddress(t *testing.T) {
+	overlong := strings.Repeat("a", 64)
+
+	for _, domain := range []string{overlong + ".com", "sub." + overlong} {
+		dir := t.TempDir()
+		writeFile(t, dir, "doc.md", "contact jane@"+domain+"\n")
+
+		_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+		if err != nil {
+			t.Fatalf("ScanPrivacy(jane@%s): %v", domain, err)
+		}
+		if len(warnings) != 0 {
+			t.Fatalf("jane@%s: got %+v, want no warnings - a 64-character label exceeds DNS's 63-character limit", domain, warnings)
+		}
+	}
+}
+
+// TestScanPrivacyEmployeeEmailMaximumLengthLabelStillFlags is the accepting
+// half of the label-length boundary: 63 characters is legal DNS, so an
+// address there is still flagged - again in both label positions. Paired with
+// the 64-character rejection above, this is what proves the cap sits exactly
+// on DNS's limit rather than near it, and that both positions agree on it.
+func TestScanPrivacyEmployeeEmailMaximumLengthLabelStillFlags(t *testing.T) {
+	maxLabel := strings.Repeat("a", 63)
+
+	for _, domain := range []string{maxLabel + ".com", "sub." + maxLabel} {
+		dir := t.TempDir()
+		writeFile(t, dir, "doc.md", "contact jane@"+domain+"\n")
+
+		_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+		if err != nil {
+			t.Fatalf("ScanPrivacy(jane@%s): %v", domain, err)
+		}
+		if len(warnings) != 1 {
+			t.Fatalf("jane@%s: got %+v, want one warning - a 63-character label is within DNS's limit", domain, warnings)
+		}
+	}
+}
+
+// TestScanPrivacyEmployeeEmailIDNAndHyphenatedDomainsStillFlag confirms a
+// punycode IDN domain and a hyphenated domain still match as real addresses,
+// guarding against a future tightening of the pattern that narrows too far.
+func TestScanPrivacyEmployeeEmailIDNAndHyphenatedDomainsStillFlag(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact jane@sub.xn--80ak6aa92e.com or root@my-company.co\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 2 {
+		t.Fatalf("got %+v, want two warnings - both a punycode IDN domain and a hyphenated domain are real addresses", warnings)
+	}
+}
+
 // TestScanPrivacyNoOwnerConceptReachable confirms an "owner:" frontmatter tag
 // - forbidden, or declared-but-not-public - is never flagged at any tier:
 // this module's privacy-tier checks no longer key on any owner concept.
