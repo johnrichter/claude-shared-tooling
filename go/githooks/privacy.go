@@ -157,22 +157,30 @@ const defaultAllowedEmailDomain = "example.com"
 // AllowedDomains (plus defaultAllowedEmailDomain) is what narrows that down,
 // not what the pattern alternates over.
 //
-// The last domain label - the TLD - must be letters-only and at least two
-// characters, which is what keeps a package-version specifier (foo@1.0.0,
+// The last domain label - the TLD - must be either letters-only and at least
+// two characters, or a punycode-shaped internationalized-domain-name (IDN)
+// label: the literal prefix "xn--" followed by one or more DNS-label
+// characters (letters, digits, hyphens, never ending in a hyphen). The
+// letters-only branch is what keeps a package-version specifier (foo@1.0.0,
 // tool@v0.5.0), an IPv4-shaped host (cache@127.0.0.1), or a single-letter-
 // plus-digit label (bar@a1) out of the match: each is otherwise DNS-label-
-// shaped, and no real TLD is short, numeric, or mixed with digits. Only the
-// last label carries that requirement, since every label before it
-// legitimately may start with a digit (user@mail.3m.com). Punycode in any
-// label before the last is unaffected (user@sub.xn--80ak6aa92e.com). An
-// address at a punycode TLD itself is still flagged, since that TLD's
-// leading "xn" satisfies the letters-only rule, but only the "xn" falls
-// inside the match, so emailDomain reports a truncated domain for one and
-// such an address cannot be allow-listed. Every label is also capped at 63
-// characters, matching DNS's own label-length limit - the last label
-// included, which is why its bound is {2,63} rather than {2,}.
+// shaped, and no real non-IDN TLD is short, numeric, or mixed with digits.
+// The punycode branch exists because a real IDN TLD's own label is digits-
+// and-hyphens-shaped past its "xn--" prefix (e.g. xn--80ak6aa92e) and would
+// otherwise be truncated at "xn" by the letters-only branch, leaving
+// emailDomain reporting only the truncated prefix - which meant such a
+// domain could never be allow-listed even though the address was still (
+// correctly) flagged. A bare "xn--" with nothing after it satisfies neither
+// branch in full, so it never matches as a complete TLD.
+//
+// Only the last label carries either of these requirements, since every
+// label before it legitimately may start with a digit (user@mail.3m.com) or
+// be punycode (user@sub.xn--80ak6aa92e.com) without needing special-casing.
+// Every label is also capped at 63 characters, matching DNS's own
+// label-length limit - the last label included, whichever branch it takes.
 var employeeEmailPattern = regexp.MustCompile(
-	`(?i)\b[\w.+-]+@(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}\b`)
+	`(?i)\b[\w.+-]+@(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+` +
+		`(?:xn--[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,57}[a-zA-Z0-9])?|[a-zA-Z]{2,63})\b`)
 
 // EmployeeEmailCheck configures the public tier's employee-email member of
 // the internal-identifier posture: any email-address-shaped string found in

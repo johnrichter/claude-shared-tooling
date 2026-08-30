@@ -489,6 +489,75 @@ func TestScanPrivacyEmployeeEmailIDNAndHyphenatedDomainsStillFlag(t *testing.T) 
 	}
 }
 
+// TestEmployeeEmailPatternPunycodeTLDMatchesInFull confirms a punycode IDN
+// TLD (e.g. xn--80ak6aa92e) is captured in full rather than truncated at its
+// "xn" prefix: the regression this guards is emailDomain reporting only the
+// truncated "acme.xn" instead of the real domain, which is what makes an
+// operator's AllowedDomains entry for the real domain silently not apply.
+func TestEmployeeEmailPatternPunycodeTLDMatchesInFull(t *testing.T) {
+	match := employeeEmailPattern.FindString("contact jane@acme.xn--80ak6aa92e today")
+	if match != "jane@acme.xn--80ak6aa92e" {
+		t.Fatalf("got match %q, want the full address, not truncated at the punycode TLD's \"xn\" prefix", match)
+	}
+	if got := emailDomain(match); got != "acme.xn--80ak6aa92e" {
+		t.Fatalf("got domain %q, want the full punycode TLD, not truncated", got)
+	}
+}
+
+// TestEmployeeEmailPatternBareXNPrefixDoesNotMatchAsTLD confirms a bare
+// "xn--" with nothing after it is not accepted as a complete punycode TLD:
+// the punycode branch requires at least one DNS-label character following
+// the prefix, so an incomplete/malformed label falls back to at most the
+// pre-existing letters-only match ("xn"), never a match that swallows the
+// trailing hyphens as if they were a valid label.
+func TestEmployeeEmailPatternBareXNPrefixDoesNotMatchAsTLD(t *testing.T) {
+	match := employeeEmailPattern.FindString("resolve foo@bar.xn-- please")
+	if strings.Contains(match, "xn--") {
+		t.Fatalf("got match %q, want no match containing the bare, suffix-less \"xn--\" as a TLD", match)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailAllowedIDNDomainConfigDoesNotFlag is the
+// production-level regression: a caller-configured AllowedDomains entry for
+// a real punycode IDN domain must exempt an address at that domain end to
+// end through ScanPrivacy, not just at the regex level - this is the actual
+// bug the truncation caused (the allow-list comparison ran against the
+// truncated "acme.xn", which never equals the operator's real configured
+// domain, so the exemption silently never applied).
+func TestScanPrivacyEmployeeEmailAllowedIDNDomainConfigDoesNotFlag(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact jane@acme.xn--80ak6aa92e or root@other.com\n")
+
+	opts := PrivacyOptions{
+		SkipRules:     DefaultSkipRules,
+		EmployeeEmail: EmployeeEmailCheck{AllowedDomains: []string{"acme.xn--80ak6aa92e"}},
+	}
+	_, warnings, err := ScanPrivacy(dir, TierPublic, opts)
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("got %+v, want exactly one warning (root@other.com) - jane@acme.xn--80ak6aa92e is allowlisted", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailFalsePositiveExclusionsStillHold confirms the
+// punycode allowance did not loosen any of the shapes the letters-only TLD
+// rule was tightened to exclude: a package-version specifier, an IPv4-shaped
+// host, and a letter-plus-digit label still do not match as addresses.
+func TestScanPrivacyEmployeeEmailFalsePositiveExclusionsStillHold(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "install foo@1.0.0, pin tool@v0.5.0, probe cache@127.0.0.1, resolve bar@a1\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("got %+v, want no warnings - none of these are real addresses", warnings)
+	}
+}
+
 // TestScanPrivacyNoOwnerConceptReachable confirms an "owner:" frontmatter tag
 // - forbidden, or declared-but-not-public - is never flagged at any tier:
 // this module's privacy-tier checks no longer key on any owner concept.
