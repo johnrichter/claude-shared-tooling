@@ -156,8 +156,16 @@ const defaultAllowedEmailDomain = "example.com"
 // address is a candidate internal identifier, and EmployeeEmailCheck.
 // AllowedDomains (plus defaultAllowedEmailDomain) is what narrows that down,
 // not what the pattern alternates over.
+//
+// The last domain label - the TLD - must start with a letter, which is what
+// keeps a package-version specifier (foo@1.0.0, tool@v0.5.0) or an
+// IPv4-shaped host (cache@127.0.0.1) out of the match: each is otherwise
+// DNS-label-shaped, and no real address sits at an all-numeric TLD. Only the
+// last label carries that requirement, since every label before it
+// legitimately may start with a digit (user@mail.3m.com). A punycode IDN TLD
+// still matches, as it starts with the letters "xn".
 var employeeEmailPattern = regexp.MustCompile(
-	`(?i)\b[\w.+-]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+\b`)
+	`(?i)\b[\w.+-]+@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z](?:[a-z0-9-]*[a-z0-9])?\b`)
 
 // EmployeeEmailCheck configures the public tier's employee-email member of
 // the internal-identifier posture: any email-address-shaped string found in

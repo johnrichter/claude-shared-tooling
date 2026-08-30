@@ -319,6 +319,41 @@ func TestScanPrivacyEmployeeEmailBlankAllowedDomainEntryIgnored(t *testing.T) {
 	}
 }
 
+// TestScanPrivacyEmployeeEmailNumericTLDIsNotAnAddress confirms the shapes an
+// allow-list-polarity check most easily over-flags - a package-version
+// specifier and an IPv4-shaped host - are not treated as addresses. Both are
+// DNS-label-shaped on the right of the "@", so only the TLD's leading-letter
+// requirement excludes them, and both are pervasive in ordinary source and
+// documentation: matching them would swamp the real signal.
+func TestScanPrivacyEmployeeEmailNumericTLDIsNotAnAddress(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "install foo@1.0.0, pin git-tools@v0.5.0, probe cache@127.0.0.1\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("got %+v, want no warnings - an all-numeric TLD is never a real address", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailDigitLeadingHostLabelStillFlags confirms the
+// TLD's leading-letter requirement constrains only the last label: a real
+// address at a digit-leading host label is still detected.
+func TestScanPrivacyEmployeeEmailDigitLeadingHostLabelStillFlags(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact jane@mail.3m.com\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("got %+v, want one warning - a digit-leading label before the TLD is a real host label", warnings)
+	}
+}
+
 // TestScanPrivacyNoOwnerConceptReachable confirms an "owner:" frontmatter tag
 // - forbidden, or declared-but-not-public - is never flagged at any tier:
 // this module's privacy-tier checks no longer key on any owner concept.
