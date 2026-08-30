@@ -1,15 +1,3 @@
-# This repository holds the operator's own personal shared-tooling library,
-# not public-shareable material by default: parts of its tracked tree can
-# legitimately carry privacy:internal / owner:personal frontmatter markers,
-# and CI already checks it out with a dedicated SIBLING_REPO_TOKEN rather
-# than the default token. git-tools' own default privacy_tier is "public"
-# (the strictest posture), which treats every one of those real, legitimate
-# markers as forbidden content, so a sanctioned merge/push/tag create
-# refuses unless --privacy-tier is passed by hand every time. Declaring
-# this repo's own tier here is the fix.
-#
-# The loosest tier relaxes only the frontmatter-marker checks and the
-# internal-identifier warnings. The secret-pattern scan (private-key blocks,
-# AWS/Slack/GitHub tokens) and the raw-binary scan are tier-independent and
-# still run on every write into this repo.
-privacy_tier: private
+# This repository is public. Declaring the tier explicitly avoids
+# relying on git-tools' own default.
+privacy_tier: public
