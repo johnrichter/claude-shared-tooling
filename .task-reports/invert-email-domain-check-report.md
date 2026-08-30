@@ -102,7 +102,7 @@ go test ./... -count=1  → ok (all packages pass)
 ## Hand-off notes
 
 - **git-tools side**: see the matching worktree at
-  `/home/bits/Development/psa-platform/git-tools/.claude/worktrees/wire-email-allowlist`
+  `/home/bits/Development/workspaces/psa-platform/git-tools/.claude/worktrees/wire-email-allowlist`
   and its own report reference below. Its `internal/cli/config.go` and
   `scan.go` are updated to the new `AllowedDomains` shape, but git-tools'
   `go.mod` still pins `go/githooks v0.6.1` (the pre-change API) — this repo's
