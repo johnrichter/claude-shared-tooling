@@ -30,6 +30,11 @@ const (
 // stay in sync by construction.
 const employeeEmailLabel = "internal employee email"
 
+// internalHostnameLabel is the internal-identifier label used by both the
+// internal-hostname pattern and its reserved-sentinel filter, named once so
+// the two stay in sync by construction.
+const internalHostnameLabel = "internal hostname"
+
 // Known reports whether t is one of the three defined tiers.
 func (t PrivacyTier) Known() bool {
 	_, ok := privacyTierConfigs[t]
@@ -99,14 +104,34 @@ var privateNetworkURL = regexp.MustCompile(
 		`|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})` +
 		hostTerminator)
 
+// reservedSentinelSuffix matches an RFC 6761 reserved-TLD label (.invalid,
+// .test, .localhost, or .example - including the RFC 2606 example.{com,net,
+// org} second-level domains) anchored at the start of whatever immediately
+// follows an internal-hostname match, itself followed by hostTerminator: a
+// genuine end of host, never another "." introducing more host content. Go's
+// RE2 engine has no lookahead, so unlike the negative-lookahead this filter
+// mirrors, it is applied by the caller against the text right after a match
+// rather than embedded in the hostname pattern itself - the same exclusion,
+// expressed as a post-match check instead of a zero-width assertion.
+var reservedSentinelSuffix = regexp.MustCompile(
+	`(?i)^\.(?:invalid|test|example(?:\.(?:com|net|org))?|localhost)` + hostTerminator)
+
 // internalIDStrict is the public-tier internal-identifier posture: internal
 // hostnames, private-network URLs, and issue-tracker links - none of which
 // match a bare company-name mention in prose. The employee-email check is a
 // fourth, caller-configured member of this posture (see
 // PrivacyOptions.EmployeeEmail); it is appended per call, not baked in here,
 // since this module ships no default domain of its own.
+//
+// The internal-hostname pattern's match ends right at the word boundary
+// after corp/internal/intranet/lan, so it matches equally whether that
+// label is the true end of the host (a real internal address) or is
+// immediately followed by an RFC 6761 reserved sentinel TLD (e.g.
+// "host.corp.test", a documentation/fixture hostname, not a real one). The
+// caller in ScanPrivacy filters out the latter via reservedSentinelSuffix,
+// keyed off internalHostnameLabel.
 var internalIDStrict = []markerPattern{
-	{regexp.MustCompile(`(?i)\b[a-z0-9][a-z0-9-]*\.(?:corp|internal|intranet|lan)\b`), "internal hostname"},
+	{regexp.MustCompile(`(?i)\b[a-z0-9][a-z0-9-]*\.(?:corp|internal|intranet|lan)\b`), internalHostnameLabel},
 	{privateNetworkURL, "private/loopback network URL"},
 	{regexp.MustCompile(`(?i)\b(?:jira|atlassian|confluence)\.[\w.-]+/(?:browse|wiki)/[A-Za-z][\w-]*`), "internal issue-tracker/wiki link"},
 }
@@ -287,8 +312,12 @@ func ScanPrivacy(root string, tier PrivacyTier, opts PrivacyOptions) (failures, 
 		}
 
 		for _, m := range internalID {
-			for _, match := range m.re.FindAllString(text, -1) {
+			for _, span := range m.re.FindAllStringIndex(text, -1) {
+				match := text[span[0]:span[1]]
 				if m.label == employeeEmailLabel && emailAllowlist[strings.ToLower(match)] {
+					continue
+				}
+				if m.label == internalHostnameLabel && reservedSentinelSuffix.MatchString(text[span[1]:]) {
 					continue
 				}
 				warnings = append(warnings, Finding{Path: rel, Rule: "internal_identifier", Detail: fmt.Sprintf("internal identifier — %s", m.label)})

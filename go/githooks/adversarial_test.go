@@ -353,6 +353,47 @@ func TestScanPrivacyReservedSentinelHostNotFlaggedAsPrivateNetwork(t *testing.T)
 	}
 }
 
+// TestScanPrivacyReservedSentinelHostnameNotFlaggedAsInternal confirms an
+// internal-hostname-shaped label immediately followed by an RFC 6761
+// reserved sentinel TLD (.test, .example, .localhost) is a documentation/
+// fixture hostname, not a real internal address, and so raises no warning.
+// These are the two real false-positive inputs from the corpus comparison
+// against the Python reference implementation, plus the third reserved TLD
+// for completeness.
+func TestScanPrivacyReservedSentinelHostnameNotFlaggedAsInternal(t *testing.T) {
+	for _, sentinel := range []string{"foo.internal.test", "bar.internal.example", "baz.internal.localhost"} {
+		t.Run(sentinel, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, dir, "doc.md", "Deploy target: "+sentinel+"\n")
+
+			_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+			if err != nil {
+				t.Fatalf("ScanPrivacy: %v", err)
+			}
+			if len(warnings) != 0 {
+				t.Fatalf("got %+v, want no warnings for reserved-sentinel hostname %q", warnings, sentinel)
+			}
+		})
+	}
+}
+
+// TestScanPrivacyRealInternalHostnameStillFlaggedAlongsideSentinel confirms
+// the reserved-sentinel filter is adjacency-scoped: a genuine internal
+// hostname with no reserved TLD immediately after it still flags, even in
+// the same file as a sentinel hostname that must not.
+func TestScanPrivacyRealInternalHostnameStillFlaggedAlongsideSentinel(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "Fixture: foo.internal.test\nReal deploy target: jenkins-01.internal\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 1 || warnings[0].Rule != "internal_identifier" {
+		t.Fatalf("got %+v, want exactly one internal-identifier warning (the real host, not the sentinel)", warnings)
+	}
+}
+
 // TestBuildHookResultCapsAtFiftyDiagnosticsWithOverflowCaveat confirms a run
 // with more failing findings than clikit's 50-entry diagnostic cap truncates
 // errors to 50 and adds exactly one overflow-summarizing caveat, rather than
