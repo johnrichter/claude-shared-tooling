@@ -355,13 +355,11 @@ func TestScanPrivacyReservedSentinelHostNotFlaggedAsPrivateNetwork(t *testing.T)
 
 // TestScanPrivacyReservedSentinelHostnameNotFlaggedAsInternal confirms an
 // internal-hostname-shaped label immediately followed by an RFC 6761
-// reserved sentinel TLD (.test, .example, .localhost) is a documentation/
-// fixture hostname, not a real internal address, and so raises no warning.
-// These are the two real false-positive inputs from the corpus comparison
-// against the Python reference implementation, plus the third reserved TLD
-// for completeness.
+// reserved sentinel TLD is a documentation/fixture hostname, not a real
+// internal address, and so raises no warning. One case per reserved TLD, so
+// dropping any single one from the filter's alternation fails a subtest.
 func TestScanPrivacyReservedSentinelHostnameNotFlaggedAsInternal(t *testing.T) {
-	for _, sentinel := range []string{"foo.internal.test", "bar.internal.example", "baz.internal.localhost"} {
+	for _, sentinel := range []string{"foo.internal.test", "bar.internal.example", "baz.internal.localhost", "qux.internal.invalid"} {
 		t.Run(sentinel, func(t *testing.T) {
 			dir := t.TempDir()
 			writeFile(t, dir, "doc.md", "Deploy target: "+sentinel+"\n")
@@ -391,6 +389,41 @@ func TestScanPrivacyRealInternalHostnameStillFlaggedAlongsideSentinel(t *testing
 	}
 	if len(warnings) != 1 || warnings[0].Rule != "internal_identifier" {
 		t.Fatalf("got %+v, want exactly one internal-identifier warning (the real host, not the sentinel)", warnings)
+	}
+}
+
+// TestScanPrivacyDisguisedSentinelHostnameStillFlagged confirms the sentinel
+// filter fires only when the reserved label is the true end of the host: a
+// reserved label with more host content after it - whether disguised as a
+// further domain label or behind a bogus port - is not a real sentinel and
+// must still warn. The reserved example.{com,net,org} second-level domains
+// are the inverse case: they are genuine end-of-host sentinels and must not.
+func TestScanPrivacyDisguisedSentinelHostnameStillFlagged(t *testing.T) {
+	for _, tc := range []struct {
+		host string
+		want int
+	}{
+		{"host.corp.test.attacker.io", 1},      // further host label after the sentinel
+		{"host.corp.test:8080.attacker.io", 1}, // bogus port, then more host
+		{"host.corp.testing", 1},               // reserved label is only a prefix
+		{"host.corp.test:8080", 0},             // real port, true end of host
+		{"host.corp.example.com", 0},           // reserved second-level domain
+		{"host.corp.example.net", 0},
+		{"host.corp.example.org", 0},
+		{"host.corp.example.co", 1}, // not a reserved second-level domain
+	} {
+		t.Run(tc.host, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, dir, "doc.md", "Deploy target: "+tc.host+"\n")
+
+			_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+			if err != nil {
+				t.Fatalf("ScanPrivacy: %v", err)
+			}
+			if len(warnings) != tc.want {
+				t.Fatalf("got %d warnings %+v for %q, want %d", len(warnings), warnings, tc.host, tc.want)
+			}
+		})
 	}
 }
 
