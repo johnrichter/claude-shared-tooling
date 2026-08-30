@@ -163,11 +163,16 @@ const defaultAllowedEmailDomain = "example.com"
 // plus-digit label (bar@a1) out of the match: each is otherwise DNS-label-
 // shaped, and no real TLD is short, numeric, or mixed with digits. Only the
 // last label carries that requirement, since every label before it
-// legitimately may start with a digit (user@mail.3m.com). A punycode IDN TLD
-// still matches, as it starts with the letters "xn". Every label is also
-// capped at 63 characters, matching DNS's own label-length limit.
+// legitimately may start with a digit (user@mail.3m.com). Punycode in any
+// label before the last is unaffected (user@sub.xn--80ak6aa92e.com). An
+// address at a punycode TLD itself is still flagged, since that TLD's
+// leading "xn" satisfies the letters-only rule, but only the "xn" falls
+// inside the match, so emailDomain reports a truncated domain for one and
+// such an address cannot be allow-listed. Every label is also capped at 63
+// characters, matching DNS's own label-length limit - the last label
+// included, which is why its bound is {2,63} rather than {2,}.
 var employeeEmailPattern = regexp.MustCompile(
-	`(?i)\b[\w.+-]+@(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b`)
+	`(?i)\b[\w.+-]+@(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}\b`)
 
 // EmployeeEmailCheck configures the public tier's employee-email member of
 // the internal-identifier posture: any email-address-shaped string found in

@@ -371,18 +371,47 @@ func TestScanPrivacyEmployeeEmailShortAlphanumericTLDIsNotAnAddress(t *testing.T
 }
 
 // TestScanPrivacyEmployeeEmailOverlongLabelIsNotAnAddress confirms a domain
-// label past DNS's 63-character limit is not treated as an address.
+// label past DNS's 63-character limit is not treated as an address, in the
+// last label position as well as before it. The two positions are matched by
+// different halves of the pattern, so the last label needs its own case: an
+// unbounded TLD would otherwise let an arbitrarily long all-letter label
+// through while every earlier label stayed capped.
 func TestScanPrivacyEmployeeEmailOverlongLabelIsNotAnAddress(t *testing.T) {
-	dir := t.TempDir()
 	overlong := strings.Repeat("a", 64)
-	writeFile(t, dir, "doc.md", "contact jane@"+overlong+".com\n")
 
-	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
-	if err != nil {
-		t.Fatalf("ScanPrivacy: %v", err)
+	for _, domain := range []string{overlong + ".com", "sub." + overlong} {
+		dir := t.TempDir()
+		writeFile(t, dir, "doc.md", "contact jane@"+domain+"\n")
+
+		_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+		if err != nil {
+			t.Fatalf("ScanPrivacy(jane@%s): %v", domain, err)
+		}
+		if len(warnings) != 0 {
+			t.Fatalf("jane@%s: got %+v, want no warnings - a 64-character label exceeds DNS's 63-character limit", domain, warnings)
+		}
 	}
-	if len(warnings) != 0 {
-		t.Fatalf("got %+v, want no warnings - a 64-character label exceeds DNS's 63-character limit", warnings)
+}
+
+// TestScanPrivacyEmployeeEmailMaximumLengthLabelStillFlags is the accepting
+// half of the label-length boundary: 63 characters is legal DNS, so an
+// address there is still flagged - again in both label positions. Paired with
+// the 64-character rejection above, this is what proves the cap sits exactly
+// on DNS's limit rather than near it, and that both positions agree on it.
+func TestScanPrivacyEmployeeEmailMaximumLengthLabelStillFlags(t *testing.T) {
+	maxLabel := strings.Repeat("a", 63)
+
+	for _, domain := range []string{maxLabel + ".com", "sub." + maxLabel} {
+		dir := t.TempDir()
+		writeFile(t, dir, "doc.md", "contact jane@"+domain+"\n")
+
+		_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+		if err != nil {
+			t.Fatalf("ScanPrivacy(jane@%s): %v", domain, err)
+		}
+		if len(warnings) != 1 {
+			t.Fatalf("jane@%s: got %+v, want one warning - a 63-character label is within DNS's limit", domain, warnings)
+		}
 	}
 }
 
