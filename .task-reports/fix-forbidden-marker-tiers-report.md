@@ -52,12 +52,14 @@ go test ./... -count=1 -v → PASS, all tests including the 3 privacy-tier tests
 Built a git-tools binary from a scratch checkout (`/tmp`, `.git` stripped so it
 is not itself a repo checkout — the worktree-gate otherwise refuses writes into
 a "primary checkout") with a `go.mod` `replace` directive pointing at this
-fixed `go/githooks` module. git-tools' `internal/cli/scan.go` referenced a
-stale `githooks.EmployeeEmailCheck` field name (`AllowedDomains` vs. current
-`Domains` — an unrelated, already-landed rename on `main` that git-tools'
-checked-out revision predates); patched that one field reference in the
-scratch copy only, to unblock the build. This is not part of the deliverable
-and touches no tracked file.
+fixed `go/githooks` module. The build first failed on
+`githooks.EmployeeEmailCheck` in git-tools' `internal/cli/scan.go`, which
+names the field `AllowedDomains` while this branch's `go/githooks` still has
+the older `Domains`; patched that one field reference in the scratch copy
+only, to unblock the build. This is not part of the deliverable and touches no
+tracked file. The direction is the reverse of what it first looked like: it is
+this branch that predates `main`'s `AllowedDomains` rename (`6497aad`), and
+git-tools is already correct against `main` — see Hand-off notes.
 
 Copied the real production file, `workspace` repo's
 `.dat/feature-request-reporting/design.md` (frontmatter `privacy:confidential`,
@@ -102,9 +104,13 @@ worktree-gate) and ran the built binary's `scan privacy`:
 - Quality-reviewer: confirm no other module in this repo (or a downstream
   consumer like `git-tools`) hardcodes the old tier semantics or has its own
   copy of a similar tier-marker table that needs the same fix.
-- Unrelated finding surfaced during live verification, worth a separate
-  ticket: `git-tools`' checked-out `internal/cli/scan.go` still references
-  `githooks.EmployeeEmailCheck.AllowedDomains`, which no longer exists on
-  `go/githooks` `main` (renamed to `Domains` by the `invert-email-domain-check`
-  work) — `git-tools` will fail to build against a `go/githooks` bump past
-  that rename until its own `require` is repinned and its call site updated.
+- Merge note (not a defect, and not a `git-tools` bug): this branch forked
+  from `17185ad`, before `main`'s `6497aad` renamed
+  `EmployeeEmailCheck.Domains`/`Allowlist` to `AllowedDomains`. So this
+  branch carries the older `Domains` naming and `main` carries
+  `AllowedDomains`; `git-tools`' `internal/cli/scan.go:275` uses
+  `AllowedDomains` and is already correct against `main`. Nothing to repin or
+  ticket — landing this branch just has to carry `main`'s naming forward.
+  Confirmed by the quality reviewer: `git merge-tree main HEAD` merges clean
+  (the regex lines and the `EmployeeEmailCheck` region do not overlap), and
+  `git-tools` builds unpatched against the merged module.
