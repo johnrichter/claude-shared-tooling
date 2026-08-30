@@ -123,6 +123,24 @@ func TestScanSecretsStillFlagsRealShapedSlackToken(t *testing.T) {
 	}
 }
 
+// TestScanSecretsStillFlagsSlackPlaceholderWithAppendedChars pins a boundary
+// case specific to the Slack pattern, which the AWS tests cannot cover: the
+// Slack regex has no trailing \b, so a longer token that merely starts with
+// the placeholder must still be flagged. Greedy matching consumes the whole
+// token-character run, so the compared match is not the exempt string.
+func TestScanSecretsStillFlagsSlackPlaceholderWithAppendedChars(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "src/leak.txt", "slack_token = "+fixtureSlackDocToken+"DEADBEEF\n")
+
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	if err != nil {
+		t.Fatalf("ScanSecrets: %v", err)
+	}
+	if len(got) != 1 || got[0].Path != "src/leak.txt" || got[0].Rule != "slack_token" {
+		t.Fatalf("got %+v, want one slack_token finding at src/leak.txt", got)
+	}
+}
+
 // TestScanSecretsStillFlagsNearMissOfPlaceholder confirms the exemption is a
 // strict exact match, not fuzzy: a single-character near-miss of the
 // placeholder still triggers.

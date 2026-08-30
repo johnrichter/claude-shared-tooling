@@ -4,9 +4,9 @@
 Scans committed files for accidentally-committed plaintext secrets: private
 keys, cloud/API access-key ids, and chat/VCS-host tokens. Fails the build on
 any high-confidence match, scanned across the FULL text of EVERY non-skipped
-file. The only exemption is an exact match against a vendor's own permanently
-reserved documentation placeholder (AWS_EXAMPLE_ACCESS_KEY_IDS), which cannot
-be a real credential.
+file. The only exemption is an exact match against an enumerated documentation
+placeholder value that provably cannot be a real credential (see
+EXACT_EXEMPTIONS).
 
 Usage:
     python3 scripts/check_secrets.py            # scan repo root (exit 1 on any match)
@@ -26,15 +26,18 @@ SKIP_SUFFIX_DIRS = (".egg-info",)
 # Binary/asset extensions we never text-scan.
 BINARY_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".zip", ".gz", ".whl", ".pyc", ".ico", ".woff", ".woff2"}
 
-# The AWS-access-key-id label, named once because matches_pattern dispatches its
-# exemption on it: a rename here stays in sync with SECRET_PATTERNS by construction.
+# Labels carrying an exact-match exemption, each named once because
+# matches_pattern dispatches on it: a rename here stays in sync with
+# SECRET_PATTERNS by construction, where two string literals would silently
+# drift and disable the exemption.
 AWS_KEY_LABEL = "AWS access-key id"
+SLACK_TOKEN_LABEL = "Slack token"
 
 # High-confidence plaintext secret patterns.
 SECRET_PATTERNS = [
     (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "private key block"),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), AWS_KEY_LABEL),
-    (re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}"), "Slack token"),
+    (re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}"), SLACK_TOKEN_LABEL),
     (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}"), "GitHub token"),
 ]
 
@@ -48,16 +51,35 @@ SECRET_PATTERNS = [
 # yet and would otherwise refuse the merge over this source line.
 AWS_EXAMPLE_ACCESS_KEY_IDS = frozenset({"AKIAIOSFODNN7" + "EXAMPLE"})
 
+# The exact, enumerated Slack-token-shaped strings the Slack-token pattern must
+# never flag -- each one is a documented example format from a third-party
+# secret-detection tool's own rule-definition file, illustrating what that
+# tool's Slack-token rule matches, not a bot token any Slack workspace ever
+# issued. Mirrors slackExampleTokens in go/githooks/secrets.go; the two
+# implementations of this pattern set stay behaviorally identical.
+# Exempt by exact string only, never by substring or "contains EXAMPLE" heuristic.
+# Fragment-assembled for the same reason as AWS_EXAMPLE_ACCESS_KEY_IDS's.
+SLACK_EXAMPLE_TOKENS = frozenset({"xoxb-ab59" + "EXAMPLETOKEN"})
+
+# A pattern's label -> its exact-match exemption set. A label absent here has
+# no exact-match exemption at all. Mirrors exactExemptions in
+# go/githooks/secrets.go.
+EXACT_EXEMPTIONS = {
+    AWS_KEY_LABEL: AWS_EXAMPLE_ACCESS_KEY_IDS,
+    SLACK_TOKEN_LABEL: SLACK_EXAMPLE_TOKENS,
+}
+
 
 def matches_pattern(rx: re.Pattern[str], label: str, text: str) -> bool:
-    """Whether text holds a hit for rx not covered by an exact-match exemption.
+    """Whether text holds a hit for rx not covered by label's exact-match exemption.
 
     Every occurrence is checked; text is flagged only if at least one occurrence
-    is not exempt (see AWS_EXAMPLE_ACCESS_KEY_IDS).
+    is not exempt (see EXACT_EXEMPTIONS).
     """
-    if label != AWS_KEY_LABEL:
+    exempt = EXACT_EXEMPTIONS.get(label)
+    if exempt is None:
         return rx.search(text) is not None
-    return any(m.group(0) not in AWS_EXAMPLE_ACCESS_KEY_IDS for m in rx.finditer(text))
+    return any(m.group(0) not in exempt for m in rx.finditer(text))
 
 
 def iter_files(root: Path, self_path: Path):

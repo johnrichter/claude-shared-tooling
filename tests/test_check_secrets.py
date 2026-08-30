@@ -5,13 +5,16 @@ The checker is a standalone script (not part of the installed package), so it is
 by path via importlib. Tests scan throwaway temp trees, never the real repo.
 
 Trigger literals (secrets) are assembled from fragments so this test's OWN source does
-not trip the guardrail when it scans the repo tree.
+not trip the guardrail when it scans the repo tree. For Slack-shaped fixtures the split
+must fall within 10 characters of `xoxb-`: the Slack pattern is open-ended (`{10,}`, no
+trailing \b), so a longer first fragment matches on its own.
 
 Coverage (mirrors the guardrail's stated contract):
     1. Each high-confidence secret pattern FAILs.
     2. A clean tree PASSes.
     3. Binary/skip-dir files are never scanned, and a real leak elsewhere still is.
-    4. AWS's own reserved doc placeholder key is exempt, exactly and only it.
+    4. Each enumerated doc placeholder (AWS key, Slack token) is exempt,
+       exactly and only it.
 """
 from __future__ import annotations
 
@@ -31,6 +34,8 @@ _AWS_NEAR_MISS = "AKIAIOSFODNN7EXAMPL" + "F"        # one char off the placehold
 _KEY = "-----BEGIN " + "OPENSSH PRIVATE " + "KEY-----"
 _GHP = "ghp_" + "A" * 36                            # ghp_ + 36 alnum -> matches GitHub token pattern
 _SLACK = "xoxb-" + "1234567890" + "-abcdefghij"     # xoxb- + 10+ alnum/dash -> matches Slack token pattern
+_SLACK_DOC = "xoxb-ab59" + "EXAMPLETOKEN"           # a scanner tool's own documented example -> allowlisted
+_SLACK_NEAR_MISS = "xoxb-ab59" + "EXAMPLETOKEM"     # one char off the placeholder -> not allowlisted
 
 
 class ScanTests(unittest.TestCase):
@@ -86,6 +91,31 @@ class ScanTests(unittest.TestCase):
         # AND leaks a real-shaped key is still flagged.
         failures = self._scan({"mixed.md": f"example: {_AWS_DOC}\nreal: {_AWS}\n"})
         self.assertTrue(any("AWS" in f for f in failures), msg=str(failures))
+
+    def test_slack_doc_placeholder_token_is_exempt(self):
+        # A third-party scanner tool's own documented Slack-token example format
+        # cannot be a real bot token, so ingesting that tool's rule file must
+        # never fail the build. Mirrors the Go side's slackExampleTokens.
+        failures = self._scan({"docs/example.md": f"Example of matching format: `{_SLACK_DOC}`\n"})
+        self.assertEqual(failures, [])
+
+    def test_slack_placeholder_exemption_is_exact_not_fuzzy(self):
+        # A one-character near-miss of the placeholder is not allowlisted, and a
+        # real-shaped token in the same tree still fails: the exemption is exact.
+        failures = self._scan({
+            "near.txt": f"token={_SLACK_NEAR_MISS}\n",
+            "real.txt": f"token={_SLACK}\n",
+        })
+        self.assertTrue(any(f.startswith("near.txt") for f in failures), msg=str(failures))
+        self.assertTrue(any(f.startswith("real.txt") for f in failures), msg=str(failures))
+
+    def test_slack_placeholder_with_appended_token_chars_still_fails(self):
+        # Slack-specific boundary case the AWS tests cannot cover: the Slack
+        # regex has no trailing \b, so a longer token that merely STARTS with the
+        # placeholder must still fail. Greedy matching consumes the whole
+        # token-character run, so the match is not the exempt string.
+        failures = self._scan({"leak.txt": f"token={_SLACK_DOC}DEADBEEF\n"})
+        self.assertTrue(any("Slack" in f for f in failures), msg=str(failures))
 
     def test_binary_and_skip_dirs_ignored(self):
         failures = self._scan({
