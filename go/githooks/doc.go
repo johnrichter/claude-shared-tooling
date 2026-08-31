@@ -32,17 +32,22 @@
 // deletion) rather than reporting or erroring, and both return an error
 // (never panic) if a qualifying candidate's content cannot be read.
 //
-// ScanCredentials and ScanPIIFinancial add a data-sensitivity taxonomy on
-// top of the above (Finding.Category): "credentials", "pii", and
-// "financial". ScanCredentials shells out to a betterleaks binary (an
-// already-resolved, caller-provisioned absolute path - this package never
-// discovers or fetches it) over a compiled-in, vendored base config
-// (data/betterleaks-base.toml) that a caller's own additive rules/allowlist
-// entries can only ever extend, never weaken (see betterleaks.go's doc
-// comments for the full implicit-config bypass surfaces this closes and how
-// they were verified). ScanPIIFinancial is a small, fully hand-rolled,
-// betterleaks-independent pass for the two categories betterleaks itself
-// carries zero rules for: SSN ("pii"), and credit card/IBAN ("financial"),
-// both checksum-gated (see checksums.go) beyond a bare shape match. Every
-// other scanner in this package leaves Finding.Category empty.
+// ScanCredentials adds a data-sensitivity taxonomy on top of the above
+// (Finding.Category): "credentials", "pii", and "financial". It shells out
+// to a betterleaks binary (an already-resolved, caller-provisioned absolute
+// path - this package never discovers or fetches it) over a compiled-in,
+// vendored base config (data/betterleaks-base.toml) that a caller's own
+// additive rules/allowlist entries can only ever extend, never weaken (see
+// betterleaks.go's doc comments for the full implicit-config bypass surfaces
+// this closes and how they were verified). betterleaks is the single
+// scanning engine for every category, including SSN ("pii") and credit
+// card/IBAN ("financial"): this package's own additional rules for those,
+// appended to the pristine upstream betterleaks catalog at the end of
+// data/betterleaks-base.toml, gate a structural regex match on a real
+// checksum (Luhn mod-10 for a credit card, ISO 7064 mod-97 for an IBAN) or a
+// real issued-range check (SSN area/group/serial) via each rule's own Expr
+// `filter`, exactly like every hand-reviewed heuristic already in that file.
+// Category is recovered purely from the firing rule's id (see
+// categoryForRuleID); every other scanner in this package leaves
+// Finding.Category empty.
 package githooks

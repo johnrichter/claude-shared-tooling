@@ -287,13 +287,40 @@ func runBetterleaksBatch(betterleaksPath, root, configPath, ignoreDir string, ba
 	return findings, nil
 }
 
+// categoryForRuleID derives a Finding's Category from a betterleaks rule id:
+// every rule this package itself added to the compiled-in base config for
+// PII/financial detection carries a "pii-"/"financial-" prefix (see the
+// "Locally authored additions" block at the end of data/betterleaks-base.toml)
+// specifically so this function can recover the right category from the rule
+// id alone, with no separate id-to-category table to keep in sync. Every
+// other rule id - the full pristine upstream betterleaks catalog - has
+// neither prefix and categorizes as "credentials".
+//
+// That prefix convention is the entire coupling between this function and
+// that data file, and getting it wrong on either side mis-buckets a finding
+// silently rather than failing: the finding is still reported, just under the
+// wrong category, so nothing errors. The two sides are pinned against each
+// other by
+// TestCategoryForRuleIDMatchesBaseConfigPIIFinancialRules,
+// so that stays impossible to do by accident.
+func categoryForRuleID(ruleID string) string {
+	switch {
+	case strings.HasPrefix(ruleID, "pii-"):
+		return "pii"
+	case strings.HasPrefix(ruleID, "financial-"):
+		return "financial"
+	default:
+		return "credentials"
+	}
+}
+
 // ScanCredentials runs betterleaksPath - the caller's own resolved, already-
 // verified absolute path to a betterleaks binary; this function never
 // discovers or provisions that path itself, so any caller (git-tools, a CI
 // script, another repo entirely) can resolve it however fits its own
 // environment - over every file under root not excluded by opts.SkipRules,
-// returning one Finding (Category "credentials") per non-exempt secret
-// betterleaks reports.
+// returning one Finding (Category "credentials", "pii", or "financial" - see
+// categoryForRuleID) per non-exempt secret betterleaks reports.
 //
 // The compiled-in base config (see betterleaksBaseConfig) plus opts.
 // ExtraRules/opts.ExtraAllowlist (see buildBetterleaksConfig) are merged
@@ -369,7 +396,7 @@ func ScanCredentials(root, betterleaksPath string, opts BetterleaksOptions) ([]F
 			Path:     filepath.ToSlash(f.File),
 			Rule:     f.RuleID,
 			Detail:   f.Description,
-			Category: "credentials",
+			Category: categoryForRuleID(f.RuleID),
 		})
 	}
 	return findings, nil
