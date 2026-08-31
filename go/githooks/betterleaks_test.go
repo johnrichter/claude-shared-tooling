@@ -3,6 +3,7 @@ package githooks
 import (
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -544,5 +545,121 @@ func TestScanCredentialsBatchesAcrossMultipleInvocations(t *testing.T) {
 	}
 	if len(got) != len(values) {
 		t.Fatalf("got %d findings %+v, want %d (one per batched file)", len(got), got, len(values))
+	}
+}
+
+// ─── Base-config PII/financial rules (pii-ssn, financial-credit-card-number, financial-iban) ───
+//
+// Fragment-assembled trigger literals, matching this package's existing
+// convention (see piifinancial_test.go's own former fixtures). The card
+// numbers are the industry-standard, publicly documented Visa/Mastercard
+// test numbers - not a real credential - and the IBANs are real, publicly
+// documented example values used across banking documentation, so neither
+// trips this repo's own vendor-shaped-literal concern.
+var (
+	fixtureBaseConfigSSN            = "123-45-" + "6789"
+	fixtureBaseConfigInvalidAreaSSN = "000-45-" + "6789"
+	fixtureBaseConfigVisaTestCard   = "41111111111111" + "11"
+	fixtureBaseConfigLuhnInvalid    = "4111111111111" + "12"
+	fixtureBaseConfigUKIBAN         = "GB82WEST1234569876" + "5432"
+	fixtureBaseConfigInvalidIBAN    = "GB82WEST1234569876" + "5433"
+)
+
+// TestScanCredentialsBaseConfigPIIFinancialRulesFireAndCategorize confirms
+// this package's own additional base-config rules - not upstream betterleaks
+// content - detect every kind of finding the deleted hand-rolled
+// ScanPIIFinancial pass used to, tagged with the right Finding.Category via
+// categoryForRuleID, and that a checksum-invalid near miss (one digit off a
+// Luhn-valid card / mod-97-valid IBAN) is never flagged.
+func TestScanCredentialsBaseConfigPIIFinancialRulesFireAndCategorize(t *testing.T) {
+	bin := testBetterleaksBinary(t)
+	dir := t.TempDir()
+	writeFile(t, dir, "leak.txt", strings.Join([]string{
+		"ssn: " + fixtureBaseConfigSSN,
+		"card: " + fixtureBaseConfigVisaTestCard,
+		"iban: " + fixtureBaseConfigUKIBAN,
+	}, "\n")+"\n")
+	writeFile(t, dir, "near_miss.txt", strings.Join([]string{
+		"ssn: " + fixtureBaseConfigInvalidAreaSSN,
+		"card: " + fixtureBaseConfigLuhnInvalid,
+		"iban: " + fixtureBaseConfigInvalidIBAN,
+	}, "\n")+"\n")
+
+	got, err := ScanCredentials(dir, bin, BetterleaksOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanCredentials: %v", err)
+	}
+
+	categoryByRule := map[string]string{}
+	for _, f := range got {
+		if f.Path != "leak.txt" {
+			t.Errorf("got a finding outside leak.txt: %+v (near_miss.txt must never flag)", f)
+			continue
+		}
+		categoryByRule[f.Rule] = f.Category
+	}
+	if len(categoryByRule) != len(wantPIIFinancialCategories) {
+		t.Fatalf("got findings %+v, want exactly %+v", got, wantPIIFinancialCategories)
+	}
+	for rule, wantCategory := range wantPIIFinancialCategories {
+		if categoryByRule[rule] != wantCategory {
+			t.Errorf("rule %s: got category %q, want %q", rule, categoryByRule[rule], wantCategory)
+		}
+	}
+}
+
+// wantPIIFinancialCategories is the exact, complete set of base-config rule
+// ids categoryForRuleID is meant to bucket outside "credentials", and the
+// bucket each belongs in - the single expectation shared by the live-scan
+// test above and the static base-config cross-check below.
+var wantPIIFinancialCategories = map[string]string{
+	"pii-ssn":                      "pii",
+	"financial-credit-card-number": "financial",
+	"financial-iban":               "financial",
+}
+
+// baseConfigRuleIDPattern matches one rule-id declaration in the compiled-in
+// base config. Every one of that file's rule ids sits on its own
+// column-zero line in this exact form (both the pristine upstream catalog,
+// which is machine-generated, and the locally authored additions at the end
+// of the file); no allowlist or other nested table declares an `id` key this
+// way, so every match is a rule id and every rule id is matched.
+var baseConfigRuleIDPattern = regexp.MustCompile(`(?m)^id = "([^"]+)"$`)
+
+// TestCategoryForRuleIDMatchesBaseConfigPIIFinancialRules pins the one
+// coupling categoryForRuleID rests on: that the set of base-config rule ids
+// carrying a "pii-"/"financial-" prefix is exactly the set of locally
+// authored PII/financial rules, no more and no less. Neither side of that
+// coupling fails loudly on its own - a locally added rule id that omits the
+// prefix, or a future vendored-upstream catalog bump that introduces a rule
+// id which happens to carry one, silently mis-buckets its findings and
+// still reports them, so no scan ever errors and no other test goes red.
+// This test is that alarm, and it needs no betterleaks binary to sound it.
+func TestCategoryForRuleIDMatchesBaseConfigPIIFinancialRules(t *testing.T) {
+	matches := baseConfigRuleIDPattern.FindAllStringSubmatch(string(betterleaksBaseConfig), -1)
+	if len(matches) < 400 {
+		t.Fatalf("extracted %d rule ids from the base config, want the whole catalog (400+): the id-line form this test scans for no longer matches the file's own, so it would otherwise pass vacuously", len(matches))
+	}
+
+	got := map[string]string{}
+	for _, m := range matches {
+		if category := categoryForRuleID(m[1]); category != "credentials" {
+			got[m[1]] = category
+		}
+	}
+
+	for id, wantCategory := range wantPIIFinancialCategories {
+		switch got[id] {
+		case wantCategory:
+		case "":
+			t.Errorf("data/betterleaks-base.toml declares no rule id %q carrying a category prefix, so findings that should be %q would report as \"credentials\": was the id renamed, or its prefix dropped?", id, wantCategory)
+		default:
+			t.Errorf("base-config rule id %q categorizes as %q, want %q", id, got[id], wantCategory)
+		}
+	}
+	for id, category := range got {
+		if _, expected := wantPIIFinancialCategories[id]; !expected {
+			t.Errorf("base-config rule id %q categorizes as %q, but is not a known locally authored PII/financial rule: either add it to wantPIIFinancialCategories, or rename it so it stops claiming a category prefix", id, category)
+		}
 	}
 }

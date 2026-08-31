@@ -11013,3 +11013,98 @@ filter = '''
 entropy(finding["secret"]) < 3.3
 '''
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Locally authored additions — PII/financial rules (not upstream betterleaks
+# content; see this file's own header for why every hand-added rule lives
+# below the pristine-upstream marker rather than interleaved with it)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# These three rules replace the package's former hand-rolled Go scanner
+# (ScanPIIFinancial) so betterleaks is the single scanning engine for every
+# category, including "pii" and "financial" — not just "credentials". Their
+# rule ids carry the "pii-"/"financial-" prefix categoryForRuleID (see
+# betterleaks.go) keys off of, since every other rule in this file still maps
+# to "credentials".
+#
+# The checksum arithmetic each `filter` performs (Luhn mod-10, ISO 7064
+# mod-97) was proven against this vendored file's own exact expr-lang/expr
+# version (v1.17.8, confirmed via a live betterleaks v1.8.1 binary) before
+# being written here — `reduce`'s `#index` accumulator variable and string
+# slicing/indexOf are what make a digit-by-digit fold expressible at all.
+#
+# Deliberately NOT carried forward from the deleted Go implementation: an
+# exact-value allowlist exemption for the published Visa/Mastercard test card
+# numbers. Two reasons, neither of them this file's header rule about
+# credential-shaped literals (that rule's own stated rationale is repeatedly
+# tripping GitHub push protection, which does not scan for card numbers at
+# all — and the checksum rule below cannot be tested without a checksum-valid
+# card number in the test fixtures regardless). First, an exemption naming
+# specific payment brands is exactly the vendor-specific knowledge this
+# package is meant to carry none of. Second, the deleted list was arbitrary
+# and incomplete: it exempted two brands' published test numbers while the
+# same rule still flagged the equally published Amex and Discover ones, so
+# preserving it would preserve a partial fix, not a coherent policy.
+#
+# Consequence, stated plainly because it is a real behavior change: a file
+# containing a published test card number is now flagged where it previously
+# was not. Any caller with payment test fixtures adds the exemption back
+# through its own BetterleaksOptions.ExtraAllowlist (§3) — the layer where
+# repo-specific known-safe values belong, scoped to these rule ids — and can
+# cover every brand it actually uses rather than the two this package
+# happened to know about.
+
+# ──────────────────────────────────────────────────────────────────────────────
+# pii-ssn
+# ──────────────────────────────────────────────────────────────────────────────
+[[rules]]
+id = "pii-ssn"
+description = "Uncovered a possible US Social Security Number (SSN) whose area/group/serial fall within a range the SSA has ever actually issued."
+regex = '''\b\d{3}-\d{2}-\d{4}\b'''
+filter = '''
+finding["secret"] matches `^\d{3}-\d{2}-\d{4}$` ? (
+  let parts = split(finding["secret"], "-");
+  parts[0] == "000" || parts[0] == "666" || int(parts[0]) >= 900 || parts[1] == "00" || parts[2] == "0000"
+) : true
+'''
+
+# ──────────────────────────────────────────────────────────────────────────────
+# financial-credit-card-number
+# ──────────────────────────────────────────────────────────────────────────────
+[[rules]]
+id = "financial-credit-card-number"
+description = "Uncovered a possible credit card number (Visa, Mastercard, Amex, or Discover brand shape), Luhn (mod-10) checksum-valid."
+regex = '''\b(?:4\d{12}(?:\d{3})?|5[1-5]\d{14}|3[47]\d{13}|6(?:011|5\d{2})\d{12})\b'''
+filter = '''
+finding["secret"] matches `^\d+$` ? (
+  let digits = map(split(finding["secret"], ""), { int(#) });
+  let parity = len(digits) % 2;
+  let total = reduce(digits, {
+    let d = #index % 2 == parity ? # * 2 : #;
+    #acc + (d > 9 ? d - 9 : d)
+  }, 0);
+  total % 10 != 0
+) : true
+'''
+
+# ──────────────────────────────────────────────────────────────────────────────
+# financial-iban
+# ──────────────────────────────────────────────────────────────────────────────
+[[rules]]
+id = "financial-iban"
+description = "Uncovered a possible IBAN (International Bank Account Number), ISO 7064 mod-97 checksum-valid."
+regex = '''\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b'''
+filter = '''
+finding["secret"] matches `^[A-Z]{2}\d{2}[A-Z0-9]+$` ? (
+  let s = upper(finding["secret"]);
+  let rearranged = s[4:] + s[0:4];
+  let letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  let digitsStr = join(map(split(rearranged, ""), {
+    indexOf(letters, #) >= 0 ? string(indexOf(letters, #) + 10) : #
+  }), "");
+  let total = reduce(split(digitsStr, ""), {
+    (#acc * 10 + int(#)) % 97
+  }, 0);
+  total != 1
+) : true
+'''
