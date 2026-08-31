@@ -8,6 +8,14 @@ type Finding struct {
 	Path   string // slash-separated, relative to the scanned root
 	Rule   string // stable rule id, e.g. "aws_access_key_id", "raw_binary"
 	Detail string // one-line, human-readable description of the hit
+	// Category is this finding's data-sensitivity bucket: "credentials" for
+	// every ScanCredentials (betterleaks-sourced) finding, "pii" or
+	// "financial" for ScanPIIFinancial's hand-rolled SSN/credit-card/IBAN
+	// rules. Findings outside this taxonomy - ScanSecrets' own hand-rolled
+	// patterns, and ScanPrivacy's forbidden_marker/internal_identifier/
+	// not_public_pair findings - leave this empty; ScanPrivacy's own logic
+	// is otherwise unchanged by this field's addition.
+	Category string
 }
 
 // DefaultSkipRules is a reasonable starting ruleset for the skipRules
