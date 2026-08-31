@@ -31,4 +31,18 @@
 // Both rules skip a candidate that no longer exists on disk (e.g. a staged
 // deletion) rather than reporting or erroring, and both return an error
 // (never panic) if a qualifying candidate's content cannot be read.
+//
+// ScanCredentials and ScanPIIFinancial add a data-sensitivity taxonomy on
+// top of the above (Finding.Category): "credentials", "pii", and
+// "financial". ScanCredentials shells out to a betterleaks binary (an
+// already-resolved, caller-provisioned absolute path - this package never
+// discovers or fetches it) over a compiled-in, vendored base config
+// (data/betterleaks-base.toml) that a caller's own additive rules/allowlist
+// entries can only ever extend, never weaken (see betterleaks.go's doc
+// comments for the full implicit-config bypass surfaces this closes and how
+// they were verified). ScanPIIFinancial is a small, fully hand-rolled,
+// betterleaks-independent pass for the two categories betterleaks itself
+// carries zero rules for: SSN ("pii"), and credit card/IBAN ("financial"),
+// both checksum-gated (see checksums.go) beyond a bare shape match. Every
+// other scanner in this package leaves Finding.Category empty.
 package githooks
