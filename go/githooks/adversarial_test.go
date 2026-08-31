@@ -717,6 +717,40 @@ func TestBuildHookResultCapsAtFiftyDiagnosticsWithOverflowCaveat(t *testing.T) {
 	assertCanonicalJSON(t, result)
 }
 
+// TestBuildHookResultWarningsOnlyCapsAtFiftyDiagnosticsWithOverflowCaveat
+// confirms the warnings-only (non-strict, no failing findings) branch has
+// the same overflow protection as the failing/errors branch above: more
+// privacy warnings than clikit's 50-entry diagnostic cap must still build a
+// valid caveats-status record, truncated to 49 per-warning caveats plus
+// exactly one overflow-summarizing caveat (50 total), never the internal
+// "clikit: caveats has N members, max 50" build failure a naive per-warning
+// caveat with no cap at all would produce once a real tree crossed 50
+// privacy warnings.
+func TestBuildHookResultWarningsOnlyCapsAtFiftyDiagnosticsWithOverflowCaveat(t *testing.T) {
+	var warnings []Finding
+	for i := 0; i < 220; i++ {
+		warnings = append(warnings, Finding{Path: fmt.Sprintf("f%d.txt", i), Rule: "internal_identifier", Detail: "internal identifier - internal hostname"})
+	}
+	result, err := BuildHookResult([]string{"githooks", "scan"}, ScanOutcome{PrivacyWarnings: warnings})
+	if err != nil {
+		t.Fatalf("BuildHookResult: %v", err)
+	}
+	if result.ExitCode != 10 {
+		t.Fatalf("ExitCode = %d, want 10 (caveats)", result.ExitCode)
+	}
+	if len(result.Errors) != 0 {
+		t.Fatalf("got %d errors, want zero for a warnings-only, non-strict run", len(result.Errors))
+	}
+	if len(result.Caveats) != 50 {
+		t.Fatalf("got %d caveats, want exactly 50 (49 findings + one overflow summary)", len(result.Caveats))
+	}
+	first := result.Caveats[0]
+	if first.Code != "caveats.githooks.findings_truncated" {
+		t.Fatalf("got first caveat code %q, want the overflow-summary caveat first", first.Code)
+	}
+	assertCanonicalJSON(t, result)
+}
+
 // TestEmitHookResultFailureEnvelopeRoundTripsAndValidates confirms a
 // precondition_unmet envelope (the failure path, not just success) is valid
 // JSON, exposes the finding under errors, and round-trips through the

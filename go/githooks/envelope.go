@@ -50,8 +50,26 @@ func BuildHookResult(command []string, outcome ScanOutcome) (*clikit.Result, err
 		if len(outcome.PrivacyWarnings) == 0 {
 			return clikit.NewSuccess(command, data)
 		}
-		caveats := make([]clikit.Diagnostic, 0, len(outcome.PrivacyWarnings))
-		for _, f := range outcome.PrivacyWarnings {
+		// Every warning becomes its own caveat below, so the array itself is
+		// subject to clikit's 50-member cap - unlike the failing/errors
+		// branch further down, an overflow summary here has to share that
+		// same array rather than living in a separate one, so it reserves
+		// one of the 50 slots up front instead of being appended after a
+		// full-width truncation.
+		warnings := outcome.PrivacyWarnings
+		var caveats []clikit.Diagnostic
+		if len(warnings) > maxDiagnostics {
+			overflow := len(warnings) - (maxDiagnostics - 1)
+			warnings = warnings[:maxDiagnostics-1]
+			cv, err := clikit.NewCaveat("caveats.githooks.findings_truncated",
+				fmt.Sprintf("%d additional finding(s) omitted from caveats (record cap)", overflow),
+				clikit.Manual("re-run the underlying scanner directly for the full list"), nil)
+			if err != nil {
+				return nil, err
+			}
+			caveats = append(caveats, cv)
+		}
+		for _, f := range warnings {
 			cv, err := clikit.NewCaveat("caveats.privacy.internal_identifier", f.Detail,
 				clikit.Manual("confirm the flagged mention is not real internal leakage; rephrase or remove it if it is"),
 				map[string]any{"path": f.Path, "rule": f.Rule})
