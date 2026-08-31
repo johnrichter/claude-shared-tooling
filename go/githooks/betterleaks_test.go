@@ -1,8 +1,11 @@
 package githooks
 
 import (
+	"crypto/sha256"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -545,6 +548,182 @@ func TestScanCredentialsBatchesAcrossMultipleInvocations(t *testing.T) {
 	}
 	if len(got) != len(values) {
 		t.Fatalf("got %d findings %+v, want %d (one per batched file)", len(got), got, len(values))
+	}
+}
+
+// ─── CacheDir wiring ───
+
+// countCacheEntries counts the regular files under dir (BetterleaksCache's
+// two-level split), ignoring the subdirectories themselves.
+func countCacheEntries(t *testing.T, dir string) int {
+	t.Helper()
+	var n int
+	if err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			n++
+		}
+		return nil
+	}); err != nil {
+		if os.IsNotExist(err) {
+			return 0
+		}
+		t.Fatalf("walking cache dir %s: %v", dir, err)
+	}
+	return n
+}
+
+// TestScanCredentialsCacheDirEmptyIsByteIdenticalToUncached is the zero-
+// behavior-change proof: a first (cold) call with a fresh CacheDir produces
+// exactly the same findings as CacheDir left at its default "" - caching
+// changes performance, never correctness, on a first pass.
+func TestScanCredentialsCacheDirEmptyIsByteIdenticalToUncached(t *testing.T) {
+	bin := testBetterleaksBinary(t)
+
+	dirUncached := t.TempDir()
+	writeFile(t, dirUncached, "leak.txt", "token = "+fixtureHexValue+"\n")
+	writeFile(t, dirUncached, "clean.txt", "nothing sensitive here\n")
+
+	dirCached := t.TempDir()
+	writeFile(t, dirCached, "leak.txt", "token = "+fixtureHexValue+"\n")
+	writeFile(t, dirCached, "clean.txt", "nothing sensitive here\n")
+
+	opts := BetterleaksOptions{SkipRules: DefaultSkipRules, ExtraRules: []BetterleaksRule{testFixtureRule}}
+
+	uncached, err := ScanCredentials(dirUncached, bin, opts)
+	if err != nil {
+		t.Fatalf("ScanCredentials (uncached): %v", err)
+	}
+
+	cachedOpts := opts
+	cachedOpts.CacheDir = filepath.Join(t.TempDir(), "cache")
+	cached, err := ScanCredentials(dirCached, bin, cachedOpts)
+	if err != nil {
+		t.Fatalf("ScanCredentials (cold cache): %v", err)
+	}
+
+	if !reflect.DeepEqual(uncached, cached) {
+		t.Fatalf("cold-cache findings differ from uncached findings:\nuncached=%+v\ncached=%+v", uncached, cached)
+	}
+}
+
+// TestScanCredentialsCacheReusesUnchangedFilesAndDetectsChanges is the real
+// end-to-end proof: a cold scan misses for every file (one cache entry per
+// file); an identical second scan hits for every file (no new entries,
+// byte-identical findings); changing one file's content invalidates only
+// that file's entry.
+func TestScanCredentialsCacheReusesUnchangedFilesAndDetectsChanges(t *testing.T) {
+	bin := testBetterleaksBinary(t)
+	dir := t.TempDir()
+	writeFile(t, dir, "a.txt", "token = "+fixtureHexValue+"\n")
+	writeFile(t, dir, "b.txt", "nothing sensitive here\n")
+
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	opts := BetterleaksOptions{
+		SkipRules:  DefaultSkipRules,
+		ExtraRules: []BetterleaksRule{testFixtureRule},
+		CacheDir:   cacheDir,
+	}
+
+	cold, err := ScanCredentials(dir, bin, opts)
+	if err != nil {
+		t.Fatalf("ScanCredentials (cold): %v", err)
+	}
+	if n := countCacheEntries(t, cacheDir); n != 2 {
+		t.Fatalf("cache dir has %d entries after a cold scan of 2 files, want 2", n)
+	}
+
+	entryB := cacheEntryPathFor(t, opts, dir, "b.txt", bin)
+	infoBBefore, err := os.Stat(entryB)
+	if err != nil {
+		t.Fatalf("stat cache entry for b.txt: %v", err)
+	}
+
+	warm, err := ScanCredentials(dir, bin, opts)
+	if err != nil {
+		t.Fatalf("ScanCredentials (warm, unchanged): %v", err)
+	}
+	if !reflect.DeepEqual(cold, warm) {
+		t.Fatalf("warm-cache findings differ from cold-cache findings:\ncold=%+v\nwarm=%+v", cold, warm)
+	}
+	if n := countCacheEntries(t, cacheDir); n != 2 {
+		t.Fatalf("cache dir grew to %d entries on an unchanged second scan, want still 2", n)
+	}
+
+	writeFile(t, dir, "b.txt", "nothing sensitive here, but now different\n")
+	changed, err := ScanCredentials(dir, bin, opts)
+	if err != nil {
+		t.Fatalf("ScanCredentials (after changing b.txt): %v", err)
+	}
+	if len(changed) != 1 || changed[0].Path != "a.txt" {
+		t.Fatalf("got %+v, want only a.txt's finding after b.txt's content changed but stayed clean", changed)
+	}
+	if n := countCacheEntries(t, cacheDir); n != 3 {
+		t.Fatalf("cache dir has %d entries after changing one file's content, want 3 (the new entry added, the stale one untouched)", n)
+	}
+
+	infoBAfter, err := os.Stat(entryB)
+	if err != nil {
+		t.Fatalf("stat cache entry for b.txt's original content: %v", err)
+	}
+	if infoBAfter.ModTime() != infoBBefore.ModTime() {
+		t.Fatalf("b.txt's original cache entry was modified; want it untouched once its content changed to a new cache key")
+	}
+}
+
+// cacheEntryPathFor recomputes the on-disk cache entry path ScanCredentials
+// would use for rel, so a test can assert on that specific file without
+// depending on ScanCredentials' own internal ordering.
+func cacheEntryPathFor(t *testing.T, opts BetterleaksOptions, root, rel, betterleaksPath string) string {
+	t.Helper()
+	mergedConfig, err := buildBetterleaksConfig(opts.ExtraRules, opts.ExtraAllowlist)
+	if err != nil {
+		t.Fatalf("buildBetterleaksConfig: %v", err)
+	}
+	configHash := sha256.Sum256(mergedConfig)
+	binaryHash, err := hashFile(betterleaksPath)
+	if err != nil {
+		t.Fatalf("hashFile(betterleaksPath): %v", err)
+	}
+	fileHash, err := hashFile(filepath.Join(root, rel))
+	if err != nil {
+		t.Fatalf("hashFile(%s): %v", rel, err)
+	}
+	cache := BetterleaksCache{Dir: opts.CacheDir}
+	return cache.entryPath(cacheKey(fileHash, configHash, binaryHash))
+}
+
+// TestScanCredentialsCorruptCacheEntryStillScansSuccessfully confirms a
+// corrupt cache entry never aborts a scan: it costs that one file's cache
+// benefit (a re-scan), nothing more.
+func TestScanCredentialsCorruptCacheEntryStillScansSuccessfully(t *testing.T) {
+	bin := testBetterleaksBinary(t)
+	dir := t.TempDir()
+	writeFile(t, dir, "leak.txt", "token = "+fixtureHexValue+"\n")
+
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	opts := BetterleaksOptions{
+		SkipRules:  DefaultSkipRules,
+		ExtraRules: []BetterleaksRule{testFixtureRule},
+		CacheDir:   cacheDir,
+	}
+
+	entryPath := cacheEntryPathFor(t, opts, dir, "leak.txt", bin)
+	if err := os.MkdirAll(filepath.Dir(entryPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(entryPath, []byte("{not valid json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ScanCredentials(dir, bin, opts)
+	if err != nil {
+		t.Fatalf("ScanCredentials: %v", err)
+	}
+	if len(got) != 1 || got[0].Path != "leak.txt" || got[0].Rule != testFixtureRuleID {
+		t.Fatalf("got %+v, want the real finding despite a corrupt pre-existing cache entry", got)
 	}
 }
 

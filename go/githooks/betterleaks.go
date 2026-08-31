@@ -2,6 +2,7 @@ package githooks
 
 import (
 	"bytes"
+	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -70,6 +71,13 @@ type BetterleaksOptions struct {
 	// every base-config allowlist entry still applies, and nothing else is
 	// exempted.
 	ExtraAllowlist []BetterleaksAllowlistEntry
+	// CacheDir, if set, turns on the content-addressed scan cache (see
+	// BetterleaksCache): a file whose content, effective merged config, and
+	// scanning binary all match a previous scan reuses that scan's verdict
+	// instead of re-invoking betterleaks. Empty (the default) means no
+	// caching at all - every existing caller that never sets this field sees
+	// byte-for-byte the same behavior as before this option existed.
+	CacheDir string
 }
 
 // betterleaksBatchSize caps how many file paths ScanCredentials passes to a
@@ -314,6 +322,26 @@ func categoryForRuleID(ruleID string) string {
 	}
 }
 
+// betterleaksFindingsToFindings converts betterleaks' own raw finding shape
+// into this package's Finding, dropping a JWT-shaped finding that matches a
+// known jwt.io demo payload/secret (see isKnownDemoJWT) before it is ever
+// constructed.
+func betterleaksFindingsToFindings(raw []betterleaksFinding) []Finding {
+	var findings []Finding
+	for _, f := range raw {
+		if f.RuleID == "jwt" && isKnownDemoJWT(f.Secret) {
+			continue
+		}
+		findings = append(findings, Finding{
+			Path:     filepath.ToSlash(f.File),
+			Rule:     f.RuleID,
+			Detail:   f.Description,
+			Category: categoryForRuleID(f.RuleID),
+		})
+	}
+	return findings
+}
+
 // ScanCredentials runs betterleaksPath - the caller's own resolved, already-
 // verified absolute path to a betterleaks binary; this function never
 // discovers or provisions that path itself, so any caller (git-tools, a CI
@@ -337,6 +365,14 @@ func categoryForRuleID(ruleID string) string {
 // more than one betterleaks invocation, sharing the same merged config and
 // ignore directory; results are merged. A root with zero scannable files
 // returns (nil, nil) without invoking betterleaks at all.
+//
+// opts.CacheDir, if set, turns on BetterleaksCache: each candidate file whose
+// content, merged config, and betterleaksPath binary all match a prior
+// scan's cache entry reuses that verdict instead of a real invocation, and
+// every batch-scanned file (including one with zero findings) gets a fresh
+// cache entry written afterward. Findings are returned in the same,
+// candidate-order-derived arrangement regardless of how many were served
+// from cache versus freshly scanned.
 func ScanCredentials(root, betterleaksPath string, opts BetterleaksOptions) ([]Finding, error) {
 	if betterleaksPath == "" {
 		return nil, fmt.Errorf("githooks: ScanCredentials: betterleaksPath must not be empty")
@@ -377,27 +413,89 @@ func ScanCredentials(root, betterleaksPath string, opts BetterleaksOptions) ([]F
 	}
 	defer os.RemoveAll(ignoreDir)
 
+	cache := BetterleaksCache{Dir: opts.CacheDir}
+	if cache.Dir == "" {
+		var raw []betterleaksFinding
+		for i := 0; i < len(files); i += betterleaksBatchSize {
+			end := min(i+betterleaksBatchSize, len(files))
+			batchFindings, err := runBetterleaksBatch(betterleaksPath, root, configFile.Name(), ignoreDir, files[i:end])
+			if err != nil {
+				return nil, err
+			}
+			raw = append(raw, batchFindings...)
+		}
+		return betterleaksFindingsToFindings(raw), nil
+	}
+
+	// Caching is on: the merged config and the betterleaks binary are each
+	// hashed once here, not per file - see BetterleaksCache's own doc
+	// comment for why a composite key over these two plus each file's own
+	// content is exactly what a scan verdict depends on.
+	configHash := sha256.Sum256(mergedConfig)
+	binaryHash, err := hashFile(betterleaksPath)
+	if err != nil {
+		return nil, fmt.Errorf("githooks: hashing betterleaks binary %s: %w", betterleaksPath, err)
+	}
+
+	keyForFile := make(map[string]string, len(files))
+	cachedForFile := make(map[string][]cachedFinding, len(files))
+	var missFiles []string
+	for _, rel := range files {
+		fileHash, err := hashFile(filepath.Join(root, rel))
+		if err != nil {
+			return nil, fmt.Errorf("githooks: hashing %s: %w", rel, err)
+		}
+		key := cacheKey(fileHash, configHash, binaryHash)
+		keyForFile[rel] = key
+
+		if hit, ok, _ := cache.Get(key); ok {
+			cachedForFile[rel] = hit
+			continue
+		}
+		missFiles = append(missFiles, rel)
+	}
+
 	var raw []betterleaksFinding
-	for i := 0; i < len(files); i += betterleaksBatchSize {
-		end := min(i+betterleaksBatchSize, len(files))
-		batchFindings, err := runBetterleaksBatch(betterleaksPath, root, configFile.Name(), ignoreDir, files[i:end])
+	for i := 0; i < len(missFiles); i += betterleaksBatchSize {
+		end := min(i+betterleaksBatchSize, len(missFiles))
+		batchFindings, err := runBetterleaksBatch(betterleaksPath, root, configFile.Name(), ignoreDir, missFiles[i:end])
 		if err != nil {
 			return nil, err
 		}
 		raw = append(raw, batchFindings...)
 	}
 
-	var findings []Finding
-	for _, f := range raw {
-		if f.RuleID == "jwt" && isKnownDemoJWT(f.Secret) {
-			continue
+	// Group the batch's findings (post JWT-demo filtering, so a cache hit
+	// never needs to re-apply that filter) by file, seeding every scanned
+	// file - including one with zero findings - with an entry, so a clean
+	// file's cache write is an explicit empty array, not a silent omission.
+	missFindings := make(map[string][]cachedFinding, len(missFiles))
+	for _, rel := range missFiles {
+		missFindings[rel] = []cachedFinding{}
+	}
+	for _, f := range betterleaksFindingsToFindings(raw) {
+		missFindings[f.Path] = append(missFindings[f.Path], cachedFinding{RuleID: f.Rule, Description: f.Detail})
+	}
+	for _, rel := range missFiles {
+		if err := cache.Put(keyForFile[rel], missFindings[rel]); err != nil {
+			return nil, fmt.Errorf("githooks: writing betterleaks cache entry for %s: %w", rel, err)
 		}
-		findings = append(findings, Finding{
-			Path:     filepath.ToSlash(f.File),
-			Rule:     f.RuleID,
-			Detail:   f.Description,
-			Category: categoryForRuleID(f.RuleID),
-		})
+	}
+
+	var findings []Finding
+	for _, rel := range files {
+		cfs := cachedForFile[rel]
+		if cfs == nil {
+			cfs = missFindings[rel]
+		}
+		for _, cf := range cfs {
+			findings = append(findings, Finding{
+				Path:     rel,
+				Rule:     cf.RuleID,
+				Detail:   cf.Description,
+				Category: categoryForRuleID(cf.RuleID),
+			})
+		}
 	}
 	return findings, nil
 }

@@ -50,4 +50,14 @@
 // Category is recovered purely from the firing rule's id (see
 // categoryForRuleID); every other scanner in this package leaves
 // Finding.Category empty.
+//
+// ScanCredentials optionally caches its per-file verdicts (BetterleaksCache,
+// wired via BetterleaksOptions.CacheDir - empty by default, so caching never
+// changes any existing caller's behavior). A cache entry's key is
+// sha256(fileContentHash || mergedConfigHash || betterleaksBinaryHash): a
+// file's scan result is only ever reused while its own bytes, the effective
+// merged config, and the betterleaks binary itself all still match a prior
+// scan. Each entry stores only a rule id and description per finding - never
+// the matched secret value - exactly the same, already-non-sensitive fields
+// a returned Finding carries today.
 package githooks
