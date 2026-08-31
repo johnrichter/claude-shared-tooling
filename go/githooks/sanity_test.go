@@ -539,6 +539,69 @@ func TestBuildHookResultFailureIsWellFormed(t *testing.T) {
 	assertCanonicalJSON(t, result)
 }
 
+// TestBuildHookResultErrorContextCarriesCategory confirms a finding's
+// Category reaches its governing error's Context under the same "category"
+// key a downstream consumer already reads "path" and "rule" from - and that
+// a finding kind which never sets Category (forbidden_marker, here) still
+// yields the key with an empty value rather than a differently-shaped
+// Context, matching path/rule's own always-present convention.
+func TestBuildHookResultErrorContextCarriesCategory(t *testing.T) {
+	outcome := ScanOutcome{
+		Secrets: []Finding{{Path: "a.txt", Rule: "widget_pattern", Detail: "possible widget leak", Category: "widgets"}},
+		PrivacyFailures: []Finding{
+			{Path: "c.md", Rule: "forbidden_marker", Detail: `forbidden frontmatter marker "privacy: confidential"`},
+		},
+	}
+	result, err := BuildHookResult([]string{"githooks", "scan"}, outcome)
+	if err != nil {
+		t.Fatalf("BuildHookResult: %v", err)
+	}
+	if len(result.Errors) != 2 {
+		t.Fatalf("got %d errors, want one per finding (2)", len(result.Errors))
+	}
+	var sawWidget, sawMarker bool
+	for _, e := range result.Errors {
+		switch e.Context["path"] {
+		case "a.txt":
+			sawWidget = true
+			if e.Context["category"] != "widgets" {
+				t.Fatalf("Context[category] = %v, want %q", e.Context["category"], "widgets")
+			}
+		case "c.md":
+			sawMarker = true
+			if e.Context["category"] != "" {
+				t.Fatalf("Context[category] = %v, want empty for a finding with no Category", e.Context["category"])
+			}
+		}
+	}
+	if !sawWidget || !sawMarker {
+		t.Fatalf("got %+v, want both findings represented", result.Errors)
+	}
+	assertCanonicalJSON(t, result)
+}
+
+// TestBuildHookResultCaveatContextCarriesCategory mirrors
+// TestBuildHookResultErrorContextCarriesCategory for the caveats path built
+// from PrivacyWarnings: internal_identifier findings leave Category empty
+// today, and that must keep producing an empty (not absent, not error)
+// "category" entry alongside "path" and "rule".
+func TestBuildHookResultCaveatContextCarriesCategory(t *testing.T) {
+	outcome := ScanOutcome{
+		PrivacyWarnings: []Finding{{Path: "a.md", Rule: "internal_identifier", Detail: "internal identifier — internal hostname"}},
+	}
+	result, err := BuildHookResult([]string{"githooks", "scan"}, outcome)
+	if err != nil {
+		t.Fatalf("BuildHookResult: %v", err)
+	}
+	if len(result.Caveats) != 1 {
+		t.Fatalf("got %d caveats, want 1", len(result.Caveats))
+	}
+	if got := result.Caveats[0].Context["category"]; got != "" {
+		t.Fatalf("Context[category] = %v, want empty for an internal_identifier finding", got)
+	}
+	assertCanonicalJSON(t, result)
+}
+
 // TestBuildHookResultWarningsOnlyIsCaveats confirms privacy warnings alone
 // (no failures, non-strict) build a caveats record, not success or failure.
 func TestBuildHookResultWarningsOnlyIsCaveats(t *testing.T) {

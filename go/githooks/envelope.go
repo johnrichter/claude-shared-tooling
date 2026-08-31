@@ -30,6 +30,11 @@ type ScanOutcome struct {
 // privacy warnings were found (and Strict is false), precondition_unmet
 // (the commit precondition "no guardrail violation is staged" is not met)
 // with one governing diagnostic per finding otherwise.
+//
+// Every finding-derived diagnostic's context carries the same three keys -
+// path, rule, category - on both the caveats and the errors path. category
+// is the empty string for finding kinds outside Finding.Category's taxonomy,
+// never absent, so a consumer can read it unconditionally.
 func BuildHookResult(command []string, outcome ScanOutcome) (*clikit.Result, error) {
 	data := map[string]any{
 		"secrets_found":            len(outcome.Secrets),
@@ -72,7 +77,7 @@ func BuildHookResult(command []string, outcome ScanOutcome) (*clikit.Result, err
 		for _, f := range warnings {
 			cv, err := clikit.NewCaveat("caveats.privacy.internal_identifier", f.Detail,
 				clikit.Manual("confirm the flagged mention is not real internal leakage; rephrase or remove it if it is"),
-				map[string]any{"path": f.Path, "rule": f.Rule})
+				map[string]any{"path": f.Path, "rule": f.Rule, "category": f.Category})
 			if err != nil {
 				return nil, err
 			}
@@ -98,7 +103,7 @@ func BuildHookResult(command []string, outcome ScanOutcome) (*clikit.Result, err
 	for _, tf := range failing {
 		e, err := clikit.NewError(tf.code, tf.Detail,
 			clikit.Manual("remove the offending content from the flagged path and re-commit"),
-			map[string]any{"path": tf.Path, "rule": tf.Rule})
+			map[string]any{"path": tf.Path, "rule": tf.Rule, "category": tf.Category})
 		if err != nil {
 			return nil, err
 		}
