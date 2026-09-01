@@ -29,22 +29,42 @@ const labelAWSAccessKeyID = "aws_access_key_id"
 // construction.
 const labelSlackToken = "slack_token"
 
+// privateKeyGap matches whatever can sit between a PEM header and the key
+// body: whitespace (the line break plus any indentation, so a key embedded in
+// a nested YAML or JSON manifest still matches), a lone backslash, or a
+// backslash-escaped newline/carriage return as it appears literally inside a
+// JSON string value in a .jsonl corpus. Admitting only whitespace and
+// escape sequences is what keeps the gap from re-admitting the false
+// positives the body requirement exists to reject: any real intervening text
+// carries non-whitespace and ends the gap.
+const privateKeyGap = `(?:\\[rn]|[\s\\])*`
+
+// privateKeyEncryptionHeaders matches the optional headers a
+// passphrase-encrypted PEM key carries between its header line and its body,
+// as emitted for an encrypted traditional-format key. An encrypted key is
+// still leaked key material, so requiring body content must not silently
+// stop reporting one.
+const privateKeyEncryptionHeaders = `(?:(?:Proc-Type|DEK-Info)[^\n]*` + privateKeyGap + `)*`
+
+// privateKeyBody is the minimum body evidence that distinguishes a real key
+// block from a bare mention of one: at least 40 consecutive base64-alphabet
+// characters. A real key's own first body line clears this easily (PEM wraps
+// at 64 characters per line), while a keyword mention with no body, a short
+// filler placeholder, and a truncated example all fall short. The bound is
+// approximate at the edge, not exact: where the gap is an escape sequence,
+// its own trailing letter is itself a base64-alphabet character and can
+// count toward the run.
+const privateKeyBody = `[A-Za-z0-9+/=]{40,}`
+
 // secretPatterns are the closed, high-confidence signatures ScanSecrets looks
 // for: private-key blocks and cloud/VCS/chat-host token shapes distinctive
 // enough that a match is never mistaken for ordinary source text.
 //
-// private_key_block requires real body content after the header, not just
-// the header line by itself: [\s\\]{0,4} tolerates up to four characters of
-// line-break representation between the header and the body - a real
-// newline byte in an ordinary source file, or the two-character `\n` escape
-// sequence as it literally appears inside a JSON string value in a .jsonl
-// corpus - and [A-Za-z0-9+/=]{40,} then requires at least 40 consecutive
-// base64-alphabet characters. A real key's own first body line clears that
-// easily (PEM wraps at 64 characters per line); a bare keyword mention with
-// no body at all, a short filler placeholder, or a truncated example ending
-// in non-base64 characters all fall short and no longer match.
+// private_key_block requires real body content after the header, not the
+// header line by itself - see privateKeyGap, privateKeyEncryptionHeaders and
+// privateKeyBody for what each segment admits and why.
 var secretPatterns = []secretPattern{
-	{regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\\]{0,4}[A-Za-z0-9+/=]{40,}`), "private_key_block"},
+	{regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----` + privateKeyGap + privateKeyEncryptionHeaders + privateKeyBody), "private_key_block"},
 	{regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`), labelAWSAccessKeyID},
 	{regexp.MustCompile(`\bxox[baprs]-[0-9A-Za-z-]{10,}`), labelSlackToken},
 	{regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{36,}`), "github_token"},

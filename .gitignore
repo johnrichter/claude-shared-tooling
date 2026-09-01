@@ -134,6 +134,13 @@ tmp/
 # Local settings are machine-specific — never shared
 **/.claude/settings.local.json
 
+# Per-task agent reports written at the repo root (the loose-file counterpart
+# of .task-reports/ below) — operator evidence for one task, never repo
+# content, and never something a careless `git add -A` should sweep in.
+/REPORT-*
+/TEST-REPORT-*
+/QUALITY-REVIEW-*
+
 ###############################################################################
 # Language / build-output — repo-specific
 ###############################################################################
