@@ -24,7 +24,12 @@ var (
 	fixtureAWSNearMiss     = "AKIAIOSFODNN7EXAMPL" + "F"    // one char off the placeholder -> not allowlisted
 	fixtureSlackDocToken   = "xoxb-ab59" + "EXAMPLETOKEN"   // a scanner tool's own documented Slack-token example -> allowlisted
 	fixtureSlackRealShaped = "xoxb-ab59" + "REALLOOKINGABC" // same prefix and length class, not the placeholder -> not allowlisted
-	fixturePEMKey          = "-----BEGIN " + "RSA PRIVATE " + "KEY-----"
+	// fixturePEMKeyBody is a fabricated, structurally-real-shaped (never a
+	// real key) base64 run over 40 characters, matching a real PEM's first
+	// wrapped line - the body content the private_key_block pattern now
+	// requires immediately after the header.
+	fixturePEMKeyBody = "MIIEpAIBAAKCAQEA1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJ"
+	fixturePEMKey     = "-----BEGIN " + "RSA PRIVATE " + "KEY-----" + "\n" + fixturePEMKeyBody
 )
 
 func writeFile(t *testing.T, dir, rel, content string) string {
@@ -46,7 +51,7 @@ func TestScanSecretsDetectsPlantedSecret(t *testing.T) {
 	writeFile(t, dir, "src/leak.txt", "aws_key = "+fixtureAWSKey+"\n")
 	writeFile(t, dir, "src/clean.txt", "nothing to see here\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -63,7 +68,7 @@ func TestScanSecretsExemptsAWSDocPlaceholder(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "docs/example.md", "aws_access_key_id = "+fixtureAWSDocKey+"\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -80,7 +85,7 @@ func TestScanSecretsStillFlagsRealShapedKey(t *testing.T) {
 	fixtureOtherKey := "AKIA" + "JXNH2K3LQZABCDEF" // AKIA + 16 chars, not the placeholder
 	writeFile(t, dir, "src/leak.txt", "aws_key = "+fixtureOtherKey+"\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -97,7 +102,7 @@ func TestScanSecretsExemptsSlackDocPlaceholder(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "docs/example.md", "Example of matching format: `"+fixtureSlackDocToken+"`\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -114,7 +119,7 @@ func TestScanSecretsStillFlagsRealShapedSlackToken(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "src/leak.txt", "slack_token = "+fixtureSlackRealShaped+"\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -132,7 +137,7 @@ func TestScanSecretsStillFlagsSlackPlaceholderWithAppendedChars(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "src/leak.txt", "slack_token = "+fixtureSlackDocToken+"DEADBEEF\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -148,7 +153,7 @@ func TestScanSecretsStillFlagsNearMissOfPlaceholder(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "src/leak.txt", "aws_key = "+fixtureAWSNearMiss+"\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -167,7 +172,7 @@ func TestScanSecretsRealKeyAlongsidePlaceholderStillFlagged(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "docs/mixed.md", "example: "+fixtureAWSDocKey+"\nreal: "+fixtureAWSKey+"\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -192,7 +197,7 @@ func TestScanSecretsPlaceholderWithoutWordBoundaryIsNotExempted(t *testing.T) {
 	writeFile(t, dir, "src/a.txt", "x"+fixtureAWSDocKey+"x\n")
 	writeFile(t, dir, "src/b.txt", fixtureAWSDocKey+"123\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -208,7 +213,7 @@ func TestScanSecretsCleanFixturePasses(t *testing.T) {
 	writeFile(t, dir, "README.md", "# Project\n\nNo secrets here.\n")
 	writeFile(t, dir, "src/main.go", "package main\n\nfunc main() {}\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -223,7 +228,7 @@ func TestScanSecretsSkipsExcludedDirs(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "node_modules/pkg/secret.txt", fixturePEMKey+"\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -478,7 +483,7 @@ func TestScanSecretsHonorsSecretExemptRules(t *testing.T) {
 	writeFile(t, dir, "src/leak.md", fixtureAWSKey+"\n")
 	exempt := []fsx.Rule{{Pattern: "corpus/**", Class: SkipClass}}
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, exempt)
+	got, err := ScanSecrets(dir, DefaultSkipRules, exempt, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}

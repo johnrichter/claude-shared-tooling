@@ -52,7 +52,7 @@ func TestScanSecretsDetectsAllSignatureShapes(t *testing.T) {
 	writeFile(t, dir, "pem.txt", fixturePEMKey+"\n-----END RSA PRIVATE KEY-----\n")
 	writeFile(t, dir, "near-miss.txt", "ghp_tooshort\nAKIA123\n") // too short for either signature
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestScanSecretsSkipsNonUTF8Binary(t *testing.T) {
 	invalid := append([]byte(fixtureAWSKey), 0xff, 0xfe, 0x00)
 	writeFile(t, dir, "blob.dat", string(invalid))
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -849,7 +849,7 @@ func TestScanSecretsMalformedSecretExemptRuleErrors(t *testing.T) {
 	writeFile(t, dir, "leak.txt", fixtureAWSKey+"\n")
 	exempt := []fsx.Rule{{Pattern: malformedGlob, Class: SkipClass}}
 
-	_, err := ScanSecrets(dir, DefaultSkipRules, exempt)
+	_, err := ScanSecrets(dir, DefaultSkipRules, exempt, nil)
 	if err == nil {
 		t.Fatal("want an error for a malformed SecretExemptRules pattern, got nil")
 	}
@@ -883,7 +883,7 @@ func TestScanSecretsMalformedSkipRuleDoesNotError(t *testing.T) {
 	writeFile(t, dir, "leak.txt", fixtureAWSKey+"\n")
 	skip := []fsx.Rule{{Pattern: malformedGlob, Class: SkipClass}}
 
-	if _, err := ScanSecrets(dir, skip, nil); err != nil {
+	if _, err := ScanSecrets(dir, skip, nil, nil); err != nil {
 		t.Fatalf("ScanSecrets: want no error for a malformed SkipRules pattern (fail-closed-as-skip is accepted here), got %v", err)
 	}
 }

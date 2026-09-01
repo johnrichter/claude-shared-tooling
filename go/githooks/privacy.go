@@ -338,7 +338,7 @@ func ScanPrivacy(root string, tier PrivacyTier, opts PrivacyOptions) (failures, 
 
 		if fsx.ClassifyPath(rel, opts.SecretExemptRules).Class != SkipClass {
 			for _, p := range secretPatterns {
-				if matchesSecretPattern(p, text) {
+				if matchesSecretPattern(p, text, nil) {
 					failures = append(failures, Finding{Path: rel, Rule: p.label, Detail: "possible " + strings.ReplaceAll(p.label, "_", " ")})
 				}
 			}
