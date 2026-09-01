@@ -70,4 +70,12 @@
 // verified: an entry is believed on read, so whoever can write to CacheDir
 // can plant a zero-findings verdict and suppress a real finding. Treat
 // CacheDir as being inside the same trust boundary as the scan itself.
+//
+// ScanOutcome.WarnOnCategorizedSecrets is BuildHookResult's rollout lever for
+// the categorized (betterleaks-sourced) half of Secrets: the scan itself
+// always runs, unconditionally, no matter this flag's value - it only ever
+// changes a categorized finding's severity, failing (the default, false,
+// unchanged from before this flag existed) or caveats (true). A finding with
+// no Category (ScanSecrets' pre-existing hand-rolled patterns) always stays a
+// hard failure, regardless of this flag.
 package githooks

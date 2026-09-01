@@ -634,6 +634,128 @@ func TestBuildHookResultStrictEscalatesWarnings(t *testing.T) {
 	}
 }
 
+// mixedSecretsOutcome builds a ScanOutcome carrying one uncategorized (old-
+// style ScanSecrets) finding and one categorized (betterleaks-sourced)
+// finding, shared by the WarnOnCategorizedSecrets tests below.
+func mixedSecretsOutcome() ScanOutcome {
+	return ScanOutcome{
+		Secrets: []Finding{
+			{Path: "a.txt", Rule: "fixture-widget-rule", Detail: "possible widget leak"},
+			{Path: "b.txt", Rule: "fixture-widget-rule", Detail: "possible widget leak, categorized", Category: "credentials"},
+		},
+	}
+}
+
+// TestBuildHookResultWarnOnCategorizedSecretsDefaultUnchanged confirms the
+// unset (false) default produces a byte-identical result, categorized and
+// uncategorized findings both failing, to a call that never mentions the new
+// field at all - the compatibility guarantee this flag exists to protect.
+func TestBuildHookResultWarnOnCategorizedSecretsDefaultUnchanged(t *testing.T) {
+	command := []string{"githooks", "scan"}
+	outcome := mixedSecretsOutcome()
+
+	withoutField := outcome
+	withField := outcome
+	withField.WarnOnCategorizedSecrets = false
+
+	got, err := BuildHookResult(command, withoutField)
+	if err != nil {
+		t.Fatalf("BuildHookResult(false): %v", err)
+	}
+	want, err := BuildHookResult(command, withField)
+	if err != nil {
+		t.Fatalf("BuildHookResult(unset): %v", err)
+	}
+
+	gotJSON, err := got.MarshalCanonical()
+	if err != nil {
+		t.Fatalf("MarshalCanonical(got): %v", err)
+	}
+	wantJSON, err := want.MarshalCanonical()
+	if err != nil {
+		t.Fatalf("MarshalCanonical(want): %v", err)
+	}
+	if !bytes.Equal(gotJSON, wantJSON) {
+		t.Fatalf("unset default diverges from explicit false:\ngot:  %s\nwant: %s", gotJSON, wantJSON)
+	}
+	if got.ExitCode != 30 || len(got.Errors) != 2 || len(got.Caveats) != 0 {
+		t.Fatalf("got ExitCode=%d Errors=%d Caveats=%d, want a hard failure covering both findings",
+			got.ExitCode, len(got.Errors), len(got.Caveats))
+	}
+}
+
+// TestBuildHookResultWarnOnCategorizedSecretsSplitsByCategory confirms true
+// moves only the categorized finding to caveats, leaving the uncategorized
+// one failing, in a single mixed call.
+func TestBuildHookResultWarnOnCategorizedSecretsSplitsByCategory(t *testing.T) {
+	outcome := mixedSecretsOutcome()
+	outcome.WarnOnCategorizedSecrets = true
+
+	result, err := BuildHookResult([]string{"githooks", "scan"}, outcome)
+	if err != nil {
+		t.Fatalf("BuildHookResult: %v", err)
+	}
+	if result.ExitCode != 30 {
+		t.Fatalf("ExitCode = %d, want 30 (precondition_unmet, the uncategorized finding still fails)", result.ExitCode)
+	}
+	if len(result.Errors) != 1 || result.Errors[0].Context["path"] != "a.txt" {
+		t.Fatalf("got %+v, want exactly one error, at a.txt (the uncategorized finding)", result.Errors)
+	}
+	if len(result.Caveats) != 1 || result.Caveats[0].Context["path"] != "b.txt" {
+		t.Fatalf("got %+v, want exactly one caveat, at b.txt (the categorized finding)", result.Caveats)
+	}
+	if result.Caveats[0].Context["category"] != "credentials" {
+		t.Fatalf("Caveats[0].Context[category] = %v, want %q", result.Caveats[0].Context["category"], "credentials")
+	}
+	assertCanonicalJSON(t, result)
+}
+
+// TestBuildHookResultWarnOnCategorizedSecretsOnlyIsCaveats confirms an
+// outcome with only categorized findings, under WarnOnCategorizedSecrets, is
+// no longer a hard failure - it funnels through the same warnings-only
+// caveats path as PrivacyWarnings, not a bespoke status computation.
+func TestBuildHookResultWarnOnCategorizedSecretsOnlyIsCaveats(t *testing.T) {
+	outcome := ScanOutcome{
+		Secrets:                  []Finding{{Path: "b.txt", Rule: "fixture-widget-rule", Detail: "abstract-fixture-value", Category: "pii"}},
+		WarnOnCategorizedSecrets: true,
+	}
+	result, err := BuildHookResult([]string{"githooks", "scan"}, outcome)
+	if err != nil {
+		t.Fatalf("BuildHookResult: %v", err)
+	}
+	if result.ExitCode != 10 {
+		t.Fatalf("ExitCode = %d, want 10 (caveats), not a hard failure", result.ExitCode)
+	}
+	if len(result.Errors) != 0 || len(result.Caveats) != 1 {
+		t.Fatalf("got Errors=%d Caveats=%d, want zero errors and one caveat", len(result.Errors), len(result.Caveats))
+	}
+	assertCanonicalJSON(t, result)
+}
+
+// TestBuildHookResultStrictDoesNotReescalateCategorizedSecretWarning confirms
+// the documented no-interaction claim: Strict and WarnOnCategorizedSecrets
+// each govern their own finding class independently, so a categorized secret
+// demoted to a caveat is not re-escalated to failing merely because Strict is
+// also set (Strict only ever touches PrivacyWarnings).
+func TestBuildHookResultStrictDoesNotReescalateCategorizedSecretWarning(t *testing.T) {
+	outcome := ScanOutcome{
+		Secrets:                  []Finding{{Path: "b.txt", Rule: "fixture-widget-rule", Detail: "abstract-fixture-value", Category: "financial"}},
+		Strict:                   true,
+		WarnOnCategorizedSecrets: true,
+	}
+	result, err := BuildHookResult([]string{"githooks", "scan"}, outcome)
+	if err != nil {
+		t.Fatalf("BuildHookResult: %v", err)
+	}
+	if result.ExitCode != 10 {
+		t.Fatalf("ExitCode = %d, want 10 (caveats): Strict must not re-escalate a categorized secret warning", result.ExitCode)
+	}
+	if len(result.Errors) != 0 || len(result.Caveats) != 1 {
+		t.Fatalf("got Errors=%d Caveats=%d, want zero errors and one caveat", len(result.Errors), len(result.Caveats))
+	}
+	assertCanonicalJSON(t, result)
+}
+
 // TestEmitHookResultWritesCanonicalJSONLine confirms EmitHookResult writes
 // exactly one LF-terminated canonical JSON line and returns its exit code.
 func TestEmitHookResultWritesCanonicalJSONLine(t *testing.T) {
