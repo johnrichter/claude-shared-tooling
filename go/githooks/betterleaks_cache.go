@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -21,9 +22,12 @@ type cachedFinding struct {
 	Description string
 }
 
-// BetterleaksCache is a content-addressed, on-disk cache of betterleaks scan
-// verdicts, keyed so that a cached entry is reusable exactly as long as it
-// stays correct: see cacheKey. Dir is caller-supplied, never hardcoded or
+// BetterleaksCache is a hash-addressed, on-disk cache of betterleaks scan
+// verdicts, keyed on every input a verdict depends on - the file's path and
+// content, the merged config, the scanning binary - so that a cached entry
+// is reusable exactly as long as it stays correct: see cacheKey. An entry is
+// trusted on read and never evicted; see this package's doc comment for what
+// that means for a caller. Dir is caller-supplied, never hardcoded or
 // defaulted to a location this package invents on its own - matching
 // ScanCredentials' own betterleaksPath parameter, and BetterleaksOptions'
 // other fields, this package stays entirely provisioning-agnostic. An empty
@@ -32,27 +36,75 @@ type BetterleaksCache struct {
 	Dir string
 }
 
-// cacheKey derives a cache entry's key from the three things a scan verdict
-// actually depends on: the scanned file's own content, the effective merged
-// betterleaks config, and the betterleaks binary doing the scanning. Any
-// change to any of the three invalidates every key that depended on it,
-// simply by no longer producing the same hash - there is no separate
-// invalidation step to keep in sync.
-func cacheKey(fileHash, configHash, binaryHash [sha256.Size]byte) string {
+// cacheKey derives a cache entry's key from the four things a scan verdict
+// actually depends on: the scanned file's own path and content, the
+// effective merged betterleaks config, and the betterleaks binary doing the
+// scanning. Any change to any of the four invalidates every key that
+// depended on it, simply by no longer producing the same hash - there is no
+// separate invalidation step to keep in sync.
+//
+// The path is part of the key because a verdict genuinely depends on it:
+// betterleaks rules may carry a path condition, and the base config ships
+// several that do - including one (pkcs12-file) with no regex at all, which
+// fires on a matching filename whatever the content is. Key two files by
+// content alone and a "*.p12" file's finding is served from, or overwritten
+// by, an identically-worded ".txt" file's clean verdict - a silent false
+// negative in a secret scanner. Keying on the path costs nothing and closes
+// that entirely.
+//
+// Every input is a fixed-width 32-byte digest, so the 128-byte preimage
+// parses back into its four fields at fixed offsets: unlike a concatenation
+// of variable-length fields, there is no boundary ambiguity to exploit and
+// no separator needed. Length extension is not a concern either - this is a
+// lookup key over public inputs, not a MAC, and the preimage length is
+// constant.
+func cacheKey(pathHash, fileHash, configHash, binaryHash [sha256.Size]byte) string {
 	h := sha256.New()
+	h.Write(pathHash[:])
 	h.Write(fileHash[:])
 	h.Write(configHash[:])
 	h.Write(binaryHash[:])
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// hashFile returns the sha256 of path's content.
+// hashFile returns the sha256 of path's content, streamed rather than read
+// whole: this cache exists for repos carrying a very large file, and reading
+// several hundred megabytes into memory inside a git hook is a real
+// out-of-memory hazard for no speed gain - streaming measures marginally
+// faster and holds a constant few megabytes instead of the whole file.
 func hashFile(path string) ([sha256.Size]byte, error) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return [sha256.Size]byte{}, err
 	}
-	return sha256.Sum256(data), nil
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return [sha256.Size]byte{}, err
+	}
+	var sum [sha256.Size]byte
+	copy(sum[:], h.Sum(nil))
+	return sum, nil
+}
+
+// hashScannableFile returns the sha256 of path's content for cache-key use,
+// reporting ok=false - never an error - for anything that is not a plain,
+// readable regular file: a dangling symlink, a fifo or device node whose
+// read would block forever, a file that vanished between the walk and this
+// read. Such a path is simply not cacheable, and ScanCredentials still hands
+// it to betterleaks exactly as it would with caching off, so turning the
+// cache on can never fail a scan that would otherwise have completed.
+func hashScannableFile(path string) (sum [sha256.Size]byte, ok bool) {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return [sha256.Size]byte{}, false
+	}
+	sum, err = hashFile(path)
+	if err != nil {
+		return [sha256.Size]byte{}, false
+	}
+	return sum, true
 }
 
 // entryPath returns the on-disk path for key, splitting the first two hex

@@ -72,11 +72,17 @@ type BetterleaksOptions struct {
 	// exempted.
 	ExtraAllowlist []BetterleaksAllowlistEntry
 	// CacheDir, if set, turns on the content-addressed scan cache (see
-	// BetterleaksCache): a file whose content, effective merged config, and
-	// scanning binary all match a previous scan reuses that scan's verdict
-	// instead of re-invoking betterleaks. Empty (the default) means no
-	// caching at all - every existing caller that never sets this field sees
-	// byte-for-byte the same behavior as before this option existed.
+	// BetterleaksCache): a file whose path, content, effective merged
+	// config, and scanning binary all match a previous scan reuses that
+	// scan's verdict instead of re-invoking betterleaks. Empty (the default)
+	// means no caching at all - every existing caller that never sets this
+	// field sees byte-for-byte the same behavior as before this option
+	// existed.
+	//
+	// A cache entry is trusted on read, so write access to CacheDir is write
+	// access to this scanner's verdicts: anyone who can plant an entry can
+	// suppress a finding. Point this only at a directory under the same
+	// trust boundary as the scan itself.
 	CacheDir string
 }
 
@@ -367,12 +373,14 @@ func betterleaksFindingsToFindings(raw []betterleaksFinding) []Finding {
 // returns (nil, nil) without invoking betterleaks at all.
 //
 // opts.CacheDir, if set, turns on BetterleaksCache: each candidate file whose
-// content, merged config, and betterleaksPath binary all match a prior
+// path, content, merged config, and betterleaksPath binary all match a prior
 // scan's cache entry reuses that verdict instead of a real invocation, and
 // every batch-scanned file (including one with zero findings) gets a fresh
-// cache entry written afterward. Findings are returned in the same,
-// candidate-order-derived arrangement regardless of how many were served
-// from cache versus freshly scanned.
+// cache entry written afterward. A candidate that is not a plain regular
+// file is scanned but never cached (see hashScannableFile), so turning the
+// cache on never fails a scan that would otherwise have succeeded. Findings
+// are returned in the same, candidate-order-derived arrangement regardless
+// of how many were served from cache versus freshly scanned.
 func ScanCredentials(root, betterleaksPath string, opts BetterleaksOptions) ([]Finding, error) {
 	if betterleaksPath == "" {
 		return nil, fmt.Errorf("githooks: ScanCredentials: betterleaksPath must not be empty")
@@ -441,11 +449,14 @@ func ScanCredentials(root, betterleaksPath string, opts BetterleaksOptions) ([]F
 	cachedForFile := make(map[string][]cachedFinding, len(files))
 	var missFiles []string
 	for _, rel := range files {
-		fileHash, err := hashFile(filepath.Join(root, rel))
-		if err != nil {
-			return nil, fmt.Errorf("githooks: hashing %s: %w", rel, err)
+		fileHash, ok := hashScannableFile(filepath.Join(root, rel))
+		if !ok {
+			// Not hashable as a plain regular file, so it has no cache key
+			// (see hashScannableFile): scan it, and write nothing back.
+			missFiles = append(missFiles, rel)
+			continue
 		}
-		key := cacheKey(fileHash, configHash, binaryHash)
+		key := cacheKey(sha256.Sum256([]byte(rel)), fileHash, configHash, binaryHash)
 		keyForFile[rel] = key
 
 		if hit, ok, _ := cache.Get(key); ok {
@@ -477,7 +488,11 @@ func ScanCredentials(root, betterleaksPath string, opts BetterleaksOptions) ([]F
 		missFindings[f.Path] = append(missFindings[f.Path], cachedFinding{RuleID: f.Rule, Description: f.Detail})
 	}
 	for _, rel := range missFiles {
-		if err := cache.Put(keyForFile[rel], missFindings[rel]); err != nil {
+		key, cacheable := keyForFile[rel]
+		if !cacheable {
+			continue
+		}
+		if err := cache.Put(key, missFindings[rel]); err != nil {
 			return nil, fmt.Errorf("githooks: writing betterleaks cache entry for %s: %w", rel, err)
 		}
 	}

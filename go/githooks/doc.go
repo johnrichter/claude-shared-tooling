@@ -54,10 +54,20 @@
 // ScanCredentials optionally caches its per-file verdicts (BetterleaksCache,
 // wired via BetterleaksOptions.CacheDir - empty by default, so caching never
 // changes any existing caller's behavior). A cache entry's key is
-// sha256(fileContentHash || mergedConfigHash || betterleaksBinaryHash): a
-// file's scan result is only ever reused while its own bytes, the effective
-// merged config, and the betterleaks binary itself all still match a prior
-// scan. Each entry stores only a rule id and description per finding - never
-// the matched secret value - exactly the same, already-non-sensitive fields
-// a returned Finding carries today.
+// sha256(pathHash || fileContentHash || mergedConfigHash ||
+// betterleaksBinaryHash): a file's scan result is only ever reused while its
+// own path and bytes, the effective merged config, and the betterleaks
+// binary itself all still match a prior scan. The path belongs in the key
+// because some betterleaks rules fire on it (see cacheKey). Each entry
+// stores only a rule id and description per finding - never the matched
+// secret value - exactly the same, already-non-sensitive fields a returned
+// Finding carries today.
+//
+// Two limits are deliberate in this first version, not oversights. The cache
+// never evicts: a superseded entry is left in place rather than deleted, so
+// the directory grows with every distinct version of every file ever
+// scanned, and pruning it is the caller's job. And the cache is trusted, not
+// verified: an entry is believed on read, so whoever can write to CacheDir
+// can plant a zero-findings verdict and suppress a real finding. Treat
+// CacheDir as being inside the same trust boundary as the scan itself.
 package githooks

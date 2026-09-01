@@ -692,7 +692,7 @@ func cacheEntryPathFor(t *testing.T, opts BetterleaksOptions, root, rel, betterl
 		t.Fatalf("hashFile(%s): %v", rel, err)
 	}
 	cache := BetterleaksCache{Dir: opts.CacheDir}
-	return cache.entryPath(cacheKey(fileHash, configHash, binaryHash))
+	return cache.entryPath(cacheKey(sha256.Sum256([]byte(rel)), fileHash, configHash, binaryHash))
 }
 
 // TestScanCredentialsCorruptCacheEntryStillScansSuccessfully confirms a
@@ -840,5 +840,85 @@ func TestCategoryForRuleIDMatchesBaseConfigPIIFinancialRules(t *testing.T) {
 		if _, expected := wantPIIFinancialCategories[id]; !expected {
 			t.Errorf("base-config rule id %q categorizes as %q, but is not a known locally authored PII/financial rule: either add it to wantPIIFinancialCategories, or rename it so it stops claiming a category prefix", id, category)
 		}
+	}
+}
+
+// TestScanCredentialsCacheDistinguishesIdenticalContentByPath is the
+// regression for a false negative the cache would otherwise introduce.
+// pkcs12-file is a base-config rule with a path condition and no regex at
+// all: it fires on the filename, whatever the bytes are. Two files with
+// byte-identical content, one matching that path condition and one not, must
+// therefore get different verdicts - and so must not share a cache entry.
+// Keyed on content alone, the clean ".txt" verdict overwrites the ".p12"
+// finding and the next scan reports nothing.
+func TestScanCredentialsCacheDistinguishesIdenticalContentByPath(t *testing.T) {
+	bin := testBetterleaksBinary(t)
+	const body = "just some ordinary bytes, nothing notable at all\n"
+
+	dir := t.TempDir()
+	writeFile(t, dir, "bundle.p12", body)
+	writeFile(t, dir, "notes.txt", body)
+
+	opts := BetterleaksOptions{
+		SkipRules: DefaultSkipRules,
+		CacheDir:  filepath.Join(t.TempDir(), "cache"),
+	}
+
+	cold, err := ScanCredentials(dir, bin, opts)
+	if err != nil {
+		t.Fatalf("ScanCredentials (cold): %v", err)
+	}
+	if len(cold) != 1 || cold[0].Path != "bundle.p12" || cold[0].Rule != "pkcs12-file" {
+		t.Fatalf("got %+v on the cold scan, want exactly one pkcs12-file finding on bundle.p12", cold)
+	}
+	if n := countCacheEntries(t, opts.CacheDir); n != 2 {
+		t.Fatalf("cache holds %d entries for two identically-worded files at different paths, want 2", n)
+	}
+
+	warm, err := ScanCredentials(dir, bin, opts)
+	if err != nil {
+		t.Fatalf("ScanCredentials (warm): %v", err)
+	}
+	if !reflect.DeepEqual(cold, warm) {
+		t.Fatalf("warm scan lost a finding to a cross-path cache collision:\ncold=%+v\nwarm=%+v", cold, warm)
+	}
+}
+
+// TestScanCredentialsCacheSkipsNonRegularFiles pins that turning the cache on
+// never fails a scan the uncached path completes. A dangling symlink is
+// walked like any other non-directory entry, and it has no content to hash -
+// it must bypass the cache rather than abort the scan.
+func TestScanCredentialsCacheSkipsNonRegularFiles(t *testing.T) {
+	bin := testBetterleaksBinary(t)
+
+	plant := func(dir string) {
+		writeFile(t, dir, "plain.txt", "nothing here\n")
+		if err := os.Symlink(filepath.Join(dir, "absent.txt"), filepath.Join(dir, "dangling.txt")); err != nil {
+			t.Fatalf("creating dangling symlink: %v", err)
+		}
+	}
+	dirUncached := t.TempDir()
+	plant(dirUncached)
+	dirCached := t.TempDir()
+	plant(dirCached)
+
+	opts := BetterleaksOptions{SkipRules: DefaultSkipRules}
+	uncached, err := ScanCredentials(dirUncached, bin, opts)
+	if err != nil {
+		t.Fatalf("ScanCredentials (uncached) over a tree with a dangling symlink: %v", err)
+	}
+
+	cachedOpts := opts
+	cachedOpts.CacheDir = filepath.Join(t.TempDir(), "cache")
+	cached, err := ScanCredentials(dirCached, bin, cachedOpts)
+	if err != nil {
+		t.Fatalf("ScanCredentials (cached) failed on a tree the uncached scan handled fine: %v", err)
+	}
+	if !reflect.DeepEqual(uncached, cached) {
+		t.Fatalf("cached findings differ from uncached over a tree with a dangling symlink:\nuncached=%+v\ncached=%+v", uncached, cached)
+	}
+	// Only the one regular file is cacheable; the dangling symlink is not.
+	if n := countCacheEntries(t, cachedOpts.CacheDir); n != 1 {
+		t.Fatalf("cache holds %d entries, want 1 (only the regular file is cacheable)", n)
 	}
 }
