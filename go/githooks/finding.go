@@ -39,6 +39,14 @@ var DefaultSkipRules = []fsx.Rule{
 	{Pattern: "**/build/**", Class: SkipClass},
 	{Pattern: "**/target/**", Class: SkipClass},
 	{Pattern: "**/*.egg-info/**", Class: SkipClass},
+	// This package's own vendored betterleaks rule catalog. Every entry in
+	// it is a detection pattern for some credential shape, so scanning the
+	// catalog with the very ruleset it defines finds a hit in the catalog
+	// itself for rule after rule - there is no way to allowlist one value
+	// at a time out of a file whose entire job is to hold those values.
+	// Never a real secret: this file's content is fully vendored, reviewed
+	// upstream config, not user code or example data.
+	{Pattern: "**/go/githooks/data/betterleaks-base.toml", Class: SkipClass},
 }
 
 // binarySuffixes are asset extensions never text-scanned by ScanSecrets or
