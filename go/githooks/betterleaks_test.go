@@ -558,6 +558,7 @@ func TestScanCredentialsBatchesAcrossMultipleInvocations(t *testing.T) {
 // trips this repo's own vendor-shaped-literal concern.
 var (
 	fixtureBaseConfigSSN            = "123-45-" + "6789"
+	fixtureBaseConfigSSNOther       = "234-56-" + "7891"
 	fixtureBaseConfigInvalidAreaSSN = "000-45-" + "6789"
 	fixtureBaseConfigVisaTestCard   = "41111111111111" + "11"
 	fixtureBaseConfigLuhnInvalid    = "4111111111111" + "12"
@@ -605,6 +606,43 @@ func TestScanCredentialsBaseConfigPIIFinancialRulesFireAndCategorize(t *testing.
 		if categoryByRule[rule] != wantCategory {
 			t.Errorf("rule %s: got category %q, want %q", rule, categoryByRule[rule], wantCategory)
 		}
+	}
+}
+
+// TestScanCredentialsRuleScopedAllowlistSuppressesPIIFinancialFinding pins
+// the exact regression these three rules' filter bodies used to cause: a
+// betterleaks-appended allowlist `||` clause landing inside a bare ternary
+// filter's own condition, rather than wrapping the whole ternary, silently
+// suppressed nothing for a `targetRules`-scoped exemption (a global
+// rule_id "*" exemption still worked, which is what masked it). With both
+// values flagged and no exemption, a rule-scoped exemption for exactly one
+// of them must suppress that one and leave the other flagged.
+func TestScanCredentialsRuleScopedAllowlistSuppressesPIIFinancialFinding(t *testing.T) {
+	bin := testBetterleaksBinary(t)
+	dir := t.TempDir()
+	writeFile(t, dir, "leak.txt", strings.Join([]string{
+		"ssn: " + fixtureBaseConfigSSN,
+		"ssn: " + fixtureBaseConfigSSNOther,
+	}, "\n")+"\n")
+
+	baseline, err := ScanCredentials(dir, bin, BetterleaksOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanCredentials (baseline): %v", err)
+	}
+	if len(baseline) != 2 {
+		t.Fatalf("baseline: got %+v, want both SSNs flagged with no allowlist entry", baseline)
+	}
+
+	opts := BetterleaksOptions{
+		SkipRules:      DefaultSkipRules,
+		ExtraAllowlist: []BetterleaksAllowlistEntry{{RuleID: "pii-ssn", Value: fixtureBaseConfigSSN}},
+	}
+	got, err := ScanCredentials(dir, bin, opts)
+	if err != nil {
+		t.Fatalf("ScanCredentials: %v", err)
+	}
+	if len(got) != 1 || got[0].Rule != "pii-ssn" {
+		t.Fatalf("got %+v, want exactly one pii-ssn finding left (the un-exempted SSN)", got)
 	}
 }
 

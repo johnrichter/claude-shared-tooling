@@ -11050,9 +11050,27 @@ entropy(finding["secret"]) < 3.3
 # containing a published test card number is now flagged where it previously
 # was not. Any caller with payment test fixtures adds the exemption back
 # through its own BetterleaksOptions.ExtraAllowlist (§3) — the layer where
-# repo-specific known-safe values belong, scoped to these rule ids — and can
-# cover every brand it actually uses rather than the two this package
-# happened to know about.
+# repo-specific known-safe values belong, scoped to these rule ids, or
+# globally with rule_id "*" (both are confirmed equivalent for these three
+# rules — see the next paragraph) — and can cover every brand it actually
+# uses rather than the two this package happened to know about.
+#
+# Each of these three rules' own `filter` body is wrapped in one outer pair
+# of parentheses, unlike most upstream `filter`s in this file. Betterleaks
+# appends an allowlist's own suppression clause to a rule's filter with
+# `||`, and only wraps the rule's own filter in parentheses first if that
+# filter's text starts with `let` (confirmed against the live v1.8.1
+# binary's own composeFilters behavior) — these three don't start with
+# `let`, they start with a bare ternary, and `||` binds tighter than `?:` in
+# expr-lang. Left unparenthesized, an appended `|| allowlistClause` lands
+# inside the ternary's condition instead of wrapping the whole ternary, so a
+# `targetRules`-scoped allowlist entry against any of these three rules
+# silently suppressed nothing (confirmed live: 234-56-7891, exempted by a
+# pii-ssn-scoped allowlist entry, was still flagged). The outer parentheses
+# make the rule's own logic one self-contained unit regardless of what
+# betterleaks appends after it — confirmed live, post-fix, that the same
+# scoped entry now suppresses exactly the exempted value and nothing else,
+# and that a global rule_id "*" entry behaves identically.
 
 # ──────────────────────────────────────────────────────────────────────────────
 # pii-ssn
@@ -11062,10 +11080,10 @@ id = "pii-ssn"
 description = "Uncovered a possible US Social Security Number (SSN) whose area/group/serial fall within a range the SSA has ever actually issued."
 regex = '''\b\d{3}-\d{2}-\d{4}\b'''
 filter = '''
-finding["secret"] matches `^\d{3}-\d{2}-\d{4}$` ? (
+(finding["secret"] matches `^\d{3}-\d{2}-\d{4}$` ? (
   let parts = split(finding["secret"], "-");
   parts[0] == "000" || parts[0] == "666" || int(parts[0]) >= 900 || parts[1] == "00" || parts[2] == "0000"
-) : true
+) : true)
 '''
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -11076,7 +11094,7 @@ id = "financial-credit-card-number"
 description = "Uncovered a possible credit card number (Visa, Mastercard, Amex, or Discover brand shape), Luhn (mod-10) checksum-valid."
 regex = '''\b(?:4\d{12}(?:\d{3})?|5[1-5]\d{14}|3[47]\d{13}|6(?:011|5\d{2})\d{12})\b'''
 filter = '''
-finding["secret"] matches `^\d+$` ? (
+(finding["secret"] matches `^\d+$` ? (
   let digits = map(split(finding["secret"], ""), { int(#) });
   let parity = len(digits) % 2;
   let total = reduce(digits, {
@@ -11084,7 +11102,7 @@ finding["secret"] matches `^\d+$` ? (
     #acc + (d > 9 ? d - 9 : d)
   }, 0);
   total % 10 != 0
-) : true
+) : true)
 '''
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -11095,7 +11113,7 @@ id = "financial-iban"
 description = "Uncovered a possible IBAN (International Bank Account Number), ISO 7064 mod-97 checksum-valid."
 regex = '''\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b'''
 filter = '''
-finding["secret"] matches `^[A-Z]{2}\d{2}[A-Z0-9]+$` ? (
+(finding["secret"] matches `^[A-Z]{2}\d{2}[A-Z0-9]+$` ? (
   let s = upper(finding["secret"]);
   let rearranged = s[4:] + s[0:4];
   let letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -11106,5 +11124,5 @@ finding["secret"] matches `^[A-Z]{2}\d{2}[A-Z0-9]+$` ? (
     (#acc * 10 + int(#)) % 97
   }, 0);
   total != 1
-) : true
+) : true)
 '''
