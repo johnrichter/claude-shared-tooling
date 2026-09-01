@@ -1,3 +1,8 @@
 # This repository is public. Declaring the tier explicitly avoids
 # relying on git-tools' own default.
 privacy_tier: public
+
+secret_scan_extra_allowlist:
+  - rule_id: aws-amazon-bedrock-api-key-short-lived
+    value: "bedrock-api-key-YmVkcm9jay5hbWF6b25hd3MuY29t"
+
