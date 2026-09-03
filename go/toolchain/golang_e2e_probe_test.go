@@ -88,15 +88,30 @@ func writeGoProbeModule(t *testing.T, mainGo, testGo string) string {
 	return dir
 }
 
+// writeGoE2ETaggedFile writes body as the module's e2e-tagged test file
+// (main_e2e_test.go), matching the "e2e" build tag `go test -tags=e2e ./...`
+// filters on. Without a file carrying that tag, the e2e pair's own command
+// matches nothing and passes trivially — this is what actually exercises the
+// pair's real tool invocation against real e2e-shaped content. Callers write
+// this before addChromedpDep so `go mod tidy` sees a genuine chromedp import
+// to keep, rather than pruning an otherwise-unused requirement.
+func writeGoE2ETaggedFile(t *testing.T, dir, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "main_e2e_test.go"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write main_e2e_test.go: %v", err)
+	}
+}
+
 const probeCleanMain = "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(add(2, 3))\n}\n\nfunc add(a, b int) int {\n\treturn a + b\n}\n"
 const probeCleanTest = "package main\n\nimport \"testing\"\n\nfunc TestAdd(t *testing.T) {\n\tif add(2, 3) != 5 {\n\t\tt.Fatal(\"bad add\")\n\t}\n}\n"
 
-// probeE2ETag is an e2e-tagged test file that imports chromedp (satisfying
-// AC4: test e2e drives chromedp) but never opens a real browser session, so
-// it passes cleanly without a pinned Chrome binary in this probe's
-// environment. The real runE2ETest command (go test -tags=e2e ./...) is
-// exercised verbatim; only the fixture test body avoids depending on an
-// actual Chrome install, which this sandbox does not carry.
+// probeE2ETag is the clean e2e-tagged test file written via
+// writeGoE2ETaggedFile for the whole-matrix clean-input probes below: it
+// imports chromedp (satisfying AC4: test e2e drives chromedp) but never
+// opens a real browser session, so it passes cleanly without a pinned Chrome
+// binary in this probe's environment. The real runE2ETest command (go test
+// -tags=e2e ./...) is exercised verbatim; only the fixture test body avoids
+// depending on an actual Chrome install, which this sandbox does not carry.
 const probeE2ETag = "//go:build e2e\n\npackage main\n\nimport (\n\t\"testing\"\n\n\t\"github.com/chromedp/chromedp\"\n)\n\nfunc TestE2ESmoke(t *testing.T) {\n\t_ = chromedp.ByQuery\n}\n"
 
 // addChromedpDep runs `go mod tidy` inside dir so the e2e-tagged file's
@@ -141,6 +156,7 @@ var goMatrixPairs = []struct {
 func TestE2EGoAdapterSevenPairsCleanInputNeverExit80(t *testing.T) {
 	registerGoE2EAdapter(t)
 	dir := writeGoProbeModule(t, probeCleanMain, probeCleanTest)
+	writeGoE2ETaggedFile(t, dir, probeE2ETag)
 	addChromedpDep(t, dir)
 	requireTool(t, "go")
 	logDir := t.TempDir()
@@ -176,6 +192,7 @@ func TestE2EGoAdapterSevenPairsCleanInputNeverExit80(t *testing.T) {
 func TestE2EGoAdapterSevenPairsCleanInputExitZero(t *testing.T) {
 	registerGoE2EAdapter(t)
 	dir := writeGoProbeModule(t, probeCleanMain, probeCleanTest)
+	writeGoE2ETaggedFile(t, dir, probeE2ETag)
 	addChromedpDep(t, dir)
 	requireTool(t, "go")
 	logDir := t.TempDir()
@@ -221,14 +238,22 @@ func TestE2EGoAdapterVetAttributesCompilerAndStaticcheckSeparately(t *testing.T)
 		t.Fatalf("Run(vet) on a Printf-mismatch module = status %s (exit %d), want gate_negative (exit %d); diagnostics=%+v",
 			res.Status, res.Status.ExitCode(), ExitCheckFailed, res.Diagnostics)
 	}
-	foundGoVet := false
-	for _, d := range res.Diagnostics {
-		if containsSubstring(d.Message, goVet) {
-			foundGoVet = true
+	var found *Diagnostic
+	for i := range res.Diagnostics {
+		if containsSubstring(res.Diagnostics[i].Message, goVet) {
+			found = &res.Diagnostics[i]
 		}
 	}
-	if !foundGoVet {
-		t.Errorf("Run(vet) diagnostics = %+v, want at least one attributed to %q", res.Diagnostics, goVet)
+	if found == nil {
+		t.Fatalf("Run(vet) diagnostics = %+v, want at least one attributed to %q", res.Diagnostics, goVet)
+	}
+	// AC2: a diagnostic whose tool reports a position (go vet's own
+	// file:line:col: message shape) must name both the file and the line.
+	if found.File == "" {
+		t.Errorf("go vet diagnostic %+v names no file, want main.go", *found)
+	}
+	if found.Line == 0 {
+		t.Errorf("go vet diagnostic %+v carries no line, want the Printf call's line", *found)
 	}
 }
 
@@ -253,14 +278,22 @@ func TestE2EGoAdapterSecurityFindsGosecIssueAndAttributesIt(t *testing.T) {
 		t.Fatalf("Run(security) on an insecure-write module = status %s (exit %d), want gate_negative (exit %d); diagnostics=%+v",
 			res.Status, res.Status.ExitCode(), ExitCheckFailed, res.Diagnostics)
 	}
-	foundGosec := false
-	for _, d := range res.Diagnostics {
-		if containsSubstring(d.Message, gosec) && d.Code != "" {
-			foundGosec = true
+	var found *Diagnostic
+	for i := range res.Diagnostics {
+		if containsSubstring(res.Diagnostics[i].Message, gosec) && res.Diagnostics[i].Code != "" {
+			found = &res.Diagnostics[i]
 		}
 	}
-	if !foundGosec {
-		t.Errorf("Run(security) diagnostics = %+v, want at least one gosec finding with a rule code", res.Diagnostics)
+	if found == nil {
+		t.Fatalf("Run(security) diagnostics = %+v, want at least one gosec finding with a rule code", res.Diagnostics)
+	}
+	// AC2: gosec reports a file and line for every finding, so this one must
+	// name both.
+	if found.File == "" {
+		t.Errorf("gosec diagnostic %+v names no file, want main.go", *found)
+	}
+	if found.Line == 0 {
+		t.Errorf("gosec diagnostic %+v carries no line, want the WriteFile call's line", *found)
 	}
 }
 
@@ -285,14 +318,22 @@ func TestE2EGoAdapterUnitTestProducesCoverageAndJUnitInSameRun(t *testing.T) {
 		t.Fatalf("Run(test unit) on a failing test = status %s (exit %d), want gate_negative (exit %d); diagnostics=%+v",
 			res.Status, res.Status.ExitCode(), ExitCheckFailed, res.Diagnostics)
 	}
-	foundFailure := false
-	for _, d := range res.Diagnostics {
-		if containsSubstring(d.Message, "TestAdd") {
-			foundFailure = true
+	var found *Diagnostic
+	for i := range res.Diagnostics {
+		if containsSubstring(res.Diagnostics[i].Message, "TestAdd") {
+			found = &res.Diagnostics[i]
 		}
 	}
-	if !foundFailure {
-		t.Errorf("Run(test unit) diagnostics = %+v, want a diagnostic naming TestAdd", res.Diagnostics)
+	if found == nil {
+		t.Fatalf("Run(test unit) diagnostics = %+v, want a diagnostic naming TestAdd", res.Diagnostics)
+	}
+	// AC2: t.Fatal's own callsite log line names both the file and the line
+	// the failure happened at, so the diagnostic built from it must too.
+	if found.File != "main_test.go" {
+		t.Errorf("test-unit diagnostic %+v names file %q, want main_test.go", *found, found.File)
+	}
+	if found.Line == 0 {
+		t.Errorf("test-unit diagnostic %+v carries no line, want the t.Fatal callsite line", *found)
 	}
 	if _, err := os.Stat(filepath.Join(dir, goTestCoverageFile)); err != nil {
 		t.Errorf("coverage file %s not written: %v", goTestCoverageFile, err)
@@ -331,6 +372,147 @@ func TestE2EGoAdapterFormatAndLintAttributeGoimportsSeparately(t *testing.T) {
 	}
 }
 
+// TestE2EGoAdapterBuildFailureNamesFileAndLine runs build against a module
+// referencing an undefined identifier — a real compiler error — and asserts
+// the resulting diagnostic names the failing file and line, evidence that
+// Parse's build-error branch (golang.go) actually attributes a compile
+// failure rather than collapsing it into the generic subprocess fallback.
+func TestE2EGoAdapterBuildFailureNamesFileAndLine(t *testing.T) {
+	registerGoE2EAdapter(t)
+	requireTool(t, "go")
+	undefinedRef := "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(undefinedVar)\n}\n"
+	dir := writeGoProbeModule(t, undefinedRef, "")
+	logDir := t.TempDir()
+
+	res, err := Run(context.Background(), Target{Language: LanguageGo, Check: CheckBuild, Dir: dir}, Options{LogDir: logDir})
+	if err != nil {
+		t.Fatalf("Run(build): unexpected infrastructure error: %v", err)
+	}
+	if res.Status.ExitCode() != ExitCheckFailed {
+		t.Fatalf("Run(build) on an undefined-identifier module = status %s (exit %d), want gate_negative (exit %d); diagnostics=%+v",
+			res.Status, res.Status.ExitCode(), ExitCheckFailed, res.Diagnostics)
+	}
+	if len(res.Diagnostics) == 0 {
+		t.Fatalf("Run(build) diagnostics = %+v, want at least one parsed compiler error", res.Diagnostics)
+	}
+	found := res.Diagnostics[0]
+	if found.File == "" {
+		t.Errorf("build diagnostic %+v names no file, want main.go", found)
+	}
+	if found.Line == 0 {
+		t.Errorf("build diagnostic %+v carries no line, want the undefined reference's line", found)
+	}
+}
+
+// TestE2EGoAdapterFormatFailureNamesFileNoLine runs format against a module
+// with a deliberately misindented file and asserts the resulting diagnostic
+// names the file but carries no line — gofmt -l prints only the path of an
+// unformatted file, never a position, so recording Line as 0 here is the
+// tool reporting no position, not a placeholder (AC2).
+func TestE2EGoAdapterFormatFailureNamesFileNoLine(t *testing.T) {
+	registerGoE2EAdapter(t)
+	requireTool(t, "gofmt")
+	misindented := "package main\n\nimport \"fmt\"\n\nfunc main() {\n  fmt.Println(\"hi\")\n}\n"
+	dir := writeGoProbeModule(t, misindented, "")
+	logDir := t.TempDir()
+
+	res, err := Run(context.Background(), Target{Language: LanguageGo, Check: CheckFormat, Dir: dir}, Options{LogDir: logDir})
+	if err != nil {
+		t.Fatalf("Run(format): unexpected infrastructure error: %v", err)
+	}
+	if res.Status.ExitCode() != ExitCheckFailed {
+		t.Fatalf("Run(format) on a misindented module = status %s (exit %d), want gate_negative (exit %d); diagnostics=%+v",
+			res.Status, res.Status.ExitCode(), ExitCheckFailed, res.Diagnostics)
+	}
+	if len(res.Diagnostics) != 1 {
+		t.Fatalf("Run(format) diagnostics = %+v, want exactly one (main.go)", res.Diagnostics)
+	}
+	found := res.Diagnostics[0]
+	if found.File != "main.go" {
+		t.Errorf("format diagnostic %+v names file %q, want main.go", found, found.File)
+	}
+	if found.Line != 0 {
+		t.Errorf("format diagnostic %+v carries line %d, want 0 — gofmt -l reports no position", found, found.Line)
+	}
+}
+
+// TestE2EGoAdapterLintFailureNamesFileAndLine runs lint against a module
+// carrying an errcheck-triggering pattern (an unchecked os.Open error,
+// errcheck being one of golangci-lint's own default-enabled linters with no
+// project config present) and asserts the resulting diagnostic names the
+// failing file and line — AC2's file+line contract for golangci-lint's own
+// JSON report.
+func TestE2EGoAdapterLintFailureNamesFileAndLine(t *testing.T) {
+	registerGoE2EAdapter(t)
+	requireTool(t, "golangci-lint")
+	requireTool(t, "goimports")
+	uncheckedErr := "package main\n\nimport \"os\"\n\nfunc main() {\n\tos.Open(\"does-not-exist\")\n}\n"
+	dir := writeGoProbeModule(t, uncheckedErr, "")
+	logDir := t.TempDir()
+
+	res, err := Run(context.Background(), Target{Language: LanguageGo, Check: CheckLint, Dir: dir}, Options{LogDir: logDir})
+	if err != nil {
+		t.Fatalf("Run(lint): unexpected infrastructure error: %v", err)
+	}
+	if res.Status.ExitCode() != ExitCheckFailed {
+		t.Fatalf("Run(lint) on an unchecked-error module = status %s (exit %d), want gate_negative (exit %d); diagnostics=%+v",
+			res.Status, res.Status.ExitCode(), ExitCheckFailed, res.Diagnostics)
+	}
+	var found *Diagnostic
+	for i := range res.Diagnostics {
+		if res.Diagnostics[i].File != "" {
+			found = &res.Diagnostics[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("Run(lint) diagnostics = %+v, want at least one naming a file", res.Diagnostics)
+	}
+	if found.Line == 0 {
+		t.Errorf("lint diagnostic %+v carries no line, want golangci-lint's own Pos.Line", *found)
+	}
+}
+
+// TestE2EGoAdapterE2ETestFailureNamesFileAndLine runs the e2e-test pair
+// against a chromedp-importing e2e file whose own assertion is deliberately
+// wrong, and asserts the resulting diagnostic names the failing test's file
+// and line — AC2's file+line contract for the one pair among the seven whose
+// tool reports no compiler-style position, only testing's own callsite log
+// (parseGoTestFailures' goTestLogLineRE branch).
+func TestE2EGoAdapterE2ETestFailureNamesFileAndLine(t *testing.T) {
+	registerGoE2EAdapter(t)
+	requireTool(t, "go")
+	dir := writeGoProbeModule(t, probeCleanMain, "")
+	failingE2E := "//go:build e2e\n\npackage main\n\nimport (\n\t\"testing\"\n\n\t\"github.com/chromedp/chromedp\"\n)\n\nfunc TestE2ESmoke(t *testing.T) {\n\t_ = chromedp.ByQuery\n\tif add(2, 3) != 6 {\n\t\tt.Fatal(\"bad add\")\n\t}\n}\n"
+	writeGoE2ETaggedFile(t, dir, failingE2E)
+	addChromedpDep(t, dir)
+	logDir := t.TempDir()
+
+	res, err := Run(context.Background(), Target{Language: LanguageGo, Check: CheckTest, Test: TestE2E, Dir: dir}, Options{LogDir: logDir})
+	if err != nil {
+		t.Fatalf("Run(test e2e): unexpected infrastructure error: %v", err)
+	}
+	if res.Status.ExitCode() != ExitCheckFailed {
+		t.Fatalf("Run(test e2e) on a failing chromedp-importing test = status %s (exit %d), want gate_negative (exit %d); diagnostics=%+v",
+			res.Status, res.Status.ExitCode(), ExitCheckFailed, res.Diagnostics)
+	}
+	var found *Diagnostic
+	for i := range res.Diagnostics {
+		if containsSubstring(res.Diagnostics[i].Message, "TestE2ESmoke") {
+			found = &res.Diagnostics[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("Run(test e2e) diagnostics = %+v, want one naming TestE2ESmoke", res.Diagnostics)
+	}
+	if found.File != "main_e2e_test.go" {
+		t.Errorf("test-e2e diagnostic %+v names file %q, want main_e2e_test.go", *found, found.File)
+	}
+	if found.Line == 0 {
+		t.Errorf("test-e2e diagnostic %+v carries no line, want the t.Fatal callsite line", *found)
+	}
+}
+
 // containsSubstring avoids importing strings twice across this file and
 // golang.go's own use; kept local and trivial so this probe file has no
 // surprising indirect dependency.
@@ -346,4 +528,3 @@ func indexOf(haystack, needle string) int {
 	}
 	return -1
 }
-
