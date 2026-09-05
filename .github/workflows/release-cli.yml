@@ -1,35 +1,81 @@
 # Reusable SC-DISTRIBUTION release template — CLI track. Fleet-wide: any repository's
 # workflow may call this, not only ai-shared-lib's own modules (the original scope this file
 # shipped with). Calling it now requires two things a pre-mise caller of this file never
-# needed: a mise.toml + mise.lock at the caller's checked-out repo root pinning a Go toolchain,
-# and network access to fetch a pinned language-tools release — the cross-compile `go build`
-# this file used to run directly took neither dependency.
+# needed: a mise.toml + mise.lock at the caller's checked-out repo root pinning the selected
+# language's toolchain, and network access to fetch a pinned language-tools release — the
+# cross-compile `go build` this file used to run directly took neither dependency.
 #
-# A CLI releases as per-OS/arch archives + two checksum manifests, attached to the official
-# platform release; nothing is committed to git for this (dist-guard, tooling/dist-guard/,
-# enforces that). A plugin-side download-script fetches the pinned version and verifies the
-# checksum before ever running the binary.
+# `--language` selects the release track: go and rust each cross-compile every target into a
+# checksummed per-OS/arch archive; python builds a wheel plus a source distribution from the
+# project's own metadata. `binaries` names one or more "name:package" pairs, so one call
+# releases every binary a caller ships rather than one binary per call. Archives, wheels and
+# source distributions plus two checksum manifests are attached to the official platform
+# release; nothing is committed to git for this (dist-guard, tooling/dist-guard/, enforces
+# that). A plugin-side download-script fetches the pinned version and verifies the checksum
+# before ever running the binary.
 #
-# Shares ci-go.yml's canonical preamble (mise pin, verified fetch, platform resolution) up
-# through installing language-tools, byte-for-byte; a change to that shared shape belongs in
-# ci-go.yml first, then copies here. It departs from the CI templates' preamble in three ways,
-# all release-track, not check-track:
+# Shares ci-go.yml's canonical preamble (mise pin, verified fetch, platform resolution, PATH
+# activation) up through installing language-tools, byte-for-byte; a change to that shared
+# shape belongs in ci-go.yml first, then copies here. It departs from the CI templates'
+# preamble in three ways, all release-track, not check-track:
 #   - There are no five language-tools checks to skip, so there is no dry_run-gated
 #     "checks skipped" step; the build/archive/manifest work below runs the same whether
 #     dry_run is set or not (only the tag push and the platform release skip it — see below).
 #   - No extra_steps escape hatch and no cross-repository sibling-checkout input: those exist
 #     on the CI templates for a repository-specific check or a private-module resolution
 #     problem, neither of which a single release-build invocation has.
-#   - `language-tools release build` (cmd/release.go) itself cross-compiles every target in
-#     one call, so this template needs no per-cell build matrix — the four-cell GOOS/GOARCH
-#     fan-out that used to live in `strategy.matrix` now lives inside that one command.
+#   - `language-tools release build` (cmd/release.go) itself builds every binary and, for
+#     go/rust, every target in one call, so this template needs no per-cell build matrix — the
+#     four-cell GOOS/GOARCH fan-out that used to live in `strategy.matrix` now lives inside
+#     that one command.
 #
 # `language-tools release build` replaces the cross-compile `go build` this file ran directly
 # before — the one documented exception to the fleet's banned-check-command list, since a
-# release build is not a check. It writes archives plus checksums.txt (one row per archive)
-# and binary-checksums.txt (one row per extracted binary) straight to --output-dir; this
-# template publishes exactly those three kinds of asset, replacing the per-archive .sha256
-# files and the combined SHA256SUMS this file used to produce and publish instead.
+# release build is not a check. It writes archives (go/rust) or wheels and source
+# distributions (python) plus checksums.txt (one row per artifact) and, for go/rust,
+# binary-checksums.txt (one row per extracted binary) straight to --output-dir; this template
+# publishes exactly those artifact kinds, replacing the per-archive .sha256 files and the
+# combined SHA256SUMS this file used to produce and publish instead.
+#
+# The tag guard accepts a tag already at HEAD rather than rejecting every existing tag: a
+# tag-push trigger runs against a commit whose tag already exists by definition, and a re-run
+# of the dispatch path at the same commit finds the tag it pushed last time. Both are
+# idempotent, not a reuse of the tag at a different commit, which the guard still rejects.
+#
+# Inputs:
+#   version                          (string,  required)
+#     Tag to cut, e.g. lang/example-cli/v1.2.3 (SC-VERSIONING: tag prefix == module path).
+#     Read by both trigger paths — named on a workflow_dispatch call, or the pushed tag
+#     itself on a push: tags: call.
+#   module_dir                       (string,  required)
+#     Project root every binary's package/crate/project directory is resolved against,
+#     relative to the checked-out repo (language-tools' `--module-dir`).
+#   language                         (string,  required)
+#     Release track to build: go, rust or python (language-tools' `--language`). Selects the
+#     artifact shape: a checksummed per-target archive per binary for go/rust, or a wheel
+#     plus a source distribution per binary for python.
+#   binaries                         (string,  required)
+#     Newline-separated "name:package" entries (language-tools' `--binary`, repeated once per
+#     entry). One call releases every binary named here (OD15).
+#   runs_on                          (string,  default "ubuntu-24.04")
+#     Fully qualified GitHub-hosted runner label, published by actions/runner-images. Never
+#     a floating tag (ubuntu-latest, ...): those move under a caller without notice.
+#   mise_version                     (string,  default "2026.9.1")
+#     mise release this template installs. Latest stable patch, measured at write time
+#     per K11/S7 — never carried forward from an earlier revision. Every committed
+#     mise.lock must be re-locked with this version.
+#   dry_run                          (boolean, default false)
+#     true builds and verifies archives/wheels/source-distributions and both checksum
+#     manifests as usual; the tag push and the platform release are the only steps skipped.
+#
+# Secrets:
+#   GH_TOKEN                         (optional)
+#     Token with contents:write, for `gh release create`/`gh release upload`. Unused when
+#     dry_run is true.
+#
+# Caller contract: the caller supplies nothing but these inputs and, outside dry-run, a
+# GH_TOKEN secret — this template checks out the caller's own repo itself, once per job. It
+# pushes exactly one tag and publishes exactly one platform release per call.
 #
 # GitLab equivalent: the same `language-tools release build` call + a `release-cli create`
 # job attaching its output. No separate GitLab template exists in this repo; this file is the
@@ -45,11 +91,15 @@ on:
         required: true
         type: string
       module_dir:
-        description: "Go module directory the CLI builds from, relative to the checked-out repo (language-tools' --module-dir)."
+        description: "Project root every binary's package/crate/project directory is resolved against, relative to the checked-out repo (language-tools' --module-dir): a Go module directory, a Rust workspace directory, or a Python directory tree, depending on language."
         required: true
         type: string
-      binary_name:
-        description: "Output binary name (e.g. example-cli); built from module_dir's root package."
+      language:
+        description: "Release track to build: go, rust or python (language-tools' --language). Selects the artifact shape: a checksummed per-target archive per binary for go/rust, or a wheel plus a source distribution per binary for python."
+        required: true
+        type: string
+      binaries:
+        description: "One or more \"name:package\" entries (language-tools' --binary), one per line: name is the built binary's base name, package is a Go import path, a Rust crate directory, or a Python project directory, relative to module_dir. One call releases every binary named here."
         required: true
         type: string
       runs_on:
@@ -58,12 +108,12 @@ on:
         type: string
         default: "ubuntu-24.04"
       mise_version:
-        description: "mise release to install. Every committed mise.lock in the fleet was written by this version."
+        description: "mise release the template installs. Latest stable patch, measured at write time per K11/S7. Every committed mise.lock must be re-locked with this version."
         required: false
         type: string
-        default: "2026.8.10"
+        default: "2026.9.1"
       dry_run:
-        description: "Build archives, checksums.txt, and binary-checksums.txt as usual; skip the tag push and the platform release."
+        description: "Build archives/wheels/source-distributions, checksums.txt, and (go/rust) binary-checksums.txt as usual; skip the tag push and the platform release."
         required: false
         type: boolean
         default: false
@@ -74,7 +124,8 @@ on:
 
 env:
   # Named once; every step below reads this instead of restating the version.
-  LANGUAGE_TOOLS_VERSION: "2.1.0"
+  # OD69 sets 3.0.0 (major bump: SC5 makes --language a required selector on `release build`).
+  LANGUAGE_TOOLS_VERSION: "3.0.0"
 
 permissions:
   contents: write
@@ -142,8 +193,36 @@ jobs:
           install -m 0755 "${tmp}/${bin}" "${RUNNER_TEMP}/bin/mise"
           rm -rf "${tmp}"
 
+      # Trust every config mise will read before the first install reads one (OD65, F58).
+      # mise refuses an untrusted config outright; an untrusted file breaks the build.
+      - name: mise trust
+        run: mise trust --all
+
+      # Install the pinned toolchain, then put mise's shims ahead of the ambient runner
+      # version on PATH (F55, F56) — the build below must compile against the pin, not
+      # whatever the image ships. MISE_PYTHON_COMPILE=0 is harmless for go/rust; set on every
+      # template for one shared activation shape.
       - name: mise install --locked
-        run: mise install --locked
+        env:
+          MISE_PYTHON_COMPILE: "0"
+        run: |
+          set -euo pipefail
+          mise install --locked
+          mise bin-paths >> "$GITHUB_PATH"
+
+      # SC6: prove the pin, not the runner's ambient toolchain, for whichever track this
+      # call selected.
+      - name: Resolved toolchain version
+        env:
+          LANGUAGE: ${{ inputs.language }}
+        run: |
+          set -euo pipefail
+          case "${LANGUAGE}" in
+            go)     go version ;;
+            rust)   cargo --version ;;
+            python) uv --version && python3 --version ;;
+            *) echo "::error::unknown language ${LANGUAGE}, want one of go, rust, python"; exit 1 ;;
+          esac
 
       - name: Install language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} (verified fetch)
         env:
@@ -174,25 +253,26 @@ jobs:
           install -m 0755 "${tmp}/language-tools" "${RUNNER_TEMP}/bin/language-tools"
           rm -rf "${tmp}"
 
-      # Cross-compiles every default GOOS/GOARCH cell in one call and writes checksums.txt +
-      # binary-checksums.txt alongside the archives — no per-cell matrix, no separate archive
-      # or checksum step. Runs unconditionally: dry_run only gates the tag push and the
-      # platform release below, never this build. Inputs pass through env, never interpolated
-      # into the shell.
+      # Cross-compiles every binary (and, for go/rust, every default GOOS/GOARCH cell) in one
+      # call and writes checksums.txt plus, for go/rust, binary-checksums.txt alongside the
+      # artifacts — no per-cell matrix, no separate archive or checksum step. Runs
+      # unconditionally: dry_run only gates the tag push and the platform release below, never
+      # this build. Every input passes through env, never interpolated into the shell.
       - name: language-tools release build
         env:
+          LANGUAGE: ${{ inputs.language }}
           MODULE_DIR: ${{ inputs.module_dir }}
-          BINARY_NAME: ${{ inputs.binary_name }}
+          BINARIES: ${{ inputs.binaries }}
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           ver="${VERSION##*/}"
           ver="${ver#v}"
-          language-tools release build \
-            --module-dir "${MODULE_DIR}" \
-            --output-dir "${{ github.workspace }}/dist" \
-            --binary "${BINARY_NAME}:." \
-            --version "${ver}"
+          args=(--language "${LANGUAGE}" --module-dir "${MODULE_DIR}" --output-dir "${{ github.workspace }}/dist" --version "${ver}")
+          while IFS= read -r binary; do
+            [ -n "${binary}" ] && args+=(--binary "${binary}")
+          done <<< "${BINARIES}"
+          language-tools release build "${args[@]}"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -214,27 +294,74 @@ jobs:
           name: release-dist
           path: dist
 
-      - name: Reject an existing tag (no overwrite)
+      # A release tag is an annotated tag, which needs a tagger identity; the checkout above
+      # carries none. No caller identity is required or assumed — the fleet's own bot identity
+      # signs every release tag this template cuts.
+      - name: Configure git identity
         run: |
-          if git rev-parse "${{ inputs.version }}" >/dev/null 2>&1; then
-            echo "::error::tag ${{ inputs.version }} already exists - a release tag is never reused"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # Accepts a tag already at HEAD (a tag-push trigger runs against a commit whose tag
+      # already exists by definition, and a re-run of the dispatch path at the same commit
+      # finds the tag it pushed last time — both idempotent); rejects a tag that exists
+      # anywhere else, since a release tag is never moved.
+      - name: Check for an existing tag
+        id: tagcheck
+        env:
+          TAG: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          tag_commit="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          head_commit="$(git rev-parse HEAD)"
+          if [ "${tag_commit}" != "${head_commit}" ]; then
+            echo "::error::tag ${TAG} already exists at ${tag_commit}, not HEAD (${head_commit}) - a release tag is never moved"
             exit 1
           fi
+          echo "tag ${TAG} already exists at HEAD (${head_commit}) - reusing it rather than re-tagging"
+          echo "exists=true" >> "$GITHUB_OUTPUT"
 
       - name: Tag HEAD
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && steps.tagcheck.outputs.exists == 'false' }}
+        env:
+          TAG: ${{ inputs.version }}
         run: |
-          git tag -a "${{ inputs.version }}" -m "${{ inputs.version }}"
-          git push origin "${{ inputs.version }}"
+          set -euo pipefail
+          git tag -a "${TAG}" -m "${TAG}"
+          git push origin "${TAG}"
 
-      - name: Publish the official release (archives + checksums.txt + binary-checksums.txt)
+      # Idempotent: creates the release the first time, uploads over it (--clobber) on a
+      # re-run that finds the release already there. nullglob plus a plain existence check
+      # keeps this generic across tracks — go/rust ship .tar.gz archives and
+      # binary-checksums.txt, python ships .whl and .tar.gz (its source distribution) and no
+      # binary-checksums.txt (SC-DISTRIBUTION: neither is ever committed to the repo).
+      - name: Publish the official release
         if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: gh release create "${{ inputs.version }}" --title "${{ inputs.version }}" --generate-notes dist/*.tar.gz dist/checksums.txt dist/binary-checksums.txt
+          TAG: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(dist/*.tar.gz dist/*.whl dist/checksums.txt)
+          if [ -f dist/binary-checksums.txt ]; then
+            assets+=(dist/binary-checksums.txt)
+          fi
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" "${assets[@]}" --clobber
+          else
+            gh release create "${TAG}" --title "${TAG}" --generate-notes "${assets[@]}"
+          fi
 
       - name: Dry-run summary
         if: ${{ inputs.dry_run }}
+        env:
+          TAG: ${{ inputs.version }}
         run: |
-          echo "dry-run: built archives, checksums.txt, and binary-checksums.txt for ${{ inputs.version }}, tag push and platform release skipped"
+          set -euo pipefail
+          echo "dry-run: built artifacts and checksum manifests for ${TAG}, tag push and platform release skipped"
           ls -la dist

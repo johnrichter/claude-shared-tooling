@@ -41,7 +41,8 @@ jobs:
     with:
       version: dry-run-cli-${{ github.run_id }}
       module_dir: go/agentcontract/cmd/agentcontract-lint
-      binary_name: agentcontract-lint
+      language: go
+      binaries: "agentcontract-lint:."
       dry_run: true
 
   dry-run-library-release:
