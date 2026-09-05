@@ -52,10 +52,9 @@ time = { version = "0.3.53", default-features = false, features = ["parsing", "m
 # to facetquery's generic `FacetSource` trait, so a caller parses a
 # `facetquery@1` query once and matches it against many frontmatter files.
 # Git-tag dependency per SC-VERSIONING (never a relative `path`, which can't
-# survive facetquery being tagged and consumed independently of frontmatter);
-# `rust/Cargo.toml`'s `[patch]` table redirects this to the in-tree workspace
-# member so a local checkout builds against the crate it ships alongside,
-# not a network fetch.
+# survive facetquery being tagged and consumed independently of frontmatter):
+# the workspace resolves it from the published `rust/facetquery/v0.1.0` tag,
+# so a clean clone with no sibling checkout builds without a path redirect.
 facetquery = { git = "https://github.com/johnrichter/claude-shared-tooling.git", tag = "rust/facetquery/v0.1.0" }
 
 [dev-dependencies]

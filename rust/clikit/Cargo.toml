@@ -22,10 +22,9 @@ serde_jcs = "0.2.0"
 # delegation") is built directly on logkit's `Logger`/`Level`/`Record`
 # types. Git-tag dependency per SC-VERSIONING (never a relative `path`,
 # which can't survive logkit being tagged and consumed independently of
-# clikit); `rust/Cargo.toml`'s `[patch]` table redirects this to the
-# in-tree workspace member so a local checkout builds against the crate it
-# ships alongside, not a network fetch of a tag that may not exist yet for
-# the commit in hand.
+# clikit): the workspace resolves it from the published
+# `rust/logkit/v0.1.0` tag, so a clean clone with no sibling checkout builds
+# without a path redirect.
 logkit = { git = "https://github.com/johnrichter/claude-shared-tooling.git", tag = "rust/logkit/v0.1.0" }
 
 [dev-dependencies]

@@ -44,7 +44,7 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 name = "clikit"
 version = "0.1.0"
 dependencies = [
- "logkit",
+ "logkit 0.1.0 (git+https://github.com/johnrichter/claude-shared-tooling.git?tag=rust%2Flogkit%2Fv0.1.0)",
  "serde",
  "serde_jcs",
  "serde_json",
@@ -74,6 +74,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "facetquery"
+version = "0.1.0"
+source = "git+https://github.com/johnrichter/claude-shared-tooling.git?tag=rust%2Ffacetquery%2Fv0.1.0#283159516ab5d99cc3d62f7b975338325eddf255"
+dependencies = [
+ "time",
+ "winnow",
+]
+
+[[package]]
 name = "foldhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -83,7 +92,7 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 name = "frontmatter"
 version = "0.1.0"
 dependencies = [
- "facetquery",
+ "facetquery 0.1.0 (git+https://github.com/johnrichter/claude-shared-tooling.git?tag=rust%2Ffacetquery%2Fv0.1.0)",
  "globset",
  "regex",
  "serde",
@@ -144,6 +153,19 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 [[package]]
 name = "logkit"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_jcs",
+ "serde_json",
+ "time",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "logkit"
+version = "0.1.0"
+source = "git+https://github.com/johnrichter/claude-shared-tooling.git?tag=rust%2Flogkit%2Fv0.1.0#283159516ab5d99cc3d62f7b975338325eddf255"
 dependencies = [
  "serde",
  "serde_jcs",
