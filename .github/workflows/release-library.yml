@@ -132,8 +132,19 @@ jobs:
           install -m 0755 "${tmp}/${bin}" "${RUNNER_TEMP}/bin/mise"
           rm -rf "${tmp}"
 
+      # Trust every config mise will read before the first install reads one (OD65, F58).
+      # mise refuses an untrusted config outright; an untrusted file breaks the install.
+      - name: mise trust
+        run: mise trust --all
+
+      # Install the pinned toolchain, then put mise's shims ahead of the ambient runner
+      # version on PATH (F55, F56) — this template's own steps below must resolve the pin,
+      # not whatever the image ships.
       - name: mise install --locked
-        run: mise install --locked
+        run: |
+          set -euo pipefail
+          mise install --locked
+          mise bin-paths >> "$GITHUB_PATH"
 
       - name: Install language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} (verified fetch)
         env:
