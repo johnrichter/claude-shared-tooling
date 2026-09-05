@@ -2,48 +2,58 @@
 # pin, runner, dry-run) that the Rust, Python, and two release templates copy verbatim; a
 # change to that shared shape belongs here first.
 #
-# Purpose: a `workflow_call` template that installs a pinned mise, installs a verified
-# language-tools release, and runs the five language-tools checks (build, test, lint,
-# format, vet) against a caller's Go module. It reads nothing from the caller beyond
-# mise.toml + mise.lock at the checked-out repo root and go.mod at `module_dir` — every
-# other decision (runner image, extra checks language-tools doesn't cover, the two
-# cross-repository couplings some Go callers need) is a typed input.
+# Purpose: a `workflow_call` template implementing the fleet CI template contract
+# (docs/ci-template-contract.md) for Go. Two jobs: source-checks (format, lint, vet,
+# security — one platform, since those checks read source text rather than build output)
+# and build-test (build, test unit, test e2e — the four-platform matrix, needs:
+# source-checks). Each job puts the pinned mise toolchain ahead of the runner's ambient Go
+# on PATH, provisions every binary its checks invoke — golangci-lint, goimports,
+# staticcheck, gosec, govulncheck, gotestsum, and (build-test's test e2e leg) Google
+# Chrome — and installs a verified language-tools release. It reads nothing from the
+# caller beyond mise.toml + mise.lock at the checked-out repo root and go.mod at
+# `module_dir`; every other decision is a typed input.
+#
+# Check-tool provisioning (contract section 5): the six binaries install from a
+# template-owned mise config written to RUNNER_TEMP and pointed at via MISE_CONFIG_FILE,
+# never the caller's own committed mise.toml/mise.lock — a caller's toolchain pin and
+# lockfile stay exactly what the caller committed. Each is pinned at its latest stable
+# version (OD49). golangci-lint, staticcheck, gosec and gotestsum resolve through the aqua
+# backend, which records a per-platform digest; goimports and govulncheck resolve through
+# the go backend, which records none (F67) — the digest check is simply not run for those
+# two, per the contract.
 #
 # Inputs:
 #   runs_on                          (string,  default "ubuntu-24.04")
 #     Fully qualified GitHub-hosted runner label, published by actions/runner-images.
 #     Never a floating tag (ubuntu-latest, ...): those move under a caller without notice.
+#     Unused by this template's own job placement — source-checks and build-test fix their
+#     runner labels per the two-job shape (section 3) — kept for input-naming parity with
+#     the other five templates (section 1).
 #   module_dir                       (string,  default ".")
 #     Go module directory language-tools checks, relative to the checked-out repo
 #     (language-tools' `--dir`).
-#   mise_version                     (string,  default "2026.8.10")
-#     mise release this template installs. Every mise.lock the fleet has committed was
-#     written by this version; override only to try a newer mise ahead of repinning the
-#     fleet.
+#   mise_version                     (string,  default "2026.9.1")
+#     mise release this template installs. Latest stable patch, measured at write time
+#     per K11/S7 — never carried forward from an earlier revision. Every committed
+#     mise.lock must be re-locked with this version.
 #   dry_run                          (boolean, default false)
-#     true installs mise and language-tools, verifies both, and stops — the five check
-#     steps and the extra-steps escape hatch are skipped. Proves the call contract and the
-#     installs without needing the caller's code to actually pass a check.
-#   checkout_ai_shared_lib_sibling   (boolean, default false)
-#     true checks out johnrichter/claude-shared-tooling (this repository) into
-#     ./ai-shared-lib, alongside the caller's own repo root, for a caller whose go.mod
-#     resolves it through a local `replace` directive. Needs the sibling_repo_token secret.
-#   set_ai_shared_lib_goprivate      (boolean, default false)
-#     true sets GOPRIVATE=github.com/johnrichter/claude-shared-tooling and a matching git
-#     credential, for a caller that resolves claude-shared-tooling's modules from the proxy
-#     at tagged versions instead of a local replace. Needs the sibling_repo_token secret.
+#     true installs and verifies mise, language-tools, the Go check binaries and (in
+#     build-test) Chrome, then stops — every check step and extra_steps are skipped.
+#     Proves the call contract and the installs without needing the caller's code to
+#     actually pass a check.
+#   test_timeout                     (number,  default 300)
+#     Wall-clock bound per test subcommand, in seconds. Applied to each `test` subcommand
+#     step as `--timeout <n>s`. Default is language-tools' own binary default (300 s).
 #   extra_steps                      (string,  default "")
-#     Shell script run as a final step, after the five checks, for a repository-specific
-#     check language-tools doesn't cover (e.g. a shellcheck run, a GPG-signing smoke test).
+#     Shell script run after build-test's checks, for a repository-specific check
+#     language-tools doesn't cover (e.g. a shellcheck run, a GPG-signing smoke test).
 #     Empty runs nothing.
 #
-# Secrets:
-#   sibling_repo_token — a PAT scoped to johnrichter/claude-shared-tooling. Required when
-#   checkout_ai_shared_lib_sibling or set_ai_shared_lib_goprivate is true; unused otherwise.
-#
-# Caller contract: the caller supplies nothing but these inputs and (when needed) the one
-# secret — this template checks out the caller's own repo itself, at repo root. It pushes
-# and publishes nothing.
+# Caller contract: the caller supplies nothing but these inputs — this template checks out
+# the caller's own repo itself, at repo root, once per job. claude-shared-tooling is a
+# public module (F78), so a caller's go.mod resolves it through the public proxy at a
+# tagged version like any other dependency; this template takes no sibling-checkout input,
+# no private-module coupling, and needs no secret. It pushes and publishes nothing.
 
 name: CI template (Go)
 
@@ -51,7 +61,7 @@ on:
   workflow_call:
     inputs:
       runs_on:
-        description: "Fully qualified GitHub-hosted runner label (actions/runner-images). Never a floating tag."
+        description: "Fully qualified GitHub-hosted runner label (actions/runner-images). Never a floating tag. Unused for this template's own job placement (source-checks/build-test fix their labels); kept for input-naming parity with the other five templates."
         required: false
         type: string
         default: "ubuntu-24.04"
@@ -61,64 +71,40 @@ on:
         type: string
         default: "."
       mise_version:
-        description: "mise release to install. Every committed mise.lock in the fleet was written by this version."
+        description: "mise release the template installs. Latest stable patch, measured at write time per K11/S7. Every committed mise.lock must be re-locked with this version."
         required: false
         type: string
-        default: "2026.8.10"
+        default: "2026.9.1"
       dry_run:
-        description: "true installs and verifies mise + language-tools and stops; the five check steps and extra_steps are skipped."
+        description: "true installs and verifies mise, language-tools, the Go check binaries and (build-test) Chrome, then stops; every check step and extra_steps are skipped."
         required: false
         type: boolean
         default: false
-      checkout_ai_shared_lib_sibling:
-        description: "true checks out johnrichter/claude-shared-tooling into ./ai-shared-lib for a go.mod replace directive. Needs sibling_repo_token."
+      test_timeout:
+        description: "Wall-clock bound per test subcommand, in seconds. Applied as language-tools --timeout <n>s. Default is the binary default (300 s)."
         required: false
-        type: boolean
-        default: false
-      set_ai_shared_lib_goprivate:
-        description: "true sets GOPRIVATE + a git credential for johnrichter/claude-shared-tooling's private modules. Needs sibling_repo_token."
-        required: false
-        type: boolean
-        default: false
+        type: number
+        default: 300
       extra_steps:
-        description: "Shell script run after the five checks, for a repository-specific check language-tools doesn't cover. Empty runs nothing."
+        description: "Shell script run after build-test's checks, for a repository-specific check language-tools doesn't cover. Empty runs nothing."
         required: false
         type: string
         default: ""
-    secrets:
-      sibling_repo_token:
-        description: "PAT scoped to johnrichter/claude-shared-tooling. Required when either cross-repository input above is true."
-        required: false
 
 env:
   # Named once; every step below reads this instead of restating the version.
-  LANGUAGE_TOOLS_VERSION: "2.1.0"
+  # OD69 sets 3.0.0 (major bump: SC5 makes --language a required selector on `release build`).
+  LANGUAGE_TOOLS_VERSION: "3.0.0"
 
 permissions:
   contents: read
 
 jobs:
-  go:
-    name: go
-    runs-on: ${{ inputs.runs_on }}
+  source-checks:
+    name: source-checks
+    runs-on: ubuntu-24.04-arm        # OD63: one platform, source text not build output
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      - name: Checkout ai-shared-lib sibling (go.mod replace target)
-        if: ${{ inputs.checkout_ai_shared_lib_sibling }}
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          repository: johnrichter/claude-shared-tooling
-          token: ${{ secrets.sibling_repo_token }}
-          path: ai-shared-lib
-
-      - name: Git credential + GOPRIVATE for private ai-shared-lib module fetches
-        if: ${{ inputs.set_ai_shared_lib_goprivate }}
-        env:
-          SIBLING_REPO_TOKEN: ${{ secrets.sibling_repo_token }}
-        run: |
-          git config --global url."https://x-access-token:${SIBLING_REPO_TOKEN}@github.com/johnrichter/claude-shared-tooling".insteadOf "https://github.com/johnrichter/claude-shared-tooling"
-          echo "GOPRIVATE=github.com/johnrichter/claude-shared-tooling" >> "$GITHUB_ENV"
 
       # mise and language-tools name platforms differently (mise: linux/macos, x64/arm64;
       # language-tools: Go's own linux/darwin, amd64/arm64) — resolve both once, here.
@@ -176,8 +162,55 @@ jobs:
           install -m 0755 "${tmp}/${bin}" "${RUNNER_TEMP}/bin/mise"
           rm -rf "${tmp}"
 
+      # Trust every config mise will read before the first check reads one (OD65, F58).
+      # mise refuses an untrusted config outright; an untrusted file breaks every check.
+      - name: mise trust
+        run: mise trust --all
+
+      # Install the pinned toolchain, then put mise's shims ahead of the ambient runner
+      # version on PATH (F55, F56). MISE_PYTHON_COMPILE=0 is harmless for Go; set on every
+      # template for one shared activation shape.
       - name: mise install --locked
-        run: mise install --locked
+        env:
+          MISE_PYTHON_COMPILE: "0"
+        run: |
+          set -euo pipefail
+          mise install --locked
+          mise bin-paths >> "$GITHUB_PATH"
+
+      # SC6: prove the pin, not the ambient runner Go (F56 measures Go 1.24.x ambient).
+      - name: Resolved Go toolchain version
+        run: go version
+
+      # SC7: golangci-lint, staticcheck and gosec resolve through the aqua backend
+      # (per-platform digest recorded); goimports and govulncheck resolve through the go
+      # backend (no digest recorded, F67). Installed from a template-owned config so the
+      # caller's own committed mise.toml/mise.lock is never touched.
+      - name: Provision Go check binaries (golangci-lint, goimports, staticcheck, gosec, govulncheck)
+        env:
+          MISE_CONFIG_FILE: ${{ runner.temp }}/go-source-check-tools.toml
+        run: |
+          set -euo pipefail
+          cat > "${MISE_CONFIG_FILE}" <<'EOF'
+          [tools]
+          "aqua:golangci/golangci-lint" = "2.13.2"
+          "go:golang.org/x/tools/cmd/goimports" = "v0.49.0"
+          "aqua:dominikh/go-tools/staticcheck" = "2026.2.1"
+          "aqua:securego/gosec" = "2.29.0"
+          "go:golang.org/x/vuln/cmd/govulncheck" = "v1.7.0"
+          EOF
+          mise trust "${MISE_CONFIG_FILE}"
+          mise install
+          mise bin-paths >> "$GITHUB_PATH"
+
+      - name: Installed check-tool versions (OD60)
+        run: |
+          set -euo pipefail
+          golangci-lint --version
+          go version -m "$(command -v goimports)"
+          staticcheck --version
+          gosec --version
+          govulncheck --version
 
       - name: Install language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} (verified fetch)
         env:
@@ -210,27 +243,224 @@ jobs:
 
       - name: Dry-run summary (installs verified, checks skipped)
         if: ${{ inputs.dry_run }}
-        run: echo "dry-run summary -- mise ${{ inputs.mise_version }} and language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} installed and verified, the five check steps are skipped"
-
-      - name: language-tools build
-        if: ${{ !inputs.dry_run }}
-        run: language-tools build --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
-
-      - name: language-tools test
-        if: ${{ !inputs.dry_run }}
-        run: language-tools test --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
-
-      - name: language-tools lint
-        if: ${{ !inputs.dry_run }}
-        run: language-tools lint --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
+        run: echo "dry-run summary -- mise ${{ inputs.mise_version }}, language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} and the Go check binaries installed and verified, the source-checks steps are skipped"
 
       - name: language-tools format
         if: ${{ !inputs.dry_run }}
         run: language-tools format --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
 
+      - name: language-tools lint
+        if: ${{ !inputs.dry_run }}
+        run: language-tools lint --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
+
       - name: language-tools vet
         if: ${{ !inputs.dry_run }}
         run: language-tools vet --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
+
+      - name: language-tools security
+        if: ${{ !inputs.dry_run }}
+        run: language-tools security --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
+
+  build-test:
+    name: build-test
+    needs: source-checks
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-26, macos-26-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Resolve runner platform
+        id: platform
+        run: |
+          mkdir -p "${RUNNER_TEMP}/bin"
+          echo "${RUNNER_TEMP}/bin" >> "$GITHUB_PATH"
+          case "$(uname -s)" in
+            Linux)  mise_os=linux;  lt_os=linux  ;;
+            Darwin) mise_os=macos;  lt_os=darwin ;;
+            *) echo "::error::unsupported runner OS $(uname -s)"; exit 1 ;;
+          esac
+          case "$(uname -m)" in
+            x86_64|amd64)  mise_arch=x64;   lt_arch=amd64 ;;
+            arm64|aarch64) mise_arch=arm64; lt_arch=arm64 ;;
+            *) echo "::error::unsupported runner arch $(uname -m)"; exit 1 ;;
+          esac
+          {
+            echo "mise_os=${mise_os}"
+            echo "mise_arch=${mise_arch}"
+            echo "lt_os=${lt_os}"
+            echo "lt_arch=${lt_arch}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install mise ${{ inputs.mise_version }} (verified fetch)
+        env:
+          MISE_VERSION: ${{ inputs.mise_version }}
+          MISE_OS: ${{ steps.platform.outputs.mise_os }}
+          MISE_ARCH: ${{ steps.platform.outputs.mise_arch }}
+        run: |
+          set -euo pipefail
+          bin="mise-v${MISE_VERSION}-${MISE_OS}-${MISE_ARCH}"
+          base="https://github.com/jdx/mise/releases/download/v${MISE_VERSION}"
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "${tmp}/SHASUMS256.txt" "${base}/SHASUMS256.txt"
+          curl -fsSL -o "${tmp}/${bin}" "${base}/${bin}"
+          expected="$(awk -v want="./${bin}" '$2 == want { print $1; exit }' "${tmp}/SHASUMS256.txt")"
+          if [ -z "${expected}" ]; then
+            echo "::error::${bin} not listed in SHASUMS256.txt for mise v${MISE_VERSION}"
+            exit 1
+          fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "${tmp}/${bin}" | awk '{print $1}')"
+          else
+            actual="$(shasum -a 256 "${tmp}/${bin}" | awk '{print $1}')"
+          fi
+          if [ "${expected}" != "${actual}" ]; then
+            echo "::error::sha256 mismatch for ${bin} -- expected ${expected}, got ${actual}"
+            exit 1
+          fi
+          install -m 0755 "${tmp}/${bin}" "${RUNNER_TEMP}/bin/mise"
+          rm -rf "${tmp}"
+
+      - name: mise trust
+        run: mise trust --all
+
+      - name: mise install --locked
+        env:
+          MISE_PYTHON_COMPILE: "0"
+        run: |
+          set -euo pipefail
+          mise install --locked
+          mise bin-paths >> "$GITHUB_PATH"
+
+      - name: Resolved Go toolchain version
+        run: go version
+
+      # SC7: gotestsum resolves through the aqua backend (per-platform digest recorded,
+      # F67); it wraps the test-unit leg's `go test` run. test e2e needs no extra Go binary.
+      - name: Provision Go check binaries (gotestsum)
+        env:
+          MISE_CONFIG_FILE: ${{ runner.temp }}/go-build-test-tools.toml
+        run: |
+          set -euo pipefail
+          cat > "${MISE_CONFIG_FILE}" <<'EOF'
+          [tools]
+          "aqua:gotestyourself/gotestsum" = "1.13.0"
+          EOF
+          mise trust "${MISE_CONFIG_FILE}"
+          mise install
+          mise bin-paths >> "$GITHUB_PATH"
+
+      - name: Installed check-tool versions (OD60)
+        run: gotestsum --version
+
+      # OD56: Go's test e2e leg drives a real browser. OD64: the install must win on PATH
+      # over the image's own Chrome (F77) or the leg exercises the wrong copy (K10 breach).
+      - name: Install Google Chrome (apt, Google repository)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+            | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
+            | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+          google-chrome --version   # OD60: print what was installed
+
+      - name: Verify installed Chrome wins on PATH (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          resolved="$(command -v google-chrome)"
+          echo "resolved chrome: ${resolved}"
+          case "${resolved}" in
+            /usr/bin/google-chrome) : ;;
+            *) echo "::error::resolved Chrome ${resolved} is not apt's installed copy (/usr/bin/google-chrome)"; exit 1 ;;
+          esac
+          "${resolved}" --version
+
+      # Prepend before the first brew step so the installed copy wins over the image's own
+      # Chrome location (OD64, F80: arm64 prefix /opt/homebrew, Intel prefix /usr/local).
+      - name: Map Homebrew prefix onto PATH (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            arm64|aarch64) prefix="/opt/homebrew" ;;
+            *)             prefix="/usr/local"    ;;
+          esac
+          echo "${prefix}/bin" >> "$GITHUB_PATH"
+
+      - name: Install Google Chrome (Homebrew, macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          brew update
+          brew install --cask google-chrome
+          "$(brew --prefix)/bin/google-chrome" --version || true   # OD60: print what was installed
+
+      - name: Verify installed Chrome wins on PATH (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            arm64|aarch64) prefix="/opt/homebrew" ;;
+            *)             prefix="/usr/local"    ;;
+          esac
+          resolved="$(command -v google-chrome || command -v "Google Chrome" || true)"
+          echo "resolved chrome: ${resolved}"
+          case "${resolved}" in
+            "${prefix}/"*) : ;;
+            *) echo "::error::resolved Chrome ${resolved} is not inside the Homebrew prefix ${prefix}"; exit 1 ;;
+          esac
+          "${resolved}" --version
+
+      - name: Install language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} (verified fetch)
+        env:
+          LT_OS: ${{ steps.platform.outputs.lt_os }}
+          LT_ARCH: ${{ steps.platform.outputs.lt_arch }}
+        run: |
+          set -euo pipefail
+          archive="language-tools_${LANGUAGE_TOOLS_VERSION}_${LT_OS}_${LT_ARCH}.tar.gz"
+          base="https://github.com/johnrichter/language-tools/releases/download/v${LANGUAGE_TOOLS_VERSION}"
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "${tmp}/checksums.txt" "${base}/checksums.txt"
+          curl -fsSL -o "${tmp}/${archive}" "${base}/${archive}"
+          expected="$(awk -v want="${archive}" '$2 == want { print $1; exit }' "${tmp}/checksums.txt")"
+          if [ -z "${expected}" ]; then
+            echo "::error::${archive} not listed in checksums.txt for language-tools v${LANGUAGE_TOOLS_VERSION}"
+            exit 1
+          fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "${tmp}/${archive}" | awk '{print $1}')"
+          else
+            actual="$(shasum -a 256 "${tmp}/${archive}" | awk '{print $1}')"
+          fi
+          if [ "${expected}" != "${actual}" ]; then
+            echo "::error::sha256 mismatch for ${archive} -- expected ${expected}, got ${actual}"
+            exit 1
+          fi
+          tar -xzf "${tmp}/${archive}" -C "${tmp}"
+          install -m 0755 "${tmp}/language-tools" "${RUNNER_TEMP}/bin/language-tools"
+          rm -rf "${tmp}"
+
+      - name: Dry-run summary (installs verified, checks skipped)
+        if: ${{ inputs.dry_run }}
+        run: echo "dry-run summary -- mise ${{ inputs.mise_version }}, language-tools ${{ env.LANGUAGE_TOOLS_VERSION }}, gotestsum and Chrome installed and verified, the build-test steps and extra_steps are skipped"
+
+      - name: language-tools build
+        if: ${{ !inputs.dry_run }}
+        run: language-tools build --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
+
+      - name: language-tools test unit
+        if: ${{ !inputs.dry_run }}
+        run: language-tools test unit --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log" --timeout "${{ inputs.test_timeout }}s"
+
+      - name: language-tools test e2e
+        if: ${{ !inputs.dry_run }}
+        run: language-tools test e2e --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log" --timeout "${{ inputs.test_timeout }}s"
 
       - name: Extra steps (repository-specific checks language-tools doesn't cover)
         if: ${{ !inputs.dry_run && inputs.extra_steps != '' }}
