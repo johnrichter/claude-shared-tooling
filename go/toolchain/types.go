@@ -193,6 +193,17 @@ type Target struct {
 	// identity so two targets differing only in Args get distinct cache
 	// entries and log files.
 	Args []string
+	// ConfigPath, if set, is a caller-supplied config file for the pair's
+	// tool to read instead of what it would otherwise discover or this
+	// package's own hardcoded default (golangci-lint's lint, ruff's lint and
+	// format, mypy's vet, shellcheck's lint). Empty (the zero value) leaves
+	// every tool's resolution exactly as it was before this field existed:
+	// golangci-lint and ruff discover a config upward from the target
+	// directory on their own, and mypy and shellcheck read the file this
+	// package writes from its own constant. runID folds ConfigPath into the
+	// run identity, mirroring Args, so a target differing only in ConfigPath
+	// gets its own cache entry and log file.
+	ConfigPath string
 }
 
 // Options configures a Run call. The zero value already carries the

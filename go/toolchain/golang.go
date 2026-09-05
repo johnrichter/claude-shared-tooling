@@ -166,16 +166,21 @@ func fallbackDiagnostic(tool string, exitCode int) Diagnostic {
 // runLint runs golangci-lint and goimports against target.Dir and merges
 // their findings (OD5: lint invokes golangci-lint as a subprocess). Both
 // front the lint pair per OD46: golangci-lint carries the configured linter
-// suite (its config resolves from the language-tools tree, per OD47 —
-// Command never names one, so golangci-lint discovers it from target.Dir the
-// way it would from any working directory), goimports catches an unsorted or
-// ungrouped import block golangci-lint's own report doesn't carry on its own.
+// suite (its config resolves from the language-tools tree, per OD47 — with
+// target.ConfigPath unset, this passes golangci-lint no --config, so it
+// discovers one from target.Dir the way it would from any working
+// directory; a caller-supplied target.ConfigPath is passed explicitly
+// instead, winning over that discovery), goimports catches an unsorted or
+// ungrouped import block golangci-lint's own report doesn't carry on its
+// own.
 func (goAdapter) runLint(ctx context.Context, target Target) ([]Diagnostic, error) {
 	var diags []Diagnostic
 
-	lintRes, err := runTool(ctx, target.Dir, golangciLint, []string{
-		"run", "--output.json.path", "stdout", "--output.text.path", "stderr",
-	})
+	lintArgs := []string{"run", "--output.json.path", "stdout", "--output.text.path", "stderr"}
+	if target.ConfigPath != "" {
+		lintArgs = append(lintArgs, "--config", target.ConfigPath)
+	}
+	lintRes, err := runTool(ctx, target.Dir, golangciLint, lintArgs)
 	if err != nil {
 		return nil, err
 	}

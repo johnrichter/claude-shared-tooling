@@ -169,6 +169,28 @@ func (a pythonAdapter) Command(check Check) ([]string, error) {
 	}
 }
 
+// CommandWithConfigPath answers Command's own argv when configPath is empty,
+// and otherwise points lint, format and vet at configPath instead: ruff's
+// --config for lint and format, mypy's --config-file for vet, both winning
+// over ruff's own upward discovery and over mypyConfigPath's language-tools
+// constant respectively. build has no config to point anywhere, so it falls
+// through to Command unchanged regardless of configPath.
+func (a pythonAdapter) CommandWithConfigPath(check Check, configPath string) ([]string, error) {
+	if configPath == "" {
+		return a.Command(check)
+	}
+	switch check {
+	case CheckLint:
+		return []string{"check", "--config", configPath}, nil
+	case CheckFormat:
+		return []string{"format", "--check", "--config", configPath}, nil
+	case CheckVet:
+		return []string{"--config-file", configPath, "."}, nil
+	default:
+		return a.Command(check)
+	}
+}
+
 // RunInProcess performs target's check by spawning the tool(s) it needs and
 // merging their normalized diagnostics. build, format, lint and vet are
 // unreachable here, since Route sends them through the subprocess path

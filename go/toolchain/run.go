@@ -91,7 +91,16 @@ func Run(ctx context.Context, target Target, opts Options) (*RunResult, error) {
 	// unread and the command field empty on both the result and the log.
 	var argv []string
 	if route == RouteSubprocess {
-		cmd, err := adapter.Command(target.Check)
+		var cmd []string
+		var err error
+		// An adapter that implements ConfigPathCommand gets target.ConfigPath
+		// threaded into its argv; every other adapter keeps calling Command
+		// exactly as before ConfigPath existed.
+		if cpa, ok := adapter.(ConfigPathCommand); ok {
+			cmd, err = cpa.CommandWithConfigPath(target.Check, target.ConfigPath)
+		} else {
+			cmd, err = adapter.Command(target.Check)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -254,14 +263,15 @@ func classifyStatus(exitCode int, counts Counts, allowWarnings bool) clikit.Stat
 }
 
 // runID derives RunResult.ID deterministically from what identifies a
-// target: its language, check, test kind, directory, and args. The same
-// target always produces the same ID, which doubles as the cache key
-// (cache.go) and the log file's base name (log.go) — a re-run of the
-// identical target overwrites its own prior log rather than accumulating
-// one file per run. Two targets that differ only in Args (e.g. a release
-// build vs. a debug build of the same dir), or only in Test (e.g. the unit
-// and e2e pairs of the same CheckTest target), hash to distinct IDs, so they
-// get distinct cache entries and log files rather than colliding on one.
+// target: its language, check, test kind, directory, args, and — when set —
+// config path. The same target always produces the same ID, which doubles as
+// the cache key (cache.go) and the log file's base name (log.go) — a re-run
+// of the identical target overwrites its own prior log rather than
+// accumulating one file per run. Two targets that differ only in Args (e.g. a
+// release build vs. a debug build of the same dir), only in ConfigPath, or
+// only in Test (e.g. the unit and e2e pairs of the same CheckTest target),
+// hash to distinct IDs, so they get distinct cache entries and log files
+// rather than colliding on one.
 func runID(target Target) (string, error) {
 	key := map[string]any{
 		"language": target.Language,
@@ -269,6 +279,13 @@ func runID(target Target) (string, error) {
 		"test":     string(target.Test),
 		"dir":      target.Dir,
 		"args":     target.Args,
+	}
+	// ConfigPath only enters the key when set, so a target that leaves it
+	// unset hashes to the exact ID a pre-ConfigPath Target would have — a
+	// caller upgrading without setting it keeps every cache entry and log
+	// file it already has.
+	if target.ConfigPath != "" {
+		key["config_path"] = target.ConfigPath
 	}
 	hash, err := jsondoc.ContentHash(key)
 	if err != nil {

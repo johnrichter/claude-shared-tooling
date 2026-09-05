@@ -319,7 +319,9 @@ func shellcheckConfigPath() (string, error) {
 // a script whose own shebang names bash explicitly, so running it over the
 // whole discovered set (rather than pre-filtering by shebang here) reports
 // nothing extra for a file it would not have flagged anyway. An empty file
-// set is a trivial pass.
+// set is a trivial pass. shellcheck's --rcfile points at target.ConfigPath
+// when the caller set one, winning over shellcheckConfigPath's
+// language-tools constant, which remains the fallback when it is unset.
 func (shellAdapter) runLint(ctx context.Context, target Target) ([]Diagnostic, error) {
 	files, err := discoverShellFiles(target.Dir)
 	if err != nil {
@@ -335,9 +337,12 @@ func (shellAdapter) runLint(ctx context.Context, target Target) ([]Diagnostic, e
 
 	var diags []Diagnostic
 
-	rcfile, err := shellcheckConfigPath()
-	if err != nil {
-		return nil, err
+	rcfile := target.ConfigPath
+	if rcfile == "" {
+		rcfile, err = shellcheckConfigPath()
+		if err != nil {
+			return nil, err
+		}
 	}
 	scRes, err := runTool(ctx, target.Dir, shellcheckTool, append([]string{"--rcfile", rcfile, "-f", "json1"}, rel...))
 	if err != nil {

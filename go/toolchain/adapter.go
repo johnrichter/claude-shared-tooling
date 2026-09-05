@@ -74,6 +74,21 @@ type Adapter interface {
 	RunInProcess(ctx context.Context, target Target) ([]Diagnostic, error)
 }
 
+// ConfigPathCommand is an optional extension of Adapter for a
+// RouteSubprocess check whose argv changes when Target.ConfigPath is set.
+// Command's own signature carries only the check, so it can never see
+// ConfigPath; Run type-asserts for this interface and, when an adapter
+// implements it, calls CommandWithConfigPath instead of Command. An adapter
+// that implements it is expected to answer exactly what Command would for an
+// empty configPath, so a caller that never sets Target.ConfigPath sees no
+// difference from an adapter that skips this interface entirely.
+type ConfigPathCommand interface {
+	// CommandWithConfigPath returns check's argv given configPath, the
+	// resolved Target.ConfigPath ("" when unset). It supersedes Command for
+	// every check this adapter implements it for.
+	CommandWithConfigPath(check Check, configPath string) ([]string, error)
+}
+
 var (
 	registryMu sync.RWMutex
 	registry   = map[string]Adapter{}
