@@ -45,10 +45,10 @@ on:
         type: string
         default: "ubuntu-24.04"
       mise_version:
-        description: "mise release to install. Every committed mise.lock in the fleet was written by this version."
+        description: "mise release the template installs. Latest stable patch, measured at write time per K11/S7. Every committed mise.lock must be re-locked with this version."
         required: false
         type: string
-        default: "2026.8.10"
+        default: "2026.9.1"
       dry_run:
         description: "Verify only — skip the tag push and the platform release."
         required: false
@@ -61,7 +61,8 @@ on:
 
 env:
   # Named once; every step below reads this instead of restating the version.
-  LANGUAGE_TOOLS_VERSION: "2.1.0"
+  # OD69 sets 3.0.0 (major bump: SC5 makes --language a required selector on `release build`).
+  LANGUAGE_TOOLS_VERSION: "3.0.0"
 
 permissions:
   contents: write
@@ -163,32 +164,63 @@ jobs:
           install -m 0755 "${tmp}/language-tools" "${RUNNER_TEMP}/bin/language-tools"
           rm -rf "${tmp}"
 
-      - name: Reject an existing tag (no overwrite)
+      # A release tag is an annotated tag, which needs a tagger identity; the checkout above
+      # carries none. No caller identity is required or assumed — the fleet's own bot identity
+      # signs every release tag this template cuts.
+      - name: Configure git identity
         run: |
-          if git rev-parse "${{ inputs.version }}" >/dev/null 2>&1; then
-            echo "::error::tag ${{ inputs.version }} already exists - a release tag is never reused"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # Accepts a tag already at HEAD (a tag-push trigger runs against a commit whose tag
+      # already exists by definition, and a re-run of the dispatch path at the same commit
+      # finds the tag it pushed last time — both idempotent); rejects a tag that exists
+      # anywhere else, since a release tag is never moved.
+      - name: Check for an existing tag
+        id: tagcheck
+        env:
+          TAG: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          tag_commit="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          head_commit="$(git rev-parse HEAD)"
+          if [ "${tag_commit}" != "${head_commit}" ]; then
+            echo "::error::tag ${TAG} already exists at ${tag_commit}, not HEAD (${head_commit}) - a release tag is never moved"
             exit 1
           fi
+          echo "tag ${TAG} already exists at HEAD (${head_commit}) - reusing it rather than re-tagging"
+          echo "exists=true" >> "$GITHUB_OUTPUT"
 
       - name: Tag HEAD
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && steps.tagcheck.outputs.exists == 'false' }}
+        env:
+          TAG: ${{ inputs.version }}
         run: |
-          git tag -a "${{ inputs.version }}" -m "${{ inputs.version }}"
-          git push origin "${{ inputs.version }}"
+          set -euo pipefail
+          git tag -a "${TAG}" -m "${TAG}"
+          git push origin "${TAG}"
 
       - name: Publish the official release (tag only, no archive)
         if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          TAG: ${{ inputs.version }}
           RELEASE_NOTES: ${{ inputs.release_notes }}
         run: |
+          set -euo pipefail
           if [ -n "$RELEASE_NOTES" ]; then
-            gh release create "${{ inputs.version }}" --title "${{ inputs.version }}" --notes "$RELEASE_NOTES"
+            gh release create "$TAG" --title "$TAG" --notes "$RELEASE_NOTES"
           else
-            gh release create "${{ inputs.version }}" --title "${{ inputs.version }}" --generate-notes
+            gh release create "$TAG" --title "$TAG" --generate-notes
           fi
 
       - name: Dry-run summary
         if: ${{ inputs.dry_run }}
+        env:
+          TAG: ${{ inputs.version }}
         run: |
-          echo "dry-run: would tag and release ${{ inputs.version }} - no archive attached (library track)"
+          echo "dry-run: would tag and release ${TAG} - no archive attached (library track)"
