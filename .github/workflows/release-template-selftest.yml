@@ -1,14 +1,25 @@
-# Proves the fleet's five reusable SC-DISTRIBUTION/CI templates actually work: dry-runs each
-# on every change to a template or dist-guard, and on demand. dry_run: true means something
-# different per track: on a CI template (ci-go/ci-rust/ci-python) it skips the five
-# language-tools checks and only proves the install steps and the call contract — never a
-# check result. On a release template (release-cli/release-library) it always runs the real
-# build (there's nothing else to prove a build against) and only skips the tag push and the
-# platform release, so it needs no release credentials.
+# Proves the fleet's seven reusable SC-DISTRIBUTION/CI templates actually work, in real CI,
+# before any caller adopts one (SC13, OD62): on every change to a template or dist-guard, and
+# on demand. The five track jobs below run that track's full check set against a real target
+# root inside this repository — MATRIX's twenty-seven pairs (Go seven, Rust eight, Python
+# seven, Shell five) plus WORKFLOW-PAIR's single `workflow lint` check, twenty-eight checks in
+# total, matching SC1's pair count. None of the five sets dry_run: true, unlike this file's
+# earlier revision — a dry run only proves the install steps and the call contract, never a
+# check result.
 #
-# This is a self-test of the templates themselves, not adoption: no caller here is wired into
-# this repo's own ci.yml, and no real language check result is asserted. Wiring a template
-# into a real caller for this repo's own modules is a separate concern.
+# The two release jobs stay dry-run: true, as they always have. A release leg always runs the
+# real build (there's nothing else to prove a build against) and only skips the tag push and
+# the platform release, so neither leg needs a GH_TOKEN.
+#
+# Every `uses:` line below names its template by path rather than by tag (DD8: a
+# same-repository caller references a path; every other caller references a tag). The
+# template tag SC15 cuts does not exist until layer 7, so every reference here resolves
+# through fleet rule two's `path_ref` reason rather than through a version comparison.
+#
+# This is a self-test of the templates themselves, not adoption: no job here is wired into
+# this repo's own ci.yml, and a check result proves the template, not this repository's
+# modules. Wiring a template into a real caller for this repo's own modules is a separate
+# concern (SC20).
 
 name: SC-DISTRIBUTION and CI release template self-test
 
@@ -21,28 +32,105 @@ on:
   workflow_dispatch: {}
 
 jobs:
-  dry-run-ci-go:
+  # Go track (MATRIX: format, lint, vet, security, build, test unit, test e2e — seven checks).
+  # go/agentcontract is a real module with its own committed mise.toml (every go module root
+  # under go/ already carries one) and no network- or credential-dependent test.
+  run-ci-go:
     uses: ./.github/workflows/ci-go.yml
     with:
-      dry_run: true
+      module_dir: go/agentcontract
 
-  dry-run-ci-rust:
+  # Rust track (MATRIX: the Go seven plus test benchmark — eight checks). F76 measured five
+  # rust crate roots with no mise.toml (bm25, clikit, facetquery, frontmatter, logkit); a call
+  # against any of them would have exited 20 gate_negative.pin.missing_mise_toml (F59) before
+  # layer 4 pinned all five. rust/bm25 is one of the five, so this leg proves the pin rather
+  # than merely declaring it.
+  run-ci-rust:
     uses: ./.github/workflows/ci-rust.yml
     with:
-      dry_run: true
+      crate_dir: rust/bm25
 
-  dry-run-ci-python:
+  # Python track (MATRIX: format, lint, vet, security, build, test unit, test e2e — the same
+  # seven checks as Go, under ruff/mypy/bandit). The repository root is itself a real Python
+  # project (pyproject.toml, claude_tooling/), so the default project_dir already applies;
+  # named explicitly here for the same reason module_dir and crate_dir are named above.
+  run-ci-python:
     uses: ./.github/workflows/ci-python.yml
     with:
-      dry_run: true
+      project_dir: .
 
+  # Shell track (MATRIX minus build and vet, neither applicable to shell — five checks:
+  # format, lint, security, test unit, test e2e). script_root's default already covers the
+  # whole repository in one call (OD54); named explicitly for the same reason as the tracks
+  # above.
+  run-ci-shell:
+    uses: ./.github/workflows/ci-shell.yml
+    with:
+      script_root: .
+
+  # Workflow track (WORKFLOW-PAIR, OD71: one check, workflow lint, carved outside the section
+  # 4.7 language matrix). target_root's default already covers this repository's own
+  # .github/workflows/ (WFRULES clause (a)), which holds eleven tracked workflow bodies at
+  # layer-6 entry.
+  #
+  # Two of those eleven — ai-shared-lib/ci.yml and ai-shared-lib/agent-contract.yml — each
+  # declare a job holding a banned-command run: step and no template uses: line, so fleet rule
+  # one reports an error for each. That is the rule firing correctly, not a template defect
+  # (DD6 excludes the seven templates and this file itself from ever being a subject). This
+  # job's expected fleet-rule-one subject set is exactly these two paths:
+  #   ai-shared-lib/ci.yml
+  #   ai-shared-lib/agent-contract.yml
+  # It passes only when the reported set equals that set exactly and no other body reports a
+  # finding.
+  #
+  # The underlying check exits 20 on those two real findings, and GitHub Actions has no
+  # continue-on-error for a job that calls a reusable workflow via uses: (only a job with its
+  # own steps can mark itself allowed to fail), so this job's own conclusion, and this run's,
+  # report failure. SC13's "and green" is read at the level of this job's own reported result
+  # matching its recorded expectation exactly, not at the level of the run-conclusion badge,
+  # which no uses:-by-path job can turn back to success once its underlying check reports a
+  # real finding.
+  #
+  # Fleet rule two returns the silent verdict at reason path_ref for every uses: line here
+  # (DD8, WFRULES clause (d)): SC15 does not cut the first template tag until layer 7. This job
+  # proves neither the warning nor the error verdict for that rule — only SC39's three
+  # wfcurr-* probe modules do (R16).
+  run-ci-workflow:
+    uses: ./.github/workflows/ci-workflow.yml
+    with:
+      target_root: .
+
+  # Both release legs below stay dry-run: true, as they always have (see header): the build
+  # and checksum-manifest work always runs for real, and only the tag push and the platform
+  # release are skipped, so neither leg needs a GH_TOKEN. version stays a run-unique string
+  # rather than a real SC-VERSIONING tag, so language-tools release build has something to
+  # stamp into the archive names that never collides across runs.
+  #
+  # OD13 makes one template handle both a dispatch-triggered caller (names a version, cuts a
+  # tag) and a tag-push-triggered caller (finds the tag already present at HEAD): the "Check
+  # for an existing tag" step in release-cli.yml and release-library.yml runs unconditionally
+  # and branches on tag existence alone, never on which trigger fired. This self-test's own
+  # triggers are pull_request and workflow_dispatch, neither a tag push, and dry_run: true
+  # skips the one step that would ever create a tag — so a run here can exercise the
+  # tag-does-not-exist-yet branch (the dispatch shape) but never the tag-already-exists-at-HEAD
+  # branch without either a real tag push (needing a GH_TOKEN this self-test is not meant to
+  # hold) or an eighth job outside SC13's seven-job budget. That second branch is proven by the
+  # guard's own unconditional step, not by this self-test.
+  #
+  # binaries carries two entries rather than one, proving defect 4's list-valued input (OD15):
+  # F39 measured release-cli.yml releasing one binary per call before that fix. This repository
+  # ships exactly one real CLI package today (agentcontract-lint); the second entry builds that
+  # same package under a second output name, since the property under test is the list parsing
+  # and the per-entry build loop, not a second piece of software.
   dry-run-cli-release:
     uses: ./.github/workflows/release-cli.yml
     with:
       version: dry-run-cli-${{ github.run_id }}
       module_dir: go/agentcontract/cmd/agentcontract-lint
       language: go
-      binaries: "agentcontract-lint:."
+      binaries: |
+        agentcontract-lint:.
+        agentcontract-lint-probe:.
       dry_run: true
 
   dry-run-library-release:
