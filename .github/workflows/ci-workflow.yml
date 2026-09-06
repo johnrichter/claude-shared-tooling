@@ -218,17 +218,20 @@ jobs:
 
       # WFRULES clause (f): capture the exit code through an if/else guard, so a 10 or a 20
       # never trips set -e, then read the binary's own JSON result record with jq — never a
-      # log-text pattern match. Exit 0 is silent and passes. Exit 10 emits one ::warning::
-      # annotation per `caveats` entry and still passes: gating on it would turn every
-      # warning into a red default branch fleet-wide. Exit 20 emits one ::error:: annotation
-      # per `errors` entry and fails: swallowing it would turn every rule-one violation
-      # green. Any other exit code is outside this clause's two mapped classes and fails the
-      # step with the code language-tools itself reported.
+      # log-text pattern match. --allow-warnings is required here: without it the binary folds
+      # a caveats-only run straight into gate_negative (exit 20) before this step ever sees a
+      # 10, which would turn fleet rule two's warn verdict into a hard failure. Exit 0 is
+      # silent and passes. Exit 10 emits one ::warning:: annotation per `caveats` entry and
+      # still passes: gating on it would turn every warning into a red default branch
+      # fleet-wide. Exit 20 emits one ::error:: annotation per `errors` entry and fails:
+      # swallowing it would turn every rule-one violation green. Any other exit code is
+      # outside this clause's two mapped classes and fails the step with the code
+      # language-tools itself reported.
       - name: language-tools workflow lint
         run: |
           set -euo pipefail
           result="${RUNNER_TEMP}/workflow-lint-result.json"
-          if language-tools workflow lint --dir "${{ inputs.target_root }}" --log-dir "${{ github.workspace }}/.language-tools/log" > "${result}"; then
+          if language-tools workflow lint --dir "${{ inputs.target_root }}" --log-dir "${{ github.workspace }}/.language-tools/log" --allow-warnings > "${result}"; then
             exit_code=0
           else
             exit_code=$?
