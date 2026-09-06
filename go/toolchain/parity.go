@@ -12,13 +12,14 @@ import (
 	"github.com/johnrichter/claude-shared-tooling/go/sysops"
 )
 
-// RegenerateMatrix rebuilds the pair set from MATRIX (matrixSpec, section
-// 4.7's grid) alone: for each language it walks the checks the grid names,
-// expanding CheckTest into the subcommands testKindsByLanguage lists, and
-// returns every pair's canonical PairID sorted. It reads none of the
-// committed table, so comparing its result to the committed pairs
-// (VerifyMatrixParity) catches a pair dropped from, or invented in, that
-// table. It has no side effect.
+// RegenerateMatrix rebuilds the pair set from MATRIX-plus-WORKFLOW-PAIR alone:
+// for each language in MATRIX (matrixSpec, section 4.7's grid) it walks the
+// checks the grid names, expanding CheckTest into the subcommands
+// testKindsByLanguage lists, then appends WORKFLOW-PAIR — the non-standard
+// carve-out OD71 places outside that grid — and returns every pair's canonical
+// PairID sorted. It reads none of the committed table, so comparing its result
+// to the committed pairs (VerifyMatrixParity) catches a pair dropped from, or
+// invented in, that table. It has no side effect.
 func RegenerateMatrix() []string {
 	var ids []string
 	for language, checks := range matrixSpec {
@@ -32,6 +33,10 @@ func RegenerateMatrix() []string {
 			ids = append(ids, MatrixEntry{Language: language, Check: check}.PairID())
 		}
 	}
+	// WORKFLOW-PAIR is the twenty-eighth pair, outside matrixSpec by OD71.
+	// Appending it here makes the regenerated set MATRIX-plus-WORKFLOW-PAIR,
+	// which is exactly what the committed dispatch table must equal.
+	ids = append(ids, workflowPair.PairID())
 	sort.Strings(ids)
 	return ids
 }
@@ -48,11 +53,12 @@ func committedPairIDs() []string {
 }
 
 // MatrixParity is the outcome of comparing the committed dispatch table
-// against the pair set regenerated from MATRIX.
+// against the pair set regenerated from MATRIX-plus-WORKFLOW-PAIR.
 type MatrixParity struct {
 	// Match is true when the two sets are byte-for-byte identical.
 	Match bool
-	// Regenerated is the newline-joined sorted PairIDs MATRIX produces.
+	// Regenerated is the newline-joined sorted PairIDs MATRIX-plus-WORKFLOW-PAIR
+	// produces.
 	Regenerated string
 	// Committed is the newline-joined sorted PairIDs the committed table
 	// holds.
@@ -61,10 +67,10 @@ type MatrixParity struct {
 
 // VerifyMatrixParity reports whether the committed dispatch table and the
 // pair set RegenerateMatrix produces are byte-for-byte identical. A mismatch
-// means the committed table drifted from MATRIX in one direction or the
-// other — a pair dropped from the table, or one invented in it — which is the
-// drift the REPRO check exists to catch. It runs nothing and has no side
-// effect.
+// means the committed table drifted from MATRIX-plus-WORKFLOW-PAIR in one
+// direction or the other — a pair dropped from the table, or one invented in
+// it — which is the drift the REPRO check exists to catch. It runs nothing and
+// has no side effect.
 func VerifyMatrixParity() MatrixParity {
 	regenerated := strings.Join(RegenerateMatrix(), "\n")
 	committed := strings.Join(committedPairIDs(), "\n")

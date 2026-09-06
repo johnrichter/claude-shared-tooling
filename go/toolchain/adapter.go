@@ -191,15 +191,33 @@ var testKindsByLanguage = map[string][]TestKind{
 	LanguageShell:  {TestUnit, TestE2E},
 }
 
-// committedMatrix is the dispatch table: the frozen enumeration of all
-// twenty-seven pairs section 4.7 names, each with its tool list, its config
-// file and its implementation status. It is asserted equal to matrixSpec
-// (MATRIX) by VerifyMatrixParity, so a pair dropped here or invented here
+// workflowPair is WORKFLOW-PAIR: the workflow track's single `workflow lint`
+// pair, the twenty-eighth entry in the dispatch table. OD71 carves it out of
+// the section 4.7 language matrix (matrixSpec) rather than adding a standard
+// category, because F82 measures that OD48's standard names no category for a
+// GitHub Actions workflow file. Its one tool is actionlint (F82), and it
+// records no Config: SC37 keeps actionlint configless, since OD71 forbids a
+// config that encodes a fleet convention — the workflow adapter carries its
+// two fleet rules in code, not in a file. RegenerateMatrix appends this pair
+// to MATRIX so the parity check compares MATRIX-plus-WORKFLOW-PAIR against the
+// committed table.
+var workflowPair = MatrixEntry{
+	Language:    LanguageWorkflow,
+	Check:       CheckLint,
+	Tools:       []string{actionlintTool},
+	Implemented: true,
+}
+
+// committedMatrix is the dispatch table: the frozen enumeration of the
+// twenty-eight pairs the fleet supports — the twenty-seven section 4.7 names
+// (matrixSpec, MATRIX) plus WORKFLOW-PAIR — each with its tool list, its
+// config file and its implementation status. VerifyMatrixParity asserts it
+// equals MATRIX-plus-WORKFLOW-PAIR, so a pair dropped here or invented here
 // fails the parity test. Config base names resolve from the language-tools
 // tree (OD47/SC37): .golangci.yml, clippy.toml, ruff.toml, mypy.ini,
-// .shellcheckrc. Implemented now marks all twenty-seven pairs (Go seven,
-// Rust eight, Python seven, shell five) — shell's five, the last to land,
-// dispatch through shellAdapter exactly like every other language's.
+// .shellcheckrc. Implemented now marks all twenty-eight pairs (Go seven,
+// Rust eight, Python seven, shell five, workflow one), each dispatching
+// through its own adapter.
 var committedMatrix = []MatrixEntry{
 	// Go — seven pairs, all implemented.
 	{Language: LanguageGo, Check: CheckBuild, Tools: []string{"go build"}, Implemented: true},
@@ -236,12 +254,17 @@ var committedMatrix = []MatrixEntry{
 	{Language: LanguageShell, Check: CheckSecurity, Tools: []string{"semgrep"}, Implemented: true},
 	{Language: LanguageShell, Check: CheckTest, Test: TestUnit, Tools: []string{"bats", "kcov"}, Implemented: true},
 	{Language: LanguageShell, Check: CheckTest, Test: TestE2E, Tools: []string{"bats"}, Implemented: true},
+
+	// Workflow — one pair, the WORKFLOW-PAIR carve-out (OD71). It sits
+	// outside the section 4.7 language matrix but dispatches through
+	// workflowAdapter like every other pair; see workflowPair above.
+	workflowPair,
 }
 
-// Matrix returns a copy of the committed dispatch table — all twenty-seven
-// pairs section 4.7 names, in a fixed order. It is a copy so a caller can
-// never mutate the one source every language track and the command surface
-// read from.
+// Matrix returns a copy of the committed dispatch table — all twenty-eight
+// pairs (section 4.7's twenty-seven plus WORKFLOW-PAIR), in a fixed order. It
+// is a copy so a caller can never mutate the one source every track and the
+// command surface read from.
 func Matrix() []MatrixEntry {
 	out := make([]MatrixEntry, len(committedMatrix))
 	for i, e := range committedMatrix {

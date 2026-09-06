@@ -8,6 +8,7 @@ require (
 	github.com/johnrichter/claude-shared-tooling/go/jsondoc v0.0.0
 	github.com/johnrichter/claude-shared-tooling/go/state v0.0.0
 	github.com/johnrichter/claude-shared-tooling/go/sysops v0.0.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

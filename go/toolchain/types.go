@@ -134,13 +134,19 @@ const (
 	TestBenchmark TestKind = "benchmark"
 )
 
-// The language set — the four languages the dispatch table covers. A
-// Target.Language and an Adapter.Language() key on one of these strings.
+// The track set the dispatch table covers: the four languages OD48's standard
+// names, plus the workflow track OD71 carves out. A Target.Language and an
+// Adapter.Language() key on one of these strings. LanguageWorkflow is not a
+// language this fleet ships — a GitHub Actions workflow file has no OD48
+// category — so WORKFLOW-PAIR sits outside the section 4.7 matrix (matrixSpec)
+// as an explicit non-standard carve-out, even though it dispatches through the
+// same table and Adapter contract as every language pair.
 const (
-	LanguageGo     = "go"
-	LanguageRust   = "rust"
-	LanguagePython = "python"
-	LanguageShell  = "shell"
+	LanguageGo       = "go"
+	LanguageRust     = "rust"
+	LanguagePython   = "python"
+	LanguageShell    = "shell"
+	LanguageWorkflow = "workflow"
 )
 
 // The diagnostic codes an adapter's outcome carries into the binary's

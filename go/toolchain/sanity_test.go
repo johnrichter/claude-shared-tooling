@@ -304,18 +304,19 @@ func TestSanityVerifyBinaryParityMatchesFreshBuild(t *testing.T) {
 }
 
 // TestMatrixPairCounts checks the dispatch table enumerates exactly the
-// twenty-seven pairs section 4.7 names, with the per-language split Go seven,
-// Rust eight, Python seven, shell five — SC1's after-value.
+// twenty-eight pairs the fleet supports — section 4.7's twenty-seven plus
+// WORKFLOW-PAIR — with the per-track split Go seven, Rust eight, Python seven,
+// shell five and workflow one, which is SC1's after-value.
 func TestMatrixPairCounts(t *testing.T) {
 	m := Matrix()
-	if len(m) != 27 {
-		t.Fatalf("Matrix pair count = %d, want 27", len(m))
+	if len(m) != 28 {
+		t.Fatalf("Matrix pair count = %d, want 28", len(m))
 	}
 	byLanguage := map[string]int{}
 	for _, e := range m {
 		byLanguage[e.Language]++
 	}
-	want := map[string]int{LanguageGo: 7, LanguageRust: 8, LanguagePython: 7, LanguageShell: 5}
+	want := map[string]int{LanguageGo: 7, LanguageRust: 8, LanguagePython: 7, LanguageShell: 5, LanguageWorkflow: 1}
 	for lang, n := range want {
 		if byLanguage[lang] != n {
 			t.Errorf("%s pair count = %d, want %d", lang, byLanguage[lang], n)
@@ -327,8 +328,8 @@ func TestMatrixPairCounts(t *testing.T) {
 }
 
 // TestMatrixImplementedCountMatchesBaseline checks the table marks all
-// twenty-seven pairs implemented (Go seven, Rust eight, Python seven, shell
-// five) now that every language's adapter has landed.
+// twenty-eight pairs implemented (Go seven, Rust eight, Python seven, shell
+// five, workflow one) now that every track's adapter has landed.
 func TestMatrixImplementedCountMatchesBaseline(t *testing.T) {
 	implemented := map[string]int{}
 	total := 0
@@ -338,10 +339,10 @@ func TestMatrixImplementedCountMatchesBaseline(t *testing.T) {
 			total++
 		}
 	}
-	if total != 27 {
-		t.Fatalf("implemented pair count = %d, want 27", total)
+	if total != 28 {
+		t.Fatalf("implemented pair count = %d, want 28", total)
 	}
-	want := map[string]int{LanguageGo: 7, LanguageRust: 8, LanguagePython: 7, LanguageShell: 5}
+	want := map[string]int{LanguageGo: 7, LanguageRust: 8, LanguagePython: 7, LanguageShell: 5, LanguageWorkflow: 1}
 	for lang, n := range want {
 		if implemented[lang] != n {
 			t.Errorf("%s implemented count = %d, want %d", lang, implemented[lang], n)
@@ -520,16 +521,17 @@ func TestMatrixConfigSeam(t *testing.T) {
 }
 
 // TestMatrixReproParity is the REPRO regenerate-check: the pair set rebuilt
-// from MATRIX must equal the committed table byte-for-byte, so a pair dropped
-// from the table or invented in it fails this test (E9, both directions).
+// from MATRIX-plus-WORKFLOW-PAIR must equal the committed table byte-for-byte,
+// so a pair dropped from the table or invented in it fails this test (E9, both
+// directions).
 func TestMatrixReproParity(t *testing.T) {
 	parity := VerifyMatrixParity()
 	if !parity.Match {
-		t.Fatalf("committed table drifted from MATRIX:\nregenerated:\n%s\ncommitted:\n%s",
+		t.Fatalf("committed table drifted from MATRIX-plus-WORKFLOW-PAIR:\nregenerated:\n%s\ncommitted:\n%s",
 			parity.Regenerated, parity.Committed)
 	}
-	if got := len(strings.Split(parity.Committed, "\n")); got != 27 {
-		t.Fatalf("committed pair count = %d, want 27", got)
+	if got := len(strings.Split(parity.Committed, "\n")); got != 28 {
+		t.Fatalf("committed pair count = %d, want 28", got)
 	}
 }
 
