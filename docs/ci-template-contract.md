@@ -10,7 +10,7 @@ tags:
   - owner:public
 links:
   - project:fleet-04-adoption:design
-updated: 2026-09-05T00:00:00Z
+updated: 2026-09-06T01:25:00Z
 ---
 
 # CI template contract
@@ -214,17 +214,17 @@ Applied when the primary path leaves a check running against the ambient toolcha
 
 ## 5. Binary provisioning
 
-Defect 10: no template provisions the binaries its checks invoke. F54 measures 23 standalone binaries the section 4.7 matrix invokes that no template installs (measured 2026-08-26).
+Defect 10: no template provisions the binaries its checks invoke. F54 measures 22 standalone binaries the section 4.7 matrix invokes that no template installs (measured 2026-08-26). `actionlint` sits outside this population, because the section 4.7 matrix names it in no language column. F82 counts it under the workflow track, and SC39 owns its provisioning.
 
-**Install mechanism.** Twenty-one of the 23 reach a mise backend, so each gains a row in the target root's `mise.toml` `[tools]` block and installs through `mise install --locked` — the same activation step in section 4. Twelve of those record a per-platform digest in `mise.lock`; nine do not (the backend, not the tool, decides — F63 names `go:`, `pipx:` and `core:rust` as backends that lock nothing). The remaining two reach no mise backend and install through the system package manager (section 6). Every tool is pinned at its latest stable version, never `latest` (OD49).
+**Install mechanism.** Twenty of the 22 reach a mise backend, so each gains a row in the target root's `mise.toml` `[tools]` block and installs through `mise install --locked` — the same activation step in section 4. Eleven of those record a per-platform digest in `mise.lock`; nine do not (the backend, not the tool, decides — F63 names `go:`, `pipx:` and `core:rust` as backends that lock nothing). The remaining two reach no mise backend and install through the system package manager (section 6). Every tool is pinned at its latest stable version, never `latest` (OD49).
 
 **Digest verification is best-effort (SC7).** A tool arrives verified where its backend records a per-platform digest, and unverified where none does. A prebuilt download carries a digest; a tool the package manager assembles on the machine has no whole file to hash. The check is simply not run for those tools. No tool is named an exception, because the rule is a property of the backend rather than a carve-out for a name.
 
 **The locking shape (F61).** A locking `mise.lock` row records a per-platform digest for 7 platforms with 0 skipped (`golangci-lint` via `aqua:golangci/golangci-lint` at 2.13.0 measured this). `bats-core` records 6 (every fleet target present; windows excluded).
 
-### The 23-binary matrix
+### The 22-binary matrix
 
-Digest column: **yes** = backend records a per-platform digest (12, F67); **no** = backend records none (9, F67); **system** = no mise backend, installs via the OS package manager (2, F67/F79).
+Digest column: **yes** = backend records a per-platform digest (11, F67); **no** = backend records none (9, F67); **system** = no mise backend, installs via the OS package manager (2, F67/F79).
 
 | Binary | Track | Backend | Digest | Version rule | Install step |
 |---|---|---|---|---|---|
@@ -248,11 +248,10 @@ Digest column: **yes** = backend records a per-platform digest (12, F67); **no**
 | `semgrep` | Shell | `pipx:semgrep` | no | OD49 latest stable | `mise install --locked` |
 | `kcov` | Shell | `ubi:` | no | OD49 latest stable | `mise install --locked` |
 | `jq` | Shell | `aqua:jqlang/jq` | yes | OD49 latest stable | `mise install --locked` |
-| `actionlint` | Workflows | `aqua:rhysd/actionlint` | yes | OD49 latest stable | `mise install --locked` |
 | `playwright` | Python (`test e2e`) | `pipx:` (1.62.0) or `npm:` (1.62.1) | no | OD49 latest stable | `mise install --locked`; ships its own Chromium (OD61) |
 | Google Chrome | Go (`test e2e`) | none (system) | system | OD56 latest Chrome | apt (Google repo) / brew — section 6 |
 
-Twelve lock, nine do not, two reach no mise backend (F67). `playwright` needs no browser install step: it ships its own Chromium (OD61), so the Python `test e2e` leg installs no Chrome.
+Eleven lock, nine do not, two reach no mise backend (F67). The workflow track's own binary, `actionlint`, is counted separately by F82 and provisioned under SC39; this contract documents that track once the check lands. `playwright` needs no browser install step: it ships its own Chromium (OD61), so the Python `test e2e` leg installs no Chrome.
 
 ### Provisioning fallback (SC7)
 
@@ -302,7 +301,7 @@ A check whose binary reaches the runner by neither stage becomes a named defect 
 
 ## 6. System-package tools
 
-Two of the 23 reach no mise backend and install through the system package manager (OD57, F79 measured 2026-08-26): `checkbashisms` and Google Chrome.
+Two of the 22 reach no mise backend and install through the system package manager (OD57, F79 measured 2026-08-26): `checkbashisms` and Google Chrome.
 
 | Tool | OS | Channel | Source / package | Serves |
 |---|---|---|---|---|
