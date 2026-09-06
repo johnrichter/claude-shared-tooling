@@ -1,0 +1,254 @@
+# Reusable CI template — workflow track. Implements the fleet CI template contract
+# (docs/ci-template-contract.md) for the repository's own GitHub Actions bodies: one job, one
+# check (SC39's `workflow lint`), because WORKFLOW-PAIR (OD71) carves this track out of the
+# section 4.7 language matrix rather than adding a build/format/lint/vet/security/test column
+# for it. SC8's two-job split does not reach this template — the check reads source text, not
+# build output, so a second platform or a build-then-test split would find nothing new — and
+# that exclusion, like ci-shell.yml's, is by construction rather than an oversight. It carries
+# no test_timeout input either: defect 3 (contract section 8) ties that input to a `test`
+# subcommand, and this track's one pair is `lint`.
+#
+# Toolchain activation. The workflow track pins no per-repo language version — there is no
+# caller mise.toml/mise.lock for this check to install --locked against, exactly as ci-shell.yml
+# pins none for shell. `mise trust --all` still runs first (OD65, F58): a caller repo can carry
+# its own unrelated mise.toml for a different language's local dev setup, and mise refuses to
+# read any config it has not trusted, which would break the provisioning step that follows even
+# though that step never touches the caller's file.
+#
+# Check-tool provisioning (contract section 5, SC39). actionlint and jq — the workflow share of
+# the fleet's binary matrix — install from a template-owned mise config written to RUNNER_TEMP
+# and pointed at via MISE_CONFIG_FILE, never a caller's own committed mise.toml/mise.lock.
+# actionlint pins at aqua:rhysd/actionlint 1.7.12, the version F82 measures locking all seven
+# platform entries with a SHA-256 and a provenance attestation; it sits outside F54's 22-binary
+# matrix and outside SC7's digest-verification population, so this template is its only install
+# site (E8). jq pins at aqua:jqlang/jq 1.8.2, the same version ci-shell.yml already installs for
+# the shell track — a second install of one already-counted binary adds no binary to the
+# fleet's total (K10).
+#
+# The conversion step (WFRULES clause (f)). `language-tools workflow lint` classifies its own
+# outcome into clikit's closed taxonomy, not this template's: exit 0 is a plain pass, exit 10 is
+# a pass whose JSON result record carries one or more `caveats` entries, and exit 20 is a fault
+# whose record carries one or more `errors` entries. The step captures the exit code through an
+# if/else guard, so a 10 or a 20 never trips `set -e`, then reads the record with jq — never a
+# log-text pattern match (fleet-03/FB14 records what an opaque line costs). It emits one
+# `::warning::` annotation per caveats entry and still passes at 10 (gating on it would turn
+# every warning into a red default branch fleet-wide), and one `::error::` annotation per errors
+# entry and fails at 20 (swallowing it would turn every rule-one violation green). It adds no
+# member to the closed clikit taxonomy — it only routes two of the taxonomy's eleven classes to
+# a GitHub annotation. Any other exit code falls through to the fleet's general rule (contract
+# section 10): the step fails the job on it, unmapped.
+#
+# Target enumeration (WFRULES clause (a)). This template passes target_root and nothing else;
+# the workflow adapter, not the template, walks the tree and selects every tracked workflow body
+# at or below it in either of the rule's two shapes — a .yml/.yaml under a workflows directory
+# at any depth, and any *.github-workflow.yml file — so one call also reaches a plugin-shipped
+# body a bare actionlint invocation would miss.
+#
+# Inputs:
+#   runs_on                          (string,  default "ubuntu-24.04-arm")
+#     Fully qualified GitHub-hosted runner label, published by actions/runner-images. Never a
+#     floating tag (ubuntu-latest, ...): those move under a caller without notice (K5, OD34).
+#     Unused by this template's own job placement — OD63 fixes the checks job's platform, as it
+#     does for ci-shell.yml's — kept for input-naming parity with the other six templates. Its
+#     default names the fixed job's own platform rather than the other six's "ubuntu-24.04":
+#     this template sits outside F19's population and declares its own default.
+#   target_root                      (string,  default ".")
+#     Root the workflow-lint check enumerates from (--dir), relative to the checked-out repo.
+#     Recurses over every tracked workflow body at or below it (both shapes above), so one call
+#     per repository is enough.
+#   extra_steps                      (string,  default "")
+#     Shell script run after the check, for a repository-specific step language-tools doesn't
+#     cover. Empty runs nothing.
+#
+# Caller contract: the caller supplies nothing but these three inputs — this template checks out
+# the caller's own repo itself, at repo root, once per job. It needs no secret and pushes and
+# publishes nothing.
+
+name: CI template (Workflow)
+
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: "Fully qualified GitHub-hosted runner label (actions/runner-images). Never a floating tag. Unused for this template's own job placement (OD63 fixes it, as it does for ci-shell.yml); kept for input-naming parity with the other six templates. Defaults to the fixed job's own platform rather than the other six's ubuntu-24.04 (outside F19's population)."
+        required: false
+        type: string
+        default: "ubuntu-24.04-arm"
+      target_root:
+        description: "Root the workflow-lint check enumerates from (--dir), relative to the checked-out repo. The adapter, not this template, walks the tree: it reaches every tracked workflow body at or below target_root in either of WFRULES clause (a)'s two shapes — a .yml/.yaml under a workflows directory at any depth, and any *.github-workflow.yml file — so one call also reaches a plugin-shipped body."
+        required: false
+        type: string
+        default: "."
+      extra_steps:
+        description: "Shell script run after the workflow-lint check, for a repository-specific step this track doesn't cover. Empty runs nothing."
+        required: false
+        type: string
+        default: ""
+
+env:
+  # Named once; the check step reads this instead of restating the version.
+  # OD69 sets 3.0.0 (major bump: SC5 makes --language a required selector on `release build`).
+  LANGUAGE_TOOLS_VERSION: "3.0.0"
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: checks
+    runs-on: ubuntu-24.04-arm        # OD63: one platform, source text not build output
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # mise and language-tools name platforms differently (mise: linux/macos, x64/arm64;
+      # language-tools: Go's own linux/darwin, amd64/arm64) — resolve both once, here.
+      - name: Resolve runner platform
+        id: platform
+        run: |
+          mkdir -p "${RUNNER_TEMP}/bin"
+          echo "${RUNNER_TEMP}/bin" >> "$GITHUB_PATH"
+          case "$(uname -s)" in
+            Linux)  mise_os=linux;  lt_os=linux  ;;
+            Darwin) mise_os=macos;  lt_os=darwin ;;
+            *) echo "::error::unsupported runner OS $(uname -s)"; exit 1 ;;
+          esac
+          case "$(uname -m)" in
+            x86_64|amd64)  mise_arch=x64;   lt_arch=amd64 ;;
+            arm64|aarch64) mise_arch=arm64; lt_arch=arm64 ;;
+            *) echo "::error::unsupported runner arch $(uname -m)"; exit 1 ;;
+          esac
+          {
+            echo "mise_os=${mise_os}"
+            echo "mise_arch=${mise_arch}"
+            echo "lt_os=${lt_os}"
+            echo "lt_arch=${lt_arch}"
+          } >> "$GITHUB_OUTPUT"
+
+      # Verified fetch (SC1 shape): fetch the release's own published checksum manifest,
+      # look up this artifact's digest by exact filename match, then fetch the artifact and
+      # fail closed on any mismatch. Never pipes a download into a shell.
+      - name: Install mise (verified fetch)
+        env:
+          MISE_VERSION: "2026.9.1"
+          MISE_OS: ${{ steps.platform.outputs.mise_os }}
+          MISE_ARCH: ${{ steps.platform.outputs.mise_arch }}
+        run: |
+          set -euo pipefail
+          bin="mise-v${MISE_VERSION}-${MISE_OS}-${MISE_ARCH}"
+          base="https://github.com/jdx/mise/releases/download/v${MISE_VERSION}"
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "${tmp}/SHASUMS256.txt" "${base}/SHASUMS256.txt"
+          curl -fsSL -o "${tmp}/${bin}" "${base}/${bin}"
+          expected="$(awk -v want="./${bin}" '$2 == want { print $1; exit }' "${tmp}/SHASUMS256.txt")"
+          if [ -z "${expected}" ]; then
+            echo "::error::${bin} not listed in SHASUMS256.txt for mise v${MISE_VERSION}"
+            exit 1
+          fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "${tmp}/${bin}" | awk '{print $1}')"
+          else
+            actual="$(shasum -a 256 "${tmp}/${bin}" | awk '{print $1}')"
+          fi
+          if [ "${expected}" != "${actual}" ]; then
+            echo "::error::sha256 mismatch for ${bin} -- expected ${expected}, got ${actual}"
+            exit 1
+          fi
+          install -m 0755 "${tmp}/${bin}" "${RUNNER_TEMP}/bin/mise"
+          rm -rf "${tmp}"
+
+      # Trust every config mise will read before the first check reads one (OD65, F58). A
+      # caller repo's own, unrelated mise.toml would otherwise block the provisioning step
+      # below even though that step never installs anything from it.
+      - name: mise trust
+        run: mise trust --all
+
+      # SC39: actionlint resolves through the aqua backend, which records a per-platform
+      # digest; jq does too, and is the same pin ci-shell.yml already installs for shell
+      # (K10 — a second install of a counted binary adds no binary). Installed from a
+      # template-owned config so the caller's own committed mise.toml/mise.lock is never
+      # touched.
+      - name: Provision workflow check binaries (actionlint, jq)
+        env:
+          MISE_CONFIG_FILE: ${{ runner.temp }}/workflow-check-tools.toml
+        run: |
+          set -euo pipefail
+          cat > "${MISE_CONFIG_FILE}" <<'EOF'
+          [tools]
+          "aqua:rhysd/actionlint" = "1.7.12"
+          "aqua:jqlang/jq" = "1.8.2"
+          EOF
+          mise trust "${MISE_CONFIG_FILE}"
+          mise install
+          mise bin-paths >> "$GITHUB_PATH"
+
+      - name: Installed check-tool versions (OD60)
+        run: |
+          set -euo pipefail
+          actionlint -version
+          jq --version
+
+      - name: Install language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} (verified fetch)
+        env:
+          LT_OS: ${{ steps.platform.outputs.lt_os }}
+          LT_ARCH: ${{ steps.platform.outputs.lt_arch }}
+        run: |
+          set -euo pipefail
+          archive="language-tools_${LANGUAGE_TOOLS_VERSION}_${LT_OS}_${LT_ARCH}.tar.gz"
+          base="https://github.com/johnrichter/language-tools/releases/download/v${LANGUAGE_TOOLS_VERSION}"
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "${tmp}/checksums.txt" "${base}/checksums.txt"
+          curl -fsSL -o "${tmp}/${archive}" "${base}/${archive}"
+          expected="$(awk -v want="${archive}" '$2 == want { print $1; exit }' "${tmp}/checksums.txt")"
+          if [ -z "${expected}" ]; then
+            echo "::error::${archive} not listed in checksums.txt for language-tools v${LANGUAGE_TOOLS_VERSION}"
+            exit 1
+          fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "${tmp}/${archive}" | awk '{print $1}')"
+          else
+            actual="$(shasum -a 256 "${tmp}/${archive}" | awk '{print $1}')"
+          fi
+          if [ "${expected}" != "${actual}" ]; then
+            echo "::error::sha256 mismatch for ${archive} -- expected ${expected}, got ${actual}"
+            exit 1
+          fi
+          tar -xzf "${tmp}/${archive}" -C "${tmp}"
+          install -m 0755 "${tmp}/language-tools" "${RUNNER_TEMP}/bin/language-tools"
+          rm -rf "${tmp}"
+
+      # WFRULES clause (f): capture the exit code through an if/else guard, so a 10 or a 20
+      # never trips set -e, then read the binary's own JSON result record with jq — never a
+      # log-text pattern match. Exit 0 is silent and passes. Exit 10 emits one ::warning::
+      # annotation per `caveats` entry and still passes: gating on it would turn every
+      # warning into a red default branch fleet-wide. Exit 20 emits one ::error:: annotation
+      # per `errors` entry and fails: swallowing it would turn every rule-one violation
+      # green. Any other exit code is outside this clause's two mapped classes and fails the
+      # step with the code language-tools itself reported.
+      - name: language-tools workflow lint
+        run: |
+          set -euo pipefail
+          result="${RUNNER_TEMP}/workflow-lint-result.json"
+          if language-tools workflow lint --dir "${{ inputs.target_root }}" --log-dir "${{ github.workspace }}/.language-tools/log" > "${result}"; then
+            exit_code=0
+          else
+            exit_code=$?
+          fi
+          case "${exit_code}" in
+            0)
+              ;;
+            10)
+              jq -r '.caveats[] | "::warning::" + .message' "${result}"
+              ;;
+            20)
+              jq -r '.errors[] | "::error::" + .message' "${result}"
+              exit 20
+              ;;
+            *)
+              echo "::error::language-tools workflow lint exited ${exit_code}; see ${result}"
+              exit "${exit_code}"
+              ;;
+          esac
+
+      - name: Extra steps (repository-specific checks language-tools doesn't cover)
+        if: ${{ inputs.extra_steps != '' }}
+        run: ${{ inputs.extra_steps }}
