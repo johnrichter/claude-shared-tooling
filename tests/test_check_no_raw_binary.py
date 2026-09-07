@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Unit tests for scripts/check_no_raw_binary.py — the content-based no-raw-binary
-guard (closes the extensionless-binary hole that `.gitattributes` globs miss).
+"""Unit tests for scripts/check_no_raw_binary.py — the content-based no-raw-binary guard.
+
+Closes the extensionless-binary hole that `.gitattributes` globs miss.
 
 The checker is a standalone script (not part of the installed package), so it is
 loaded by path via importlib. Each test builds a throwaway real git repo (git
@@ -15,6 +16,7 @@ Coverage (acceptance-mapped):
     4. Binary under threshold -> PASS.
     5. `--staged` vs `--tracked` candidate-set selection is correct.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -46,6 +48,8 @@ def _init_repo(root: Path) -> None:
 
 
 class NoRawBinaryTests(unittest.TestCase):
+    """No raw binary tests."""
+
     def _repo(self) -> Path:
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
@@ -55,6 +59,7 @@ class NoRawBinaryTests(unittest.TestCase):
 
     def test_extensionless_binary_over_threshold_not_lfs_fails(self):
         # This is the whole point: no extension for a .gitattributes glob to match.
+        """Test extensionless binary over threshold not lfs fails."""
         root = self._repo()
         blob = root / "blob"
         blob.write_bytes(b"\x00" + b"x" * (_THRESHOLD + 10))
@@ -66,6 +71,7 @@ class NoRawBinaryTests(unittest.TestCase):
     def test_non_utf8_binary_over_threshold_not_lfs_fails(self):
         # Second is-binary branch: no NUL byte, but the prefix fails UTF-8 decode
         # (e.g. a Latin-1 / UTF-16 blob). Distinct code path from the NUL check.
+        """Test non utf8 binary over threshold not lfs fails."""
         root = self._repo()
         blob = root / "latin_blob"
         blob.write_bytes(b"\xff\xfe" * (_THRESHOLD + 10))  # invalid UTF-8, contains no NUL
@@ -75,6 +81,7 @@ class NoRawBinaryTests(unittest.TestCase):
         self.assertTrue(any("latin_blob" in f for f in failures), msg=str(failures))
 
     def test_text_file_even_large_passes(self):
+        """Test text file even large passes."""
         root = self._repo()
         text = root / "big.txt"
         text.write_text("hello world\n" * (_THRESHOLD // 10), encoding="utf-8")
@@ -84,8 +91,11 @@ class NoRawBinaryTests(unittest.TestCase):
         self.assertEqual(failures, [])
 
     def test_lfs_routed_binary_passes(self):
+        """Test lfs routed binary passes."""
         root = self._repo()
-        (root / ".gitattributes").write_text("*.bin filter=lfs diff=lfs merge=lfs -text\n", encoding="utf-8")
+        (root / ".gitattributes").write_text(
+            "*.bin filter=lfs diff=lfs merge=lfs -text\n", encoding="utf-8"
+        )
         probe = root / "probe.bin"
         probe.write_bytes(b"\x00" + b"x" * (_THRESHOLD + 10))
         _run_git(root, "add", ".gitattributes", "probe.bin")
@@ -94,6 +104,7 @@ class NoRawBinaryTests(unittest.TestCase):
         self.assertEqual(failures, [])
 
     def test_binary_under_threshold_passes(self):
+        """Test binary under threshold passes."""
         root = self._repo()
         small = root / "small_blob"
         small.write_bytes(b"\x00" + b"x" * 10)
@@ -103,6 +114,7 @@ class NoRawBinaryTests(unittest.TestCase):
         self.assertEqual(failures, [])
 
     def test_staged_vs_tracked_candidate_selection(self):
+        """Test staged vs tracked candidate selection."""
         root = self._repo()
         committed = root / "committed.txt"
         committed.write_text("committed\n", encoding="utf-8")

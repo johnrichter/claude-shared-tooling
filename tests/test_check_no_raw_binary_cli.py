@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""CLI-level regression for scripts/check_no_raw_binary.py — invokes the checker
-as a SUBPROCESS (not via import) against a throwaway real git repo, exercising
-the exact path a developer or CI hits: `python3 check_no_raw_binary.py --staged`.
+"""CLI-level regression for scripts/check_no_raw_binary.py, invoked as a subprocess.
+
+Invokes the checker as a SUBPROCESS (not via import) against a throwaway real git repo,
+exercising the exact path a developer or CI hits: `python3 check_no_raw_binary.py --staged`.
 
 Complements test_check_no_raw_binary.py's import-based unit tests by proving the
 argv/exit-code/stdout contract end-to-end, not just the internal `scan()` logic.
@@ -9,6 +10,7 @@ argv/exit-code/stdout contract end-to-end, not just the internal `scan()` logic.
 Byte-identical across every repo that adopts this guard (the canonical
 no-raw-binary artifact) — keep all copies in sync verbatim.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -32,7 +34,9 @@ def _run_git(root: Path, *args: str) -> None:
 def _run_checker(root: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(_CHECKER), *args, "--root", str(root)],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 
@@ -43,6 +47,8 @@ def _init_repo(root: Path) -> None:
 
 
 class CliSubprocessTests(unittest.TestCase):
+    """Cli subprocess tests."""
+
     def _repo(self) -> Path:
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
@@ -51,6 +57,7 @@ class CliSubprocessTests(unittest.TestCase):
         return root
 
     def test_extensionless_binary_fails_via_subprocess(self):
+        """Test extensionless binary fails via subprocess."""
         root = self._repo()
         (root / "blob").write_bytes(_NUL + _FILLER)
         _run_git(root, "add", "blob")
@@ -59,14 +66,18 @@ class CliSubprocessTests(unittest.TestCase):
         self.assertIn("blob", result.stdout)
 
     def test_lfs_routed_binary_passes_via_subprocess(self):
+        """Test lfs routed binary passes via subprocess."""
         root = self._repo()
-        (root / ".gitattributes").write_text("*.bin filter=lfs diff=lfs merge=lfs -text\n", encoding="utf-8")
+        (root / ".gitattributes").write_text(
+            "*.bin filter=lfs diff=lfs merge=lfs -text\n", encoding="utf-8"
+        )
         (root / "probe.bin").write_bytes(_NUL + _FILLER)
         _run_git(root, "add", ".gitattributes", "probe.bin")
         result = _run_checker(root, "--staged", "--max-bytes", "1000")
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
 
     def test_text_file_passes_via_subprocess(self):
+        """Test text file passes via subprocess."""
         root = self._repo()
         (root / "big.txt").write_text("hello world\n" * 300, encoding="utf-8")
         _run_git(root, "add", "big.txt")

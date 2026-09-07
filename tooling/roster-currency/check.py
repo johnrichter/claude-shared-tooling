@@ -23,6 +23,7 @@ Exit codes: 0 every owned artifact matches its own recorded-tag render; 1 one or
 drifted, is missing, or carries no recognizable generated-by tag; 2 the roster itself
 failed to load (missing, corrupt, unsupported schema version).
 """
+
 from __future__ import annotations
 
 import re
@@ -33,7 +34,8 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _ROSTER_GEN = _REPO_ROOT / "tooling" / "roster-gen"
 sys.path.insert(0, str(_ROSTER_GEN))
 
-from roster_gen.roster import RosterError, load as load_roster  # noqa: E402
+from roster_gen.roster import RosterError  # noqa: E402
+from roster_gen.roster import load as load_roster  # noqa: E402
 from roster_gen.targets import TARGETS, resolve  # noqa: E402
 
 _ROSTER_PATH = _REPO_ROOT / "schemas" / "model-roster" / "model-roster.json"
@@ -53,18 +55,24 @@ def _recorded_tag(text: str) -> str:
 
 
 def _render_at_recorded_tag(target, path: Path, roster: dict, have: str, tag: str) -> str:
-    """Mirrors roster-gen's own kind dispatch (cli.py), scoped to what an ai-shared-lib-owned
-    target can be today ("whole") plus the other two kinds for forward compatibility if this
-    repo ever gains a "patch" or "allowlist" target of its own."""
+    """Mirror roster-gen's own kind dispatch (cli.py), scoped to this repo's targets.
+
+    Scoped to what an ai-shared-lib-owned target can be today ("whole"), plus the other two
+    kinds for forward compatibility if this repo ever gains a "patch" or "allowlist" target of
+    its own.
+    """
     if target.kind == "whole":
         return target.render_fn(roster, tag)
     if target.kind == "allowlist":
-        existing_ids = {ln.strip() for ln in have.splitlines() if ln.strip() and not ln.lstrip().startswith("#")}
+        existing_ids = {
+            ln.strip() for ln in have.splitlines() if ln.strip() and not ln.lstrip().startswith("#")
+        }
         return target.render_fn(roster, tag, existing_ids=existing_ids)
     return target.render_fn(have, roster, tag)  # "patch"
 
 
 def main() -> int:
+    """Main."""
     try:
         roster = load_roster(_ROSTER_PATH)
     except RosterError as exc:
@@ -88,7 +96,9 @@ def main() -> int:
             continue
         want = _render_at_recorded_tag(target, path, roster, have, tag)
         if want != have:
-            failures.append(f"{path}: drifted from the roster-derived rendering at its own recorded tag {tag!r}")
+            failures.append(
+                f"{path}: drifted from the roster-derived rendering at its own recorded tag {tag!r}"
+            )
 
     for f in failures:
         print(f"roster-currency: {f}", file=sys.stderr)
@@ -99,7 +109,10 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    print(f"roster-currency: all {len(own_targets)} ai-shared-lib roster-derived artifact(s) current", file=sys.stderr)
+    print(
+        f"roster-currency: all {len(own_targets)} ai-shared-lib roster-derived artifact(s) current",
+        file=sys.stderr,
+    )
     return 0
 
 

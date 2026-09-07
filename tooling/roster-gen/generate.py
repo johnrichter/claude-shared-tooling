@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""roster-gen — one deterministic rendering pass from the model roster to every derived output.
+r"""roster-gen — one deterministic rendering pass from the model roster to every derived output.
 
 The model roster (`ai-shared-lib/schemas/model-roster/model-roster.json`) is this generator's
 only input. Every output below is a pure projection of it — never hand-edit an output; edit the
@@ -29,6 +29,7 @@ Usage:
 
     python3 generate.py --roster ... --tag ... --ai-shared-lib-root ... --marketplace-root ... check
 """
+
 from __future__ import annotations
 
 import sys

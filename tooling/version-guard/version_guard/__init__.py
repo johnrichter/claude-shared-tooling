@@ -1,2 +1,5 @@
-"""version-guard: enforces SC-VERSIONING (module tag prefix == module path) and the
-no-relative-path-dependency rule for the Rust workspace."""
+"""Enforce SC-VERSIONING and the no-relative-path-dependency rule.
+
+version-guard checks that a module's tag prefix equals its module path, and
+that the Rust workspace declares no relative-path dependency.
+"""

@@ -6,6 +6,7 @@ citation shape (a named source language, a plan/task id, a file:line pointer, a 
 code-shaped statement sitting alone in a comment) rather than on any word that could
 plausibly appear in one.
 """
+
 from __future__ import annotations
 
 import re
@@ -17,8 +18,13 @@ _LANG = (
 )
 
 PORT_ARCHAEOLOGY = [
-    re.compile(rf"\b(?:ported|porting|adapted|translated)\s+(?:from|to)\s+(?:the\s+)?{_LANG}\b", re.I),
-    re.compile(rf"\bwas\s+(?:originally\s+|previously\s+)?(?:written|implemented)\s+in\s+(?:the\s+)?{_LANG}\b", re.I),
+    re.compile(
+        rf"\b(?:ported|porting|adapted|translated)\s+(?:from|to)\s+(?:the\s+)?{_LANG}\b", re.I
+    ),
+    re.compile(
+        rf"\bwas\s+(?:originally\s+|previously\s+)?(?:written|implemented)\s+in\s+(?:the\s+)?{_LANG}\b",
+        re.I,
+    ),
     re.compile(rf"\bmirrors\s+the\s+{_LANG}\b.{{0,40}}\b(?:version|implementation|source)\b", re.I),
     re.compile(r"\b[\w-]+\.(?:py|go|rs|ts|tsx|js|jsx|rb|java|kt|kts|swift|cs|php|scala):\d+\b"),
 ]

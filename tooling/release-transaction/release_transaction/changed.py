@@ -10,6 +10,7 @@ Module roots, where each kind's version is read, which tag names count as its re
 the short list of repository-infrastructure paths that ship in no release are all declared
 in the contract.
 """
+
 from __future__ import annotations
 
 import json
@@ -106,7 +107,10 @@ def check_changed(contract: Contract, repo: Path, base: str, head: str = "HEAD")
         raise ChangedError(f"{repo} is not a git working tree")
     for ref in (base, head):
         if not gitstate.ref_exists(repo, ref):
-            raise ChangedError(f"{repo}: revision {ref!r} does not resolve -- refusing to judge a release against a ref that is not there")
+            raise ChangedError(
+                f"{repo}: revision {ref!r} does not resolve -- refusing to judge a release against "
+                f"a ref that is not there"
+            )
 
     rule = contract.changed_module_rule
     kinds = tuple(rule.get("module_kinds", ()))
@@ -132,7 +136,9 @@ def check_changed(contract: Contract, repo: Path, base: str, head: str = "HEAD")
         _verdict(contract, repo, modules[module_path], base, head, tuple(sorted(paths)))
         for module_path, paths in sorted(owned.items())
     ]
-    return ChangedReport(base=base, head=head, verdicts=tuple(verdicts), exempt=tuple(exempt), unowned=tuple(unowned))
+    return ChangedReport(
+        base=base, head=head, verdicts=tuple(verdicts), exempt=tuple(exempt), unowned=tuple(unowned)
+    )
 
 
 def _owning_module(repo: Path, path: str, kinds: tuple[dict[str, Any], ...]) -> Module | None:
@@ -164,7 +170,9 @@ def _matches(repo: Path, relative: str, declaration: dict[str, Any]) -> bool:
     return bool(glob) and relative != "." and fnmatch(relative, str(glob))
 
 
-def _verdict(contract: Contract, repo: Path, module: Module, base: str, head: str, changed: tuple[str, ...]) -> ModuleVerdict:
+def _verdict(
+    contract: Contract, repo: Path, module: Module, base: str, head: str, changed: tuple[str, ...]
+) -> ModuleVerdict:
     """Judge one changed module: version bump, then published release."""
     if module.version_source == _TAG:
         return _tag_versioned_verdict(contract, repo, module, base, changed)
@@ -173,7 +181,9 @@ def _verdict(contract: Contract, repo: Path, module: Module, base: str, head: st
     manifest_path = marker if module.path == "." else f"{module.path}/{marker}"
     head_version = _version_at(repo, head, manifest_path, module.declaration)
     if head_version is None:
-        return ModuleVerdict(module, "unreadable", f"{manifest_path} at {head} states no version", changed)
+        return ModuleVerdict(
+            module, "unreadable", f"{manifest_path} at {head} states no version", changed
+        )
     base_version = _version_at(repo, base, manifest_path, module.declaration)
 
     if base_version is not None:
@@ -181,7 +191,9 @@ def _verdict(contract: Contract, repo: Path, module: Module, base: str, head: st
             return ModuleVerdict(
                 module,
                 "no-version-bump",
-                f"{module.path} changed ({len(changed)} path(s)) but {manifest_path} is still {head_version} -- a change with no version bump ships to consumers as the previous release",
+                f"{module.path} changed ({len(changed)} path(s)) but {manifest_path} is still "
+                f"{head_version} -- a change with no version bump ships to consumers as the "
+                f"previous release",
                 changed,
             )
         ordering_failure = _ordering_failure(contract, base_version, head_version, manifest_path)
@@ -194,13 +206,21 @@ def _verdict(contract: Contract, repo: Path, module: Module, base: str, head: st
         return ModuleVerdict(
             module,
             "no-published-release",
-            f"{module.path} is at {head_version} with no release tag -- expected one of: {', '.join(tags)}",
+            f"{module.path} is at {head_version} with no release tag -- expected one of: "
+            f"{', '.join(tags)}",
             changed,
         )
-    return ModuleVerdict(module, "released", f"{module.path} bumped to {head_version} and released as {published[0]}", changed)
+    return ModuleVerdict(
+        module,
+        "released",
+        f"{module.path} bumped to {head_version} and released as {published[0]}",
+        changed,
+    )
 
 
-def _tag_versioned_verdict(contract: Contract, repo: Path, module: Module, base: str, changed: tuple[str, ...]) -> ModuleVerdict:
+def _tag_versioned_verdict(
+    contract: Contract, repo: Path, module: Module, base: str, changed: tuple[str, ...]
+) -> ModuleVerdict:
     """Judge a module whose only version marker is a tag."""
     globs = _release_tags(contract, module, "*")
     candidates = sorted({tag for glob in globs for tag in gitstate.list_tags(repo, glob)})
@@ -209,7 +229,8 @@ def _tag_versioned_verdict(contract: Contract, repo: Path, module: Module, base:
         return ModuleVerdict(
             module,
             "no-published-release",
-            f"{module.path} changed ({len(changed)} path(s)) but carries no release tag cut after {base} -- its version is its tag, so an unreleased change is invisible to consumers",
+            f"{module.path} changed ({len(changed)} path(s)) but carries no release tag cut after "
+            f"{base} -- its version is its tag, so an unreleased change is invisible to consumers",
             changed,
         )
     return ModuleVerdict(module, "released", f"{module.path} released as {released[0]}", changed)
@@ -218,10 +239,15 @@ def _tag_versioned_verdict(contract: Contract, repo: Path, module: Module, base:
 def _release_tags(contract: Contract, module: Module, version: str) -> list[str]:
     """Tag names that count as this module's release at `version`."""
     substitutions = {"module_path": module.path, "module_name": module.name, "version": version}
-    return [render_template(template, substitutions) for template in contract.changed_module_rule.get("tag_templates", ())]
+    return [
+        render_template(template, substitutions)
+        for template in contract.changed_module_rule.get("tag_templates", ())
+    ]
 
 
-def _version_at(repo: Path, ref: str, manifest_path: str, declaration: dict[str, Any]) -> str | None:
+def _version_at(
+    repo: Path, ref: str, manifest_path: str, declaration: dict[str, Any]
+) -> str | None:
     """The version a module's manifest states at a revision, or None when unreadable."""
     blob = gitstate.file_at_ref(repo, ref, manifest_path)
     if blob is None:
@@ -240,13 +266,18 @@ def _version_at(repo: Path, ref: str, manifest_path: str, declaration: dict[str,
     return None
 
 
-def _ordering_failure(contract: Contract, base_version: str, head_version: str, manifest_path: str) -> str | None:
+def _ordering_failure(
+    contract: Contract, base_version: str, head_version: str, manifest_path: str
+) -> str | None:
     """Reject a version change that is not an increase; None when the bump is a bump."""
     pattern = contract.changed_module_rule["version_pattern"]
     base_triple = parse_version(base_version, pattern)
     head_triple = parse_version(head_version, pattern)
     if base_triple is None or head_triple is None:
-        return f"{manifest_path}: {base_version} -> {head_version} is not a comparable semantic-version change"
+        return (
+            f"{manifest_path}: {base_version} -> {head_version} is not a comparable "
+            "semantic-version change"
+        )
     if head_triple <= base_triple:
         return f"{manifest_path}: {base_version} -> {head_version} does not increase the version"
     return None

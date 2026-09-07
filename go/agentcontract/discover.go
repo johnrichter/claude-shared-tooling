@@ -34,13 +34,21 @@ func DiscoverRosters(root string) ([]Roster, error) {
 			return fmt.Errorf("agentcontract: reading %s: %w", path, err)
 		}
 
+		// dirRoot scopes every brief read to this "agents" directory: a directory
+		// entry name can never carry a path component that escapes it.
+		dirRoot, err := os.OpenRoot(path)
+		if err != nil {
+			return fmt.Errorf("agentcontract: opening %s: %w", path, err)
+		}
+		defer func() { _ = dirRoot.Close() }()
+
 		var briefs []*Brief
 		for _, e := range entries {
 			if e.IsDir() || filepath.Ext(e.Name()) != ".md" {
 				continue
 			}
 			briefPath := filepath.Join(path, e.Name())
-			data, err := os.ReadFile(briefPath)
+			data, err := dirRoot.ReadFile(e.Name())
 			if err != nil {
 				return fmt.Errorf("agentcontract: reading %s: %w", briefPath, err)
 			}

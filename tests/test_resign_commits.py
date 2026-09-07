@@ -22,6 +22,7 @@ Test strategy (mirrors the tool's acceptance criteria):
 Run with: python3 -m unittest tests.test_resign_commits
        or: python3 -m unittest discover -s tests -p "test_*.py"
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -52,6 +53,7 @@ class GitRepo:
     def __init__(self, root: Path):
         # Repo work tree and key material live in separate subdirs so the ephemeral key
         # files never show up as untracked entries in `git status` of the repo.
+        """Initialize the instance."""
         self.path = str(root / "wt")
         keydir = root / "keys"
         (root / "wt").mkdir(parents=True, exist_ok=True)
@@ -60,7 +62,8 @@ class GitRepo:
         key = keydir / "sign_ed25519"
         subprocess.run(
             ["ssh-keygen", "-t", "ed25519", "-N", "", "-C", "test@example.com", "-f", str(key)],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
         pub = (keydir / "sign_ed25519.pub").read_text().strip()
         allowed = keydir / "allowed_signers"
@@ -76,12 +79,15 @@ class GitRepo:
             _run(["config", k, v], self.path)
 
     def git(self, *args, check=True, inp=None):
+        """Git."""
         return _run(list(args), self.path, check=check, inp=inp)
 
     def write(self, name, content):
+        """Write."""
         (Path(self.path) / name).write_text(content)
 
     def commit(self, name, content, msg, *, sign, date="2026-01-01T00:00:00"):
+        """Commit."""
         self.write(name, content)
         self.git("add", name)
         return self.raw_commit(msg, sign=sign, date=date)
@@ -93,43 +99,62 @@ class GitRepo:
         return self.sha()
 
     def commit_verbatim(self, name, content, msg_bytes: bytes, *, sign, date="2026-01-01T00:00:00"):
-        """Commit with `--cleanup=verbatim` so git does NOT strip trailing whitespace or
-        collapse blank lines in the message -- needed to test byte-for-byte preservation."""
+        """Commit with `--cleanup=verbatim` to preserve the message bytes exactly.
+
+        git does NOT strip trailing whitespace or collapse blank lines in the message --
+        needed to test byte-for-byte preservation.
+        """
         self.write(name, content)
         self.git("add", name)
         flag = "-S" if sign else "--no-gpg-sign"
         subprocess.run(
             ["git", "commit", flag, "--cleanup=verbatim", "-F", "-"],
-            cwd=self.path, input=msg_bytes, env=_env(date), check=True, capture_output=True,
+            cwd=self.path,
+            input=msg_bytes,
+            env=_env(date),
+            check=True,
+            capture_output=True,
         )
         return self.sha()
 
     def raw_message(self, ref) -> bytes:
-        """The exact bytes stored in the commit OBJECT's message (not `log --format=%B`,
-        which appends its own trailing newline on top of whatever is actually stored)."""
+        """The exact bytes stored in the commit OBJECT's message.
+
+        Not `log --format=%B`, which appends its own trailing newline on top of whatever is
+        actually stored.
+        """
         raw = subprocess.run(
-            ["git", "cat-file", "-p", ref], cwd=self.path, capture_output=True, check=True,
+            ["git", "cat-file", "-p", ref],
+            cwd=self.path,
+            capture_output=True,
+            check=True,
         ).stdout
-        return raw[raw.index(b"\n\n") + 2:]
+        return raw[raw.index(b"\n\n") + 2 :]
 
     def merge(self, branch, msg, *, date, sign=True):
+        """Merge."""
         args = ["merge", "-S" if sign else "--no-gpg-sign", "--no-ff", "-m", msg, branch]
         _run(args, self.path, env=_env(date))
         return self.sha()
 
     def sha(self, ref="HEAD"):
+        """Sha."""
         return self.git("rev-parse", ref).stdout.strip()
 
     def gflag(self, ref="HEAD"):
+        """Gflag."""
         return self.git("log", "-1", "--format=%G?", ref).stdout.strip()
 
     def tree(self, ref):
+        """Tree."""
         return self.git("rev-parse", f"{ref}^{{tree}}").stdout.strip()
 
     def read(self, name, ref):
+        """Read."""
         return self.git("show", f"{ref}:{name}").stdout
 
     def flags(self, ref):
+        """Flags."""
         return self.git("log", "--format=%G?", ref).stdout.split()
 
 
@@ -149,6 +174,7 @@ class SigningTestCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        """Set up class."""
         cls._saved_env = {k: os.environ.get(k) for k in cls._ISO_KEYS}
         for k in cls._ISO_KEYS:
             os.environ[k] = os.devnull
@@ -160,6 +186,7 @@ class SigningTestCase(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        """Tear down class."""
         cls._restore_env()
 
     @classmethod
@@ -171,26 +198,36 @@ class SigningTestCase(unittest.TestCase):
                 os.environ[k] = v
 
     def setUp(self):
+        """Set up."""
         self._td = tempfile.TemporaryDirectory()
         self.repo = GitRepo(Path(self._td.name))
 
     def tearDown(self):
+        """Tear down."""
         self._td.cleanup()
 
     @property
     def cwd(self):
+        """Cwd."""
         return self.repo.path
 
     def _verify_map(self, old_tip, new_tip, base, mapping):
-        return {n: ok for n, ok, _ in resign_commits.verify(old_tip, new_tip, base, mapping, cwd=self.cwd)}
+        return {
+            n: ok
+            for n, ok, _ in resign_commits.verify(old_tip, new_tip, base, mapping, cwd=self.cwd)
+        }
 
 
 class TestConflictMergeRegression(SigningTestCase):
-    """The bug this tool exists for: re-signing history containing a merge with a recorded
-    conflict resolution. `rebase --rebase-merges` re-runs the merge and re-conflicts;
-    commit-tree reuses the recorded tree, so it reproduces the resolved content exactly."""
+    """The bug this tool exists for: re-signing history containing a conflicted merge.
+
+    Re-signing a merge with a recorded conflict resolution. `rebase --rebase-merges` re-runs
+    the merge and re-conflicts; commit-tree reuses the recorded tree, so it reproduces the
+    resolved content exactly.
+    """
 
     def test_conflict_merge_resigns_and_preserves_resolved_tree(self):
+        """Test conflict merge resigns and preserves resolved tree."""
         r = self.repo
         r.commit("X", "base\n", "c0 root", sign=True)
         r.git("checkout", "-q", "-b", "branchA")
@@ -200,7 +237,9 @@ class TestConflictMergeRegression(SigningTestCase):
         r.git("merge", "--no-commit", "--no-ff", "branchA", check=False)  # conflicts on X
         r.write("X", "resolved\n")
         r.git("add", "X")
-        old_tip = r.raw_commit("merge branchA into main (conflict resolved)", sign=True, date="2026-01-02T00:00:00")
+        old_tip = r.raw_commit(
+            "merge branchA into main (conflict resolved)", sign=True, date="2026-01-02T00:00:00"
+        )
         old_merge_tree = r.tree(old_tip)
         self.assertEqual(r.read("X", old_tip), "resolved\n")
 
@@ -209,13 +248,15 @@ class TestConflictMergeRegression(SigningTestCase):
         base = resign_commits.compute_base(unsigned, cwd=self.cwd)
         new_tip, mapping = resign_commits.rebuild(base, old_tip, cwd=self.cwd)
 
-        self.assertEqual(r.tree(new_tip), old_merge_tree)   # merge tree reproduced -> no re-merge
+        self.assertEqual(r.tree(new_tip), old_merge_tree)  # merge tree reproduced -> no re-merge
         self.assertEqual(r.read("X", new_tip), "resolved\n")
         results = self._verify_map(old_tip, new_tip, base, mapping)
         self.assertTrue(all(results.values()), msg=str(results))
 
 
 class TestFidelity(SigningTestCase):
+    """Test fidelity."""
+
     def _build_mixed_history(self):
         r = self.repo
         r.commit("a.txt", "0\n", "root", sign=True)
@@ -229,6 +270,7 @@ class TestFidelity(SigningTestCase):
         return r.sha()
 
     def test_full_fidelity_over_merge_history(self):
+        """Test full fidelity over merge history."""
         r = self.repo
         old_tip = self._build_mixed_history()
         unsigned = resign_commits.find_unsigned("main", cwd=self.cwd)
@@ -240,20 +282,26 @@ class TestFidelity(SigningTestCase):
         self.assertNotIn("N", r.flags(new_tip))
 
     def test_author_committer_and_dates_preserved(self):
+        """Test author committer and dates preserved."""
         r = self.repo
         r.commit("f", "0\n", "root", sign=True, date="2020-05-05T12:00:00")
         r.commit("f", "1\n", "unsigned one", sign=False, date="2021-06-06T13:00:00")
         old_tip = r.sha()
         fmt = ["log", "-1", "--format=%an|%ae|%ad|%cn|%ce|%cd", "--date=raw"]
         old_ident = r.git(*fmt, old_tip).stdout.strip()
-        base = resign_commits.compute_base(resign_commits.find_unsigned("main", cwd=self.cwd), cwd=self.cwd)
+        base = resign_commits.compute_base(
+            resign_commits.find_unsigned("main", cwd=self.cwd), cwd=self.cwd
+        )
         new_tip, _ = resign_commits.rebuild(base, old_tip, cwd=self.cwd)
         self.assertEqual(old_ident, r.git(*fmt, new_tip).stdout.strip())
         self.assertIn(r.gflag(new_tip), ("G", "U"))
 
 
 class TestComputeBase(SigningTestCase):
+    """Test compute base."""
+
     def test_chained_unsigned(self):
+        """Test chained unsigned."""
         r = self.repo
         root = r.commit("f", "0\n", "root", sign=True)
         u1 = r.commit("f", "1\n", "u1 UNSIGNED", sign=False)
@@ -265,6 +313,7 @@ class TestComputeBase(SigningTestCase):
         self.assertTrue({u1, u2}.issubset(in_range))
 
     def test_parallel_branch_unsigned(self):
+        """Test parallel branch unsigned."""
         r = self.repo
         r.commit("shared", "0\n", "root", sign=True)
         r.git("checkout", "-q", "-b", "left")
@@ -286,12 +335,15 @@ class TestComputeBase(SigningTestCase):
 
 
 class TestOctopusBuildBranch(SigningTestCase):
-    """Mirrors a CI merge-gate case: a build branch off main that octopus-merges
-    several parallel task branches, each carrying an unsigned checkpoint (resilient/unattended
-    fallback). The tool must re-sign the whole branch so it is mergeable, preserving the
-    octopus merge (>2 parents) exactly."""
+    """Mirror a CI merge-gate case: a build branch off main that octopus-merges.
+
+    Merges several parallel task branches, each carrying an unsigned checkpoint
+    (resilient/unattended fallback). The tool must re-sign the whole branch so it is
+    mergeable, preserving the octopus merge (>2 parents) exactly.
+    """
 
     def test_octopus_merge_branch_resigns_and_preserves_topology(self):
+        """Test octopus merge branch resigns and preserves topology."""
         r = self.repo
         r.commit("main.txt", "0\n", "main base", sign=True)
         r.git("checkout", "-q", "-b", "build")
@@ -300,8 +352,11 @@ class TestOctopusBuildBranch(SigningTestCase):
             r.git("checkout", "-q", "-b", t)
             r.commit(f"{t}.txt", "x\n", f"{t} checkpoint (UNSIGNED)", sign=False)
         r.git("checkout", "-q", "build")
-        _run(["merge", "-S", "--no-ff", "-m", "octopus merge t1 t2 t3", "t1", "t2", "t3"],
-             r.path, env=_env("2026-03-03T00:00:00"))
+        _run(
+            ["merge", "-S", "--no-ff", "-m", "octopus merge t1 t2 t3", "t1", "t2", "t3"],
+            r.path,
+            env=_env("2026-03-03T00:00:00"),
+        )
         old_tip = r.sha()
         self.assertEqual(len(resign_commits.parents(old_tip, cwd=self.cwd)), 4)  # HEAD + 3 tasks
         unsigned = resign_commits.find_unsigned("build", cwd=self.cwd)
@@ -316,7 +371,10 @@ class TestOctopusBuildBranch(SigningTestCase):
 
 
 class TestCli(SigningTestCase):
+    """Test cli."""
+
     def test_no_unsigned_is_noop(self):
+        """Test no unsigned is noop."""
         r = self.repo
         r.commit("f", "0\n", "root", sign=True)
         before = r.sha()
@@ -328,6 +386,7 @@ class TestCli(SigningTestCase):
         self.assertEqual(r.sha(), before)
 
     def test_apply_moves_branch_and_is_idempotent(self):
+        """Test apply moves branch and is idempotent."""
         r = self.repo
         r.commit("f", "0\n", "root", sign=True)
         r.commit("f", "1\n", "unsigned", sign=False)
@@ -351,10 +410,14 @@ class TestCli(SigningTestCase):
 
 
 class TestUnsignedRoot(SigningTestCase):
-    """The root commit itself is unsigned -> compute_base has no parent to anchor on and
-    must return None, and rebuild must rewrite the WHOLE history (base=None branch)."""
+    """The root commit itself is unsigned.
+
+    compute_base has no parent to anchor on and must return None, and rebuild must rewrite
+    the WHOLE history (base=None branch).
+    """
 
     def test_unsigned_root_rewrites_from_scratch(self):
+        """Test unsigned root rewrites from scratch."""
         r = self.repo
         root = r.commit("f", "0\n", "root (UNSIGNED)", sign=False)
         r.commit("f", "1\n", "second (signed)", sign=True)
@@ -386,14 +449,17 @@ class TestUnsignedRoot(SigningTestCase):
 
 
 class TestUnsignedRootWithUnsignedChild(SigningTestCase):
-    """Regression for the masked-root bug: an unsigned ROOT that is ALSO the parent of
-    another unsigned commit. The old code put the root into `all_parents` (because it IS
-    the child's parent) and, since that was the only parent, returned the root itself as
-    `base` -- but `rebuild` treats `base..tip` as EXCLUSIVE, so the root was silently never
-    re-signed. The fix returns None as soon as ANY unsigned commit has no parents, checked
-    before the parent-union logic can mask it."""
+    """Regression for the masked-root bug: an unsigned root that is also an unsigned parent.
+
+    The old code put the root into `all_parents` (because it IS the child's parent) and,
+    since that was the only parent, returned the root itself as `base` -- but `rebuild`
+    treats `base..tip` as EXCLUSIVE, so the root was silently never re-signed. The fix
+    returns None as soon as ANY unsigned commit has no parents, checked before the
+    parent-union logic can mask it.
+    """
 
     def test_unsigned_root_with_unsigned_child_resigns_root_too(self):
+        """Test unsigned root with unsigned child resigns root too."""
         r = self.repo
         root = r.commit("f", "0\n", "root (UNSIGNED)", sign=False)
         child = r.commit("f", "1\n", "child of root (UNSIGNED)", sign=False)
@@ -414,15 +480,19 @@ class TestUnsignedRootWithUnsignedChild(SigningTestCase):
 
 
 class TestMessageFidelity(SigningTestCase):
-    """Commit messages with unicode, multiple paragraphs, and trailing whitespace must
-    survive rebuild byte-for-byte -- including the edge case of a message stored with no
-    final newline (the tool reads exact object bytes and commit-tree adds nothing)."""
+    """Commit messages must survive rebuild byte-for-byte.
+
+    Unicode, multiple paragraphs, and trailing whitespace must survive -- including the edge
+    case of a message stored with no final newline (the tool reads exact object bytes and
+    commit-tree adds nothing).
+    """
 
     def test_unicode_multiparagraph_trailing_whitespace_preserved(self):
+        """Test unicode multiparagraph trailing whitespace preserved."""
         r = self.repo
         r.commit("f", "0\n", "root", sign=True)
         msg = (
-            "Héllo wörld 日本語 \U0001F389\n"
+            "Héllo wörld 日本語 \U0001f389\n"
             "\n"
             "Second paragraph with trailing spaces   \n"
             "and a trailing tab\t\n"
@@ -434,15 +504,20 @@ class TestMessageFidelity(SigningTestCase):
         old_raw = r.raw_message(old_tip)
         self.assertEqual(old_raw, msg)  # sanity: --cleanup=verbatim really preserved it
 
-        base = resign_commits.compute_base(resign_commits.find_unsigned("main", cwd=self.cwd), cwd=self.cwd)
+        base = resign_commits.compute_base(
+            resign_commits.find_unsigned("main", cwd=self.cwd), cwd=self.cwd
+        )
         new_tip, _ = resign_commits.rebuild(base, old_tip, cwd=self.cwd)
         new_raw = r.raw_message(new_tip)
         self.assertEqual(old_raw, new_raw)  # byte-for-byte, including trailing whitespace/tab
 
     def test_message_without_trailing_newline_preserved_exactly(self):
-        """A message stored WITHOUT a final newline is reproduced byte-for-byte -- the tool
-        reads the exact object bytes (`git cat-file`, not `git log --format=%B`, which would
-        append a newline) and commit-tree does no cleanup, so nothing is added or truncated."""
+        """A message stored WITHOUT a final newline is reproduced byte-for-byte.
+
+        The tool reads the exact object bytes (`git cat-file`, not `git log --format=%B`,
+        which would append a newline) and commit-tree does no cleanup, so nothing is added or
+        truncated.
+        """
         r = self.repo
         r.commit("f", "0\n", "root", sign=True)
         msg = "no trailing newline on this unicode message: ✓".encode()
@@ -450,27 +525,34 @@ class TestMessageFidelity(SigningTestCase):
         old_raw = r.raw_message(old_tip)
         self.assertFalse(old_raw.endswith(b"\n"))  # sanity: verbatim really kept it newline-less
 
-        base = resign_commits.compute_base(resign_commits.find_unsigned("main", cwd=self.cwd), cwd=self.cwd)
+        base = resign_commits.compute_base(
+            resign_commits.find_unsigned("main", cwd=self.cwd), cwd=self.cwd
+        )
         new_tip, _ = resign_commits.rebuild(base, old_tip, cwd=self.cwd)
         new_raw = r.raw_message(new_tip)
         self.assertEqual(new_raw, old_raw)  # byte-for-byte; no spurious newline appended
 
 
 class TestVerifyCatchesTampering(SigningTestCase):
-    """`verify` must FAIL, not rubber-stamp, when handed a bad rewrite. Each test tampers
-    with an otherwise-valid mapping/tip and asserts the specific check(s) that should catch
-    it actually flip to failing -- proving the verification has teeth."""
+    """`verify` must FAIL, not rubber-stamp, when handed a bad rewrite.
+
+    Each test tampers with an otherwise-valid mapping/tip and asserts the specific check(s)
+    that should catch it actually flip to failing -- proving the verification has teeth.
+    """
 
     def _good_history(self):
         r = self.repo
         r.commit("a.txt", "0\n", "root", sign=True)
         r.commit("a.txt", "1\n", "unsigned", sign=False)
         old_tip = r.sha()
-        base = resign_commits.compute_base(resign_commits.find_unsigned("main", cwd=self.cwd), cwd=self.cwd)
+        base = resign_commits.compute_base(
+            resign_commits.find_unsigned("main", cwd=self.cwd), cwd=self.cwd
+        )
         new_tip, mapping = resign_commits.rebuild(base, old_tip, cwd=self.cwd)
         return old_tip, new_tip, base, mapping
 
     def test_tampered_tip_pointing_at_unrelated_tree_fails_verification(self):
+        """Test tampered tip pointing at unrelated tree fails verification."""
         r = self.repo
         old_tip, new_tip, base, mapping = self._good_history()
         # A real, valid, but UNRELATED commit -- simulates a corrupted/wrong new_tip handoff.
@@ -485,6 +567,7 @@ class TestVerifyCatchesTampering(SigningTestCase):
         self.assertFalse(all(results.values()))  # overall verdict must not be a pass
 
     def test_tampered_mapping_entry_fails_tree_fidelity_check(self):
+        """Test tampered mapping entry fails tree fidelity check."""
         r = self.repo
         old_tip, new_tip, base, mapping = self._good_history()
         # Point one mapping entry at a commit with a DIFFERENT tree than its "original".
@@ -501,6 +584,7 @@ class TestVerifyCatchesTampering(SigningTestCase):
         self.assertFalse(all(results.values()))
 
     def test_tampered_base_not_ancestor_fails_boundary_check(self):
+        """Test tampered base not ancestor fails boundary check."""
         r = self.repo
         old_tip, new_tip, base, mapping = self._good_history()
         r.git("checkout", "-q", "--orphan", "decoy2")
@@ -514,7 +598,10 @@ class TestVerifyCatchesTampering(SigningTestCase):
 
 
 class TestApplyGuardrails(SigningTestCase):
+    """Test apply guardrails."""
+
     def test_apply_refuses_when_ref_is_not_a_local_branch(self):
+        """Test apply refuses when ref is not a local branch."""
         r = self.repo
         r.commit("f", "0\n", "root", sign=True)
         r.commit("f", "1\n", "unsigned", sign=False)
@@ -538,9 +625,12 @@ class TestApplyGuardrails(SigningTestCase):
         self.assertNotEqual(parked, "")
 
     def test_apply_is_compare_and_swap_refuses_if_branch_moved(self):
-        """--apply must not clobber commits added after detection. We simulate a concurrent
-        advance by moving the branch forward between rebuild and the apply's ref move, using
-        the same public entrypoints the tool would; the CAS old-value guard must refuse."""
+        """--apply must not clobber commits added after detection.
+
+        We simulate a concurrent advance by moving the branch forward between rebuild and the
+        apply's ref move, using the same public entrypoints the tool would; the CAS old-value
+        guard must refuse.
+        """
         r = self.repo
         r.commit("f", "0\n", "root", sign=True)
         r.commit("f", "1\n", "unsigned", sign=False)
@@ -557,6 +647,7 @@ class TestApplyGuardrails(SigningTestCase):
         self.assertEqual(r.sha("main"), advanced)  # branch not clobbered
 
     def test_print_push_cmd_emits_expected_force_with_lease_string(self):
+        """Test print push cmd emits expected force with lease string."""
         r = self.repo
         r.commit("f", "0\n", "root", sign=True)
         r.commit("f", "1\n", "unsigned", sign=False)

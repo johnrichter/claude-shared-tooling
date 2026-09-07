@@ -8,6 +8,7 @@ declaration line, which a `//` or `#` comment line can never match since the anc
 requires the declaring keyword (or, for a grouped var/const block, the symbol itself) to be
 the first token. Any other extension falls back to a comment-stripped whole-word search.
 """
+
 from __future__ import annotations
 
 import ast
@@ -47,7 +48,10 @@ def _resolve_go(text: str, symbol: str) -> bool:
 def _resolve_rust(text: str, symbol: str) -> bool:
     """A Rust fn, struct, enum, trait, const, static, or type item named `symbol`."""
     name = re.escape(symbol)
-    modifiers = r'(?:pub(?:\([^)]*\))?\s+)?(?:default\s+)?(?:async\s+)?(?:unsafe\s+)?(?:extern\s+"[^"]*"\s+)?'
+    modifiers = (
+        r"(?:pub(?:\([^)]*\))?\s+)?(?:default\s+)?(?:async\s+)?"
+        r'(?:unsafe\s+)?(?:extern\s+"[^"]*"\s+)?'
+    )
     patterns = [
         rf"^\s*{modifiers}fn\s+{name}\s*[<(]",
         rf"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum|trait|const|static(?:\s+mut)?|type)\s+{name}\b",

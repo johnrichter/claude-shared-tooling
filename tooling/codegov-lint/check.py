@@ -15,6 +15,7 @@ Usage:
 Exit codes: 0 no violations; 1 one or more violations found; 2 the harness itself could not
 run (not a git repo, bad arguments).
 """
+
 from __future__ import annotations
 
 import sys

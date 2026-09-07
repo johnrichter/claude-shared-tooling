@@ -3,6 +3,7 @@
 Extracts comments, runs the banned-content and doc-presence rules, and returns every
 violation found across a given file list.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

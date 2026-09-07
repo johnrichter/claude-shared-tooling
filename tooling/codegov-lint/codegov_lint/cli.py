@@ -9,6 +9,7 @@ Three ways to pick the file set to check, in order of intended use:
                      since the existing tree predates this rule set and carries a real
                      remediation backlog these rules would otherwise block on).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -79,10 +80,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if pydocs.ruff_available():
         with tempfile.TemporaryDirectory() as tmp:
-            violations.extend(pydocs.scan_python_docstrings(paths, repo_root, Path(tmp) / "ruff.toml"))
+            violations.extend(
+                pydocs.scan_python_docstrings(paths, repo_root, Path(tmp) / "ruff.toml")
+            )
         violations.sort(key=lambda v: (v.path, v.line, v.rule))
     else:
-        print("codegov-lint: ruff not found on PATH, skipping Python docstring check", file=sys.stderr)
+        print(
+            "codegov-lint: ruff not found on PATH, skipping Python docstring check", file=sys.stderr
+        )
 
     _print_report(violations)
     return 1 if violations else 0

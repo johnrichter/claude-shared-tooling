@@ -13,9 +13,13 @@
 # this template's toolchain step has no digest to verify against and says so rather than
 # implying one. `MISE_RUSTUP_HOME`/`MISE_CARGO_HOME`, set on the `mise install --locked`
 # step, make mise bootstrap its own isolated rustup rather than reuse or mutate the
-# runner's ambient one (F62) — that plus the resolve+install+PATH sequence are the two
-# activation stages Rust carries (OD16). Cargo is absent from the `ubuntu-24.04` toolcache
-# (F55b), so there is no third stage here and none is implied.
+# runner's ambient one (F62). Because a rustup-managed cargo is a proxy that reads
+# `RUSTUP_TOOLCHAIN` to select a toolchain and `RUSTUP_HOME` to find it, that step persists
+# mise's resolved selection (both homes plus `RUSTUP_TOOLCHAIN`) to `GITHUB_ENV`, not just
+# `bin-paths` to PATH — otherwise a later step's bare cargo resolves the runner's ambient
+# default rather than the pin. That resolve+install+activate sequence is the two activation
+# stages Rust carries (OD16). Cargo is absent from the `ubuntu-24.04` toolcache (F55b), so
+# there is no third stage here and none is implied.
 #
 # Check-tool provisioning (contract section 5): cargo-audit, cargo-deny, cargo-nextest and
 # cargo-llvm-cov — the Rust share of F54's 23-binary matrix — install from a template-owned
@@ -186,6 +190,12 @@ jobs:
           set -euo pipefail
           mise install --locked
           mise bin-paths >> "$GITHUB_PATH"
+          # A rustup-managed cargo is a proxy that reads RUSTUP_TOOLCHAIN to pick a toolchain
+          # and RUSTUP_HOME to find it; `mise bin-paths` puts that proxy on PATH but sets
+          # neither, so a bare cargo in a later step resolves the runner's ambient default
+          # instead of the pin (the SC6 breach F56 guards against). Persist mise's own resolved
+          # values — never a hardcoded version — so every later step's cargo is the pin.
+          mise env --dotenv | grep -E '^(RUSTUP_HOME|CARGO_HOME|RUSTUP_TOOLCHAIN)=' >> "$GITHUB_ENV"
 
       # SC6: prove the pin, not the ambient runner Cargo (F56 measures Cargo 1.97.1 ambient).
       # The core:rust lock row carries no digest to verify (F60) — this printed version is
@@ -341,6 +351,12 @@ jobs:
           set -euo pipefail
           mise install --locked
           mise bin-paths >> "$GITHUB_PATH"
+          # A rustup-managed cargo is a proxy that reads RUSTUP_TOOLCHAIN to pick a toolchain
+          # and RUSTUP_HOME to find it; `mise bin-paths` puts that proxy on PATH but sets
+          # neither, so a bare cargo in a later step resolves the runner's ambient default
+          # instead of the pin (the SC6 breach F56 guards against). Persist mise's own resolved
+          # values — never a hardcoded version — so every later step's cargo is the pin.
+          mise env --dotenv | grep -E '^(RUSTUP_HOME|CARGO_HOME|RUSTUP_TOOLCHAIN)=' >> "$GITHUB_ENV"
 
       - name: Resolved Rust toolchain version
         run: cargo --version

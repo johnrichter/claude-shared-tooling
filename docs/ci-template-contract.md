@@ -220,7 +220,7 @@ Applied when the primary path leaves a check running against the ambient toolcha
 
 Defect 10: no template provisions the binaries its checks invoke. F54 measures 22 standalone binaries the section 4.7 matrix invokes that no template installs (measured 2026-08-26). `actionlint` sits outside this population, because the section 4.7 matrix names it in no language column. F82 counts it under the workflow track; SC39 owns its provisioning, documented in its own subsection below.
 
-**Install mechanism.** Twenty of the 22 reach a mise backend, so each gains a row in the target root's `mise.toml` `[tools]` block and installs through `mise install --locked` — the same activation step in section 4. Eleven of those record a per-platform digest in `mise.lock`; nine do not (the backend, not the tool, decides — F63 names `go:`, `pipx:` and `core:rust` as backends that lock nothing). The remaining two reach no mise backend and install through the system package manager (section 6). Every tool is pinned at its latest stable version, never `latest` (OD49).
+**Install mechanism.** Nineteen of the 22 reach a mise backend, so each gains a row in the target root's `mise.toml` `[tools]` block and installs through `mise install --locked` — the same activation step in section 4. Eleven of those record a per-platform digest in `mise.lock`; eight do not (the backend, not the tool, decides — F63 names `go:`, `pipx:` and `core:rust` as backends that lock nothing). The remaining three reach no mise backend and install through the system package manager or a pinned from-source build (section 6). Every tool is pinned at its latest stable version, never `latest` (OD49).
 
 **Digest verification is best-effort (SC7).** A tool arrives verified where its backend records a per-platform digest, and unverified where none does. A prebuilt download carries a digest; a tool the package manager assembles on the machine has no whole file to hash. The check is simply not run for those tools. No tool is named an exception, because the rule is a property of the backend rather than a carve-out for a name.
 
@@ -228,7 +228,7 @@ Defect 10: no template provisions the binaries its checks invoke. F54 measures 2
 
 ### The 22-binary matrix
 
-Digest column: **yes** = backend records a per-platform digest (11, F67); **no** = backend records none (9, F67); **system** = no mise backend, installs via the OS package manager (2, F67/F79).
+Digest column: **yes** = backend records a per-platform digest (11, F67); **no** = backend records none (8, F67); **system** = no mise backend, installs via the OS package manager or a pinned from-source build (3, F67/F79).
 
 | Binary | Track | Backend | Digest | Version rule | Install step |
 |---|---|---|---|---|---|
@@ -250,12 +250,12 @@ Digest column: **yes** = backend records a per-platform digest (11, F67); **no**
 | `shfmt` | Shell | `aqua:mvdan/sh` | yes | OD49 latest stable | `mise install --locked` |
 | `bats-core` | Shell | `aqua:bats-core/bats-core` | yes (6 entries) | OD49 latest stable | `mise install --locked` |
 | `semgrep` | Shell | `pipx:semgrep` | no | OD49 latest stable | `mise install --locked` |
-| `kcov` | Shell | `ubi:` | no | OD49 latest stable | `mise install --locked` |
+| `kcov` | Shell | none (system) | system | OD49 latest stable | apt build-deps + pinned from-source build — section 6 |
 | `jq` | Shell | `aqua:jqlang/jq` | yes | OD49 latest stable | `mise install --locked` |
 | `playwright` | Python (`test e2e`) | `pipx:` (1.62.0) or `npm:` (1.62.1) | no | OD49 latest stable | `mise install --locked`; ships its own Chromium (OD61) |
 | Google Chrome | Go (`test e2e`) | none (system) | system | OD56 latest Chrome | apt (Google repo) / brew — section 6 |
 
-Eleven lock, nine do not, two reach no mise backend (F67). The workflow track's own binary, `actionlint`, is counted separately by F82 and provisioned under SC39, documented in its own subsection below. `playwright` needs no browser install step: it ships its own Chromium (OD61), so the Python `test e2e` leg installs no Chrome.
+Eleven lock, eight do not, three reach no mise backend (F67). The workflow track's own binary, `actionlint`, is counted separately by F82 and provisioned under SC39, documented in its own subsection below. `playwright` needs no browser install step: it ships its own Chromium (OD61), so the Python `test e2e` leg installs no Chrome.
 
 ### Provisioning fallback (SC7)
 
@@ -333,7 +333,7 @@ The conversion step (section 10) also needs `jq` to read the check's own JSON re
 
 ## 6. System-package tools
 
-Two of the 22 reach no mise backend and install through the system package manager (OD57, F79 measured 2026-08-26): `checkbashisms` and Google Chrome.
+Three of the 22 reach no mise backend and install through the system package manager or a pinned from-source build (OD57, F79 measured 2026-08-26): `checkbashisms`, Google Chrome, and `kcov`.
 
 | Tool | OS | Channel | Source / package | Serves |
 |---|---|---|---|---|
@@ -341,10 +341,13 @@ Two of the 22 reach no mise backend and install through the system package manag
 | `checkbashisms` | macOS | Homebrew | `checkbashisms` formula | Not installed — source checks run on `ubuntu-24.04-arm` alone (OD63) |
 | Google Chrome | Ubuntu | apt | Google's own apt repository | Go `test e2e` on both Ubuntu targets |
 | Google Chrome | macOS | Homebrew | `google-chrome` cask | Go `test e2e` on the macOS `build`/`test` legs (OD63) |
+| `kcov` | Ubuntu | apt build-deps + source build | `SimonKagstrom/kcov` pinned to the v43 tag's own commit, built with cmake | Shell track (`source-checks` on `ubuntu-24.04-arm`) |
 
 **The Google apt repository (F79).** `dl.google.com/linux/chrome/deb/dists/stable/Release` answers HTTP 200 with an `Architectures` line reading `amd64 arm64`. Both `main/binary-amd64/Packages` and `main/binary-arm64/Packages` answer 200; the counter-probe `main/binary-i386/Packages` answers 404. The arm64 index lists `google-chrome-stable`, so the channel covers both Ubuntu targets.
 
-**Split by OS (OD63).** The source checks run on `ubuntu-24.04-arm`, so `checkbashisms` installs through apt there and needs no macOS install. The Homebrew leg serves the macOS `build` and `test` legs alone — which for Chrome is the Go `test e2e` leg (OD56, OD64).
+**`kcov` builds from source (defect 10 correction).** `SimonKagstrom/kcov`'s v43 release ships no downloadable binary for any platform, and Ubuntu noble's own apt archive carries no `kcov` package either, on any architecture. `mise`'s `ubi:` backend, which resolves a tool from its GitHub releases, therefore fails closed with no asset to select — apt carries no fallback package either. The template builds `kcov` from source instead: apt installs the build toolchain and coverage-backend headers (`build-essential`, `cmake`, `pkg-config`, `binutils-dev`, `libelf-dev`, `libdw-dev`, `libiberty-dev`, `libssl-dev`, `libcurl4-openssl-dev`, `zlib1g-dev`), then `cmake`, `cmake --build` and `cmake --install` compile and install the binary. The build pins the v43 tag's own commit rather than the branch tip, so a later commit on the default branch cannot change what the runner installs.
+
+**Split by OS (OD63).** The source checks run on `ubuntu-24.04-arm`, so `checkbashisms` and `kcov` install there and need no macOS build. The Homebrew leg serves the macOS `build` and `test` legs alone — which for Chrome is the Go `test e2e` leg (OD56, OD64).
 
 **Cache refresh first (OD59).** Every job that installs a system package refreshes its cache before the install: Ubuntu runs `apt update`, macOS runs `brew update`. Homebrew itself is already present on the macOS image (F80: Homebrew 6.0.13), so the refresh makes that copy current and no Homebrew install step is needed.
 
@@ -358,6 +361,27 @@ Two of the 22 reach no mise backend and install through the system package manag
     sudo apt-get update
     sudo apt-get install -y devscripts
     checkbashisms --version   # OD60: print what was installed
+
+# Ubuntu — kcov via apt build-deps and a pinned from-source build (shell source-checks job,
+# ubuntu-24.04-arm). v43 ships no binary release for any platform, and noble's own apt archive
+# carries no kcov package either, so the template compiles it instead of fetching a binary.
+- name: Install kcov (apt build-deps + source build)
+  env:
+    KCOV_COMMIT: a39874f938ce13f7a65f253120d1ec946b349ffe # v43, never the branch tip
+  run: |
+    set -euo pipefail
+    sudo apt-get update
+    sudo apt-get install -y build-essential cmake pkg-config \
+      binutils-dev libelf-dev libdw-dev libiberty-dev libssl-dev \
+      libcurl4-openssl-dev zlib1g-dev
+    tmp="$(mktemp -d)"
+    git clone --quiet https://github.com/SimonKagstrom/kcov.git "${tmp}/kcov"
+    git -C "${tmp}/kcov" checkout --quiet "${KCOV_COMMIT}"
+    cmake -S "${tmp}/kcov" -B "${tmp}/kcov/build"
+    cmake --build "${tmp}/kcov/build" --parallel "$(nproc)"
+    sudo cmake --install "${tmp}/kcov/build"
+    rm -rf "${tmp}"
+    kcov --version   # OD60: print what was installed
 
 # Ubuntu — Google Chrome via Google's own apt repository (Go test e2e legs on both Ubuntu targets).
 - name: Install Google Chrome (apt, Google repository)

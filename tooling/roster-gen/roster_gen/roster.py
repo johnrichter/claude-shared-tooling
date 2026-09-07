@@ -1,4 +1,5 @@
 """Load and lightly validate the model-roster document — this generator's only input."""
+
 from __future__ import annotations
 
 import json
@@ -41,15 +42,21 @@ def load(path: Path) -> dict[str, Any]:
 
 
 def priced(row: dict[str, Any]) -> dict[str, float] | None:
-    """The row's rate table — `price.contract` preferred over `price.list` — or None if neither is sourced."""
+    """The row's rate table, or None if neither list nor contract is sourced.
+
+    `price.contract` is preferred over `price.list`.
+    """
     price = row["price"]
     return price["contract"] if price["contract"] is not None else price["list"]
 
 
 def list_or_contract_output(row: dict[str, Any]) -> float:
-    """The row's public output rate — always `price.list`, falling back to `price.contract`
-    only if no list price is on file. Distinct from `priced()`: a rate meant for public
-    display prefers the published list price even when a contract rate also exists."""
+    """The row's public output rate, `price.list` falling back to `price.contract`.
+
+    The fallback applies only if no list price is on file. Distinct from `priced()`: a rate
+    meant for public display prefers the published list price even when a contract rate also
+    exists.
+    """
     price = row["price"]
     table = price["list"] if price["list"] is not None else price["contract"]
     return table["output"]

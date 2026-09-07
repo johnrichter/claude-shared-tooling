@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""
-article_meta.py — Deterministically extract an article's title, published date, and a
-short factual excerpt from a web page's structured metadata. NO language model is involved,
-so there is nothing to hallucinate: every field is copied verbatim from the page's own
-HTML `<title>`, Open Graph / article meta tags, or `<time>` element.
+"""article_meta.py — deterministically extract an article's metadata, no LLM.
+
+Extracts an article's title, published date, and a short factual excerpt from a web page's
+structured metadata. NO language model is involved, so there is nothing to hallucinate:
+every field is copied verbatim from the page's own HTML `<title>`, Open Graph / article
+meta tags, or `<time>` element.
 
 Usage:
     python3 article_meta.py --url https://www.anthropic.com/news/<slug>
@@ -38,7 +39,13 @@ USER_AGENT = "claude-tooling-article-meta/1.0"
 
 # meta tags whose content is a candidate for each field, in priority order.
 _TITLE_META = ("og:title", "twitter:title")
-_PUBLISHED_META = ("article:published_time", "article:modified_time", "date", "pubdate", "og:updated_time")
+_PUBLISHED_META = (
+    "article:published_time",
+    "article:modified_time",
+    "date",
+    "pubdate",
+    "og:updated_time",
+)
 _EXCERPT_META = ("og:description", "twitter:description", "description")
 
 
@@ -47,7 +54,7 @@ class _MetaExtractor(HTMLParser):
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        self.metas: dict[str, str] = {}      # normalized meta key -> first-seen content
+        self.metas: dict[str, str] = {}  # normalized meta key -> first-seen content
         self._in_title = False
         self.title_text: str | None = None
         self.time_datetime: str | None = None
@@ -96,10 +103,16 @@ def fetch_html(url: str) -> str | None:
         charset = resp.headers.get_content_charset() or "utf-8"
         return raw.decode(charset, errors="replace")
     except URLError as exc:
-        print(f"[article-meta] WARNING: page unreachable ({exc}) — returning null fields", file=sys.stderr)
+        print(
+            f"[article-meta] WARNING: page unreachable ({exc}) — returning null fields",
+            file=sys.stderr,
+        )
         return None
     except Exception as exc:  # noqa: BLE001 — never let a fetch error escape
-        print(f"[article-meta] WARNING: unexpected fetch error ({exc}) — returning null fields", file=sys.stderr)
+        print(
+            f"[article-meta] WARNING: unexpected fetch error ({exc}) — returning null fields",
+            file=sys.stderr,
+        )
         return None
 
 
@@ -109,7 +122,10 @@ def extract_meta(html_text: str) -> dict:
     try:
         parser.feed(html_text)
     except Exception as exc:  # noqa: BLE001 — malformed HTML must degrade, not raise
-        print(f"[article-meta] WARNING: HTML parse error ({exc}) — returning what was parsed", file=sys.stderr)
+        print(
+            f"[article-meta] WARNING: HTML parse error ({exc}) — returning what was parsed",
+            file=sys.stderr,
+        )
 
     title = _first(parser.metas, _TITLE_META)
     if title is None and parser.title_text:
@@ -134,8 +150,11 @@ def article_meta(url: str) -> dict:
 
 
 def main() -> None:
+    """Main."""
     parser = argparse.ArgumentParser(
-        description="Deterministically extract {title, published, excerpt} from a page's metadata (no LLM)."
+        description=(
+            "Deterministically extract {title, published, excerpt} from a page's metadata (no LLM)."
+        )
     )
     parser.add_argument("--url", required=True, help="Article URL to extract metadata from.")
     args = parser.parse_args()
@@ -143,7 +162,10 @@ def main() -> None:
     try:
         result = article_meta(args.url)
     except Exception as exc:  # noqa: BLE001 — belt-and-suspenders: never crash a caller
-        print(f"[article-meta] WARNING: unexpected error ({exc}) — emitting null fields", file=sys.stderr)
+        print(
+            f"[article-meta] WARNING: unexpected error ({exc}) — emitting null fields",
+            file=sys.stderr,
+        )
         result = {"url": args.url, "title": None, "published": None, "excerpt": None}
 
     print(json.dumps(result, ensure_ascii=False))

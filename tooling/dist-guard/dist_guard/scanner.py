@@ -8,6 +8,7 @@ existing concern (`scripts/check_no_raw_binary.py`) with a different threshold a
 exemption. A candidate here is git's own tracked file mode, `100755`, whose content is binary
 by git's own heuristic — a NUL byte or a UTF-8 decode failure in its leading bytes.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -20,7 +21,11 @@ _EXEC_MODE = "100755"
 def tracked_executables(root: Path) -> list[str]:
     """Repo-relative paths of every git-tracked file whose tracked mode is executable."""
     result = subprocess.run(
-        ["git", "ls-files", "-s"], cwd=root, capture_output=True, text=True, check=True,
+        ["git", "ls-files", "-s"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     paths: list[str] = []
     for line in result.stdout.splitlines():
@@ -34,8 +39,10 @@ def tracked_executables(root: Path) -> list[str]:
 
 
 def is_binary_content(path: Path) -> bool:
-    """True if the file's leading bytes look binary: a NUL byte, or a chunk that fails
-    UTF-8 decoding."""
+    """True if the file's leading bytes look binary.
+
+    A NUL byte, or a chunk that fails UTF-8 decoding.
+    """
     try:
         with path.open("rb") as f:
             prefix = f.read(SNIFF_BYTES)

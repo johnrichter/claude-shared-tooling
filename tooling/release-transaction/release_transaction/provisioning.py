@@ -14,6 +14,7 @@ Three properties this module exists to hold:
   place first, then the current release, and only then a copy frozen into a commit -- so
   a host that can reach the release host never runs last commit's binary.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -74,7 +75,12 @@ class Artifact:
 
     def as_record(self) -> dict[str, Any]:
         """The artifact as its manifest record."""
-        return {"arch": self.arch, "filename": self.filename, "sha256": self.sha256, "size": self.size}
+        return {
+            "arch": self.arch,
+            "filename": self.filename,
+            "sha256": self.sha256,
+            "size": self.size,
+        }
 
 
 @dataclass(frozen=True)
@@ -215,12 +221,18 @@ def parse_manifest(text: str) -> Manifest:
             if not isinstance(raw.get(field), str) or not raw[field]:
                 raise ManifestError(f"artifacts[{index}].{field} must be a non-empty string")
         digest = raw["sha256"]
-        if len(digest) != 64 or digest.lower() != digest or not all(c in "0123456789abcdef" for c in digest):
+        if (
+            len(digest) != 64
+            or digest.lower() != digest
+            or not all(c in "0123456789abcdef" for c in digest)
+        ):
             raise ManifestError(f"artifacts[{index}].sha256 is not a lowercase hex sha256 digest")
         size = raw.get("size")
         if not isinstance(size, int) or isinstance(size, bool) or size < 0:
             raise ManifestError(f"artifacts[{index}].size must be a non-negative integer")
-        artifacts.append(Artifact(arch=raw["arch"], filename=raw["filename"], sha256=digest, size=size))
+        artifacts.append(
+            Artifact(arch=raw["arch"], filename=raw["filename"], sha256=digest, size=size)
+        )
 
     arches = [artifact.arch for artifact in artifacts]
     if len(set(arches)) != len(arches):
@@ -274,7 +286,19 @@ def openssl_verifier(manifest: Path, signature: Path, public_key: Path) -> bool 
     """
     try:
         result = subprocess.run(
-            ["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", str(public_key), "-rawin", "-in", str(manifest), "-sigfile", str(signature)],
+            [
+                "openssl",
+                "pkeyutl",
+                "-verify",
+                "-pubin",
+                "-inkey",
+                str(public_key),
+                "-rawin",
+                "-in",
+                str(manifest),
+                "-sigfile",
+                str(signature),
+            ],
             capture_output=True,
             check=False,
         )
@@ -313,23 +337,50 @@ def verify_manifest(
         The verification, carrying the manifest only on `SignatureVerdict.VERIFIED`.
     """
     if not manifest_path.is_file():
-        return ManifestVerification(SignatureVerdict.DISCARDED, "manifest-absent", f"no manifest at {manifest_path}")
+        return ManifestVerification(
+            SignatureVerdict.DISCARDED, "manifest-absent", f"no manifest at {manifest_path}"
+        )
     if not public_key_path.is_file():
-        return ManifestVerification(SignatureVerdict.UNVERIFIABLE, "public-key-absent", f"no public key at {public_key_path} -- nothing to authenticate the manifest against")
+        return ManifestVerification(
+            SignatureVerdict.UNVERIFIABLE,
+            "public-key-absent",
+            f"no public key at {public_key_path} -- nothing to authenticate the manifest against",
+        )
     if not signature_path.is_file():
-        return ManifestVerification(SignatureVerdict.DISCARDED, "signature-missing", f"no detached signature at {signature_path} -- manifest discarded, never digest-verified")
+        return ManifestVerification(
+            SignatureVerdict.DISCARDED,
+            "signature-missing",
+            f"no detached signature at {signature_path} -- manifest discarded, never "
+            f"digest-verified",
+        )
 
     verdict = verifier(manifest_path, signature_path, public_key_path)
     if verdict is None:
-        return ManifestVerification(SignatureVerdict.UNVERIFIABLE, "signature-unverifiable", "no signature verifier on this host -- fail open to the raw OS tool, never to unverified bytes")
+        return ManifestVerification(
+            SignatureVerdict.UNVERIFIABLE,
+            "signature-unverifiable",
+            "no signature verifier on this host -- fail open to the raw OS tool, never to "
+            "unverified bytes",
+        )
     if verdict is False:
-        return ManifestVerification(SignatureVerdict.DISCARDED, "signature-invalid", f"{signature_path} does not verify against {public_key_path} -- manifest discarded")
+        return ManifestVerification(
+            SignatureVerdict.DISCARDED,
+            "signature-invalid",
+            f"{signature_path} does not verify against {public_key_path} -- manifest discarded",
+        )
 
     try:
         manifest = parse_manifest(manifest_path.read_text(encoding="utf-8"))
     except (ManifestError, OSError, UnicodeDecodeError) as exc:
-        return ManifestVerification(SignatureVerdict.DISCARDED, "manifest-unparsable", f"{manifest_path}: {exc}")
-    return ManifestVerification(SignatureVerdict.VERIFIED, "verified", f"{manifest_path} verified against {public_key_path}", manifest)
+        return ManifestVerification(
+            SignatureVerdict.DISCARDED, "manifest-unparsable", f"{manifest_path}: {exc}"
+        )
+    return ManifestVerification(
+        SignatureVerdict.VERIFIED,
+        "verified",
+        f"{manifest_path} verified against {public_key_path}",
+        manifest,
+    )
 
 
 def check_artifact(path: Path, expected: Artifact) -> str | None:
@@ -353,7 +404,13 @@ def check_artifact(path: Path, expected: Artifact) -> str | None:
     return None
 
 
-def fetch(url: str, destination: Path, *, max_bytes: int = DEFAULT_MAX_ARTIFACT_BYTES, timeout: int = DEFAULT_TIMEOUT_SECONDS) -> str | None:
+def fetch(
+    url: str,
+    destination: Path,
+    *,
+    max_bytes: int = DEFAULT_MAX_ARTIFACT_BYTES,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+) -> str | None:
     """Download a release asset to a local path.
 
     Only `https://` and `file://` are accepted: a plaintext transport for an artifact this
@@ -428,7 +485,9 @@ def provision(
     reverified = _reverify_cache(cached, sidecar)
     if reverified is None:
         attempts.append(Attempt(Rung.CACHE, "resolved", f"{cached} re-verified in place"))
-        return ProvisionResult(path=cached, rung=Rung.CACHE, sha256=sha256_of(cached), attempts=tuple(attempts))
+        return ProvisionResult(
+            path=cached, rung=Rung.CACHE, sha256=sha256_of(cached), attempts=tuple(attempts)
+        )
     attempts.append(Attempt(Rung.CACHE, "skipped", reverified))
 
     if release_base_url is None:
@@ -447,19 +506,33 @@ def provision(
         )
         attempts.append(result[0])
         if result[1] is not None:
-            return ProvisionResult(path=result[1], rung=Rung.RELEASE, sha256=sha256_of(result[1]), attempts=tuple(attempts))
+            return ProvisionResult(
+                path=result[1],
+                rung=Rung.RELEASE,
+                sha256=sha256_of(result[1]),
+                attempts=tuple(attempts),
+            )
         if result[0].outcome == "discarded":
             return ProvisionResult(path=None, rung=Rung.NONE, sha256=None, attempts=tuple(attempts))
 
     if frozen_dir is None:
         attempts.append(Attempt(Rung.FROZEN, "skipped", "no frozen artifact directory configured"))
     else:
-        attempt, resolved = _from_frozen(name=name, version=version, arch=arch, cache_dir=cache_dir, frozen_dir=frozen_dir)
+        attempt, resolved = _from_frozen(
+            name=name, version=version, arch=arch, cache_dir=cache_dir, frozen_dir=frozen_dir
+        )
         attempts.append(attempt)
         if resolved is not None:
-            return ProvisionResult(path=resolved, rung=Rung.FROZEN, sha256=sha256_of(resolved), attempts=tuple(attempts))
+            return ProvisionResult(
+                path=resolved,
+                rung=Rung.FROZEN,
+                sha256=sha256_of(resolved),
+                attempts=tuple(attempts),
+            )
 
-    attempts.append(Attempt(Rung.NONE, "unavailable", "nothing verified -- fail open to the raw OS tool"))
+    attempts.append(
+        Attempt(Rung.NONE, "unavailable", "nothing verified -- fail open to the raw OS tool")
+    )
     return ProvisionResult(path=None, rung=Rung.NONE, sha256=None, attempts=tuple(attempts))
 
 
@@ -510,7 +583,12 @@ def _from_release(
             return Attempt(Rung.RELEASE, "unreachable", failure), None
         signature_failure = fetcher(f"{base}/manifest.json.sig", signature_path)
         if signature_failure is not None and not signature_path.is_file():
-            return Attempt(Rung.RELEASE, "discarded", f"no detached signature at {base}/manifest.json.sig -- manifest discarded, never digest-verified"), None
+            return Attempt(
+                Rung.RELEASE,
+                "discarded",
+                f"no detached signature at {base}/manifest.json.sig -- manifest discarded, never "
+                f"digest-verified",
+            ), None
 
         verification = verify_manifest(manifest_path, signature_path, public_key, verifier=verifier)
         if verification.verdict is SignatureVerdict.DISCARDED:
@@ -521,10 +599,16 @@ def _from_release(
         manifest = verification.manifest
         assert manifest is not None  # a VERIFIED verification always carries one
         if manifest.version != version:
-            return Attempt(Rung.RELEASE, "unreachable", f"release manifest states version {manifest.version}, not {version}"), None
+            return Attempt(
+                Rung.RELEASE,
+                "unreachable",
+                f"release manifest states version {manifest.version}, not {version}",
+            ), None
         expected = manifest.artifact(arch)
         if expected is None:
-            return Attempt(Rung.RELEASE, "unreachable", f"release manifest carries no entry for arch {arch}"), None
+            return Attempt(
+                Rung.RELEASE, "unreachable", f"release manifest carries no entry for arch {arch}"
+            ), None
 
         artifact_path = staging / expected.filename
         failure = fetcher(f"{base}/{expected.filename}", artifact_path)
@@ -535,28 +619,46 @@ def _from_release(
             return Attempt(Rung.RELEASE, "discarded", mismatch), None
 
         cached = _install(artifact_path, cache_dir / f"{name}-{version}", expected.sha256)
-        return Attempt(Rung.RELEASE, "resolved", f"current release {version} verified and cached at {cached}"), cached
+        return Attempt(
+            Rung.RELEASE, "resolved", f"current release {version} verified and cached at {cached}"
+        ), cached
 
 
-def _from_frozen(*, name: str, version: str, arch: str, cache_dir: Path, frozen_dir: Path) -> tuple[Attempt, Path | None]:
+def _from_frozen(
+    *, name: str, version: str, arch: str, cache_dir: Path, frozen_dir: Path
+) -> tuple[Attempt, Path | None]:
     """Verify a commit-frozen artifact against its committed sidecar and cache it."""
     candidate = frozen_dir / f"{name}-{arch}"
     sidecar = Path(f"{candidate}.sha256")
     if not candidate.is_file():
         return Attempt(Rung.FROZEN, "absent", f"no frozen artifact at {candidate}"), None
     if _is_lfs_pointer(candidate):
-        return Attempt(Rung.FROZEN, "absent", f"{candidate} is an unmaterialized large-file pointer, not the artifact"), None
+        return Attempt(
+            Rung.FROZEN,
+            "absent",
+            f"{candidate} is an unmaterialized large-file pointer, not the artifact",
+        ), None
     if not sidecar.is_file():
-        return Attempt(Rung.FROZEN, "rejected", f"{candidate} has no committed digest sidecar"), None
+        return Attempt(
+            Rung.FROZEN, "rejected", f"{candidate} has no committed digest sidecar"
+        ), None
     try:
         expected = sidecar.read_text(encoding="utf-8").split()[0]
     except (OSError, IndexError):
         return Attempt(Rung.FROZEN, "rejected", f"{sidecar} is unreadable"), None
     actual = sha256_of(candidate)
     if actual != expected:
-        return Attempt(Rung.FROZEN, "rejected", f"{candidate} digest {actual} does not match committed {expected}"), None
+        return Attempt(
+            Rung.FROZEN,
+            "rejected",
+            f"{candidate} digest {actual} does not match committed {expected}",
+        ), None
     cached = _install(candidate, cache_dir / f"{name}-{version}", actual)
-    return Attempt(Rung.FROZEN, "resolved", f"commit-frozen artifact verified against {sidecar} and cached at {cached}"), cached
+    return Attempt(
+        Rung.FROZEN,
+        "resolved",
+        f"commit-frozen artifact verified against {sidecar} and cached at {cached}",
+    ), cached
 
 
 def _install(source: Path, destination: Path, digest: str) -> Path:

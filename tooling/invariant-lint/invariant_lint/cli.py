@@ -1,4 +1,5 @@
 """Orchestration: load the registry, run rung-1 and rung-3 resolution, report, exit."""
+
 from __future__ import annotations
 
 import argparse

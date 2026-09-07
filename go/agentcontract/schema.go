@@ -54,7 +54,18 @@ func looksLikePath(s string) bool {
 // structural FB11 checks. It does not validate the document as a JSON Schema — only that it
 // parses, and what shape its "required"/"properties" nodes carry.
 func loadSchemaDoc(path string) (any, error) {
-	data, err := os.ReadFile(path)
+	// Scope the read to path's own directory: a directory root that a bare file
+	// name can never escape, whatever resolveSchemaPath joined it from.
+	dir, name := filepath.Split(path)
+	if dir == "" {
+		dir = "."
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	data, err := root.ReadFile(name)
 	if err != nil {
 		return nil, err
 	}

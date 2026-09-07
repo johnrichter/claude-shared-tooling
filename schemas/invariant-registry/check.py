@@ -135,9 +135,7 @@ def stem(word: str) -> str:
 
 def content_words(statement: str) -> set[str]:
     """Reduce a statement to the set of stemmed words that carry its meaning."""
-    return {
-        stem(w) for w in _WORD.findall(statement.lower()) if w not in _STOPWORDS and len(w) > 2
-    }
+    return {stem(w) for w in _WORD.findall(statement.lower()) if w not in _STOPWORDS and len(w) > 2}
 
 
 def similarity(left: str, right: str) -> float:
@@ -308,9 +306,7 @@ def check_completeness(
     Returns (violations, unclaimed out-of-scope gates, unresolved roots).
     """
     declared = {gate["path"] for gate in registry["gates"].values()}
-    entries_by_gate = {
-        entry["gate_id"] for entry in registry["invariants"] if entry.get("gate_id")
-    }
+    entries_by_gate = {entry["gate_id"] for entry in registry["invariants"] if entry.get("gate_id")}
     violations: list[str] = []
     unclaimed: list[str] = []
     unresolved: list[str] = []

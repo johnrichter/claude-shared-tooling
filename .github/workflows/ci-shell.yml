@@ -24,16 +24,19 @@
 # which records none (F67 measures 0 entries on that backend) — the digest check is simply
 # not run for it.
 #
-# checkbashisms and kcov reach the runner through apt instead of mise, for two different
-# reasons. checkbashisms reaches no mise backend at all (F79) — it installs from the
-# `devscripts` package, refreshing the apt cache first (OD59). kcov names a `ubi:` backend in
-# the contract's matrix, but SimonKagstrom/kcov's GitHub releases ship no arm64 asset for any
-# version, and the latest release (v43) ships no asset for any platform — `mise install`
-# against that backend fails closed with no release to select. This template installs kcov
-# from the same `apt` channel as checkbashisms instead; Ubuntu's arm64 universe archive
-# carries a working package. Both channels put every shell source check on one platform
-# (`ubuntu-24.04-arm`, OD63) — the Homebrew channel serving the other templates' macOS
-# `build`/`test` legs has no counterpart here, because this template has no macOS leg.
+# checkbashisms and kcov reach the runner through neither mise backend the contract's matrix
+# names for them, for two different reasons. checkbashisms reaches no mise backend at all
+# (F79) — it installs from the `devscripts` apt package, refreshing the apt cache first
+# (OD59). kcov names a `ubi:` backend, but SimonKagstrom/kcov's GitHub releases ship no
+# downloadable asset for any platform as of the latest release (v43) — `mise install` against
+# that backend fails closed with no release to select. apt carries no fallback either: kcov
+# is absent from Ubuntu noble's archive on every architecture, not only arm64, so the same
+# `apt-get install` that provisions checkbashisms cannot also provision kcov. This template
+# builds kcov from source instead, pinned to the v43 tag's own commit (never the branch tip),
+# from apt-installed build dependencies present in noble's archive on every architecture.
+# Both channels put every shell source check on one platform (`ubuntu-24.04-arm`, OD63) — the
+# Homebrew channel serving the other templates' macOS `build`/`test` legs has no counterpart
+# here, because this template has no macOS leg.
 #
 # Include list (OD12). `language-tools` has no flag for a file a script sources from outside
 # the directory it is checking, and shellcheck's own `external-sources=true` (baked into
@@ -215,13 +218,25 @@ jobs:
 
       # checkbashisms reaches no mise backend (F79) — installs from the devscripts package.
       # kcov names a ubi: backend in the contract's matrix, but that backend's upstream
-      # release ships no arm64 asset for any version, so this installs kcov from the same
-      # apt channel instead. Cache refreshes first (OD59).
+      # release ships no downloadable asset for any platform, and apt carries no kcov package
+      # on noble either — so this builds kcov from source, pinned to the v43 tag's own commit,
+      # from apt-installed build dependencies. Cache refreshes first (OD59).
       - name: Provision shell check binaries (checkbashisms, kcov)
+        env:
+          KCOV_COMMIT: a39874f938ce13f7a65f253120d1ec946b349ffe # v43
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y devscripts kcov
+          sudo apt-get install -y devscripts build-essential cmake pkg-config \
+            binutils-dev libelf-dev libdw-dev libiberty-dev libssl-dev \
+            libcurl4-openssl-dev zlib1g-dev
+          tmp="$(mktemp -d)"
+          git clone --quiet https://github.com/SimonKagstrom/kcov.git "${tmp}/kcov"
+          git -C "${tmp}/kcov" checkout --quiet "${KCOV_COMMIT}"
+          cmake -S "${tmp}/kcov" -B "${tmp}/kcov/build"
+          cmake --build "${tmp}/kcov/build" --parallel "$(nproc)"
+          sudo cmake --install "${tmp}/kcov/build"
+          rm -rf "${tmp}"
 
       - name: Installed check-tool versions (OD60)
         run: |

@@ -12,6 +12,7 @@ two orders as generator config rather than roster data. `sequence()` renders
 a roster's ID set against a fixed order table, appending any ID the table
 doesn't mention (a new roster row is placed, never dropped).
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -42,8 +43,11 @@ GATE_ALLOWLIST_ORDER: list[str] = [
 
 
 def sequence(ids: list[str], fixed_order: list[str]) -> list[str]:
-    """`ids` rendered in `fixed_order`, with any id `fixed_order` omits appended
-    (stably, in `ids`' own order) rather than dropped."""
+    """Render `ids` in `fixed_order`, appending any id it omits.
+
+    Ids `fixed_order` omits are appended stably, in `ids`' own order, rather than
+    dropped.
+    """
     id_set = set(ids)
     head = [mid for mid in fixed_order if mid in id_set]
     tail = [mid for mid in ids if mid not in fixed_order]
@@ -51,10 +55,13 @@ def sequence(ids: list[str], fixed_order: list[str]) -> list[str]:
 
 
 def capability_order(ids: list[str], models: dict[str, Any]) -> list[str]:
-    """`ids` ranked strongest-first: families ranked by their strongest member's
-    `cross_family_rank` (families with no ranked member sort after ranked ones,
-    alphabetically among themselves), then within a family by `generation`
-    descending (a prefix ranks below its extension)."""
+    """Rank `ids` strongest-first, by family then generation.
+
+    Families are ranked by their strongest member's `cross_family_rank` (families
+    with no ranked member sort after ranked ones, alphabetically among
+    themselves), then within a family by `generation` descending (a prefix ranks
+    below its extension).
+    """
 
     def family_of(mid: str) -> str:
         return models[mid]["family"]
@@ -66,7 +73,9 @@ def capability_order(ids: list[str], models: dict[str, Any]) -> list[str]:
         ranks = [r for r in ranks if r is not None]
         return max(ranks) if ranks else None
 
-    ranked = sorted((f for f in families if family_rank(f) is not None), key=family_rank, reverse=True)
+    ranked = sorted(
+        (f for f in families if family_rank(f) is not None), key=family_rank, reverse=True
+    )
     unranked = sorted(f for f in families if family_rank(f) is None)
     family_order = ranked + unranked
 

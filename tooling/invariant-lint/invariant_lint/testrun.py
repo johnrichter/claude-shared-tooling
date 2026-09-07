@@ -11,6 +11,7 @@ failing assertion is a defect the ordinary unit-test job already reports; what t
 adds is the case that job cannot see: a test skipped, filtered out, or renamed away still
 shows green there while enforcing nothing.
 """
+
 from __future__ import annotations
 
 import json

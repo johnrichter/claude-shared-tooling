@@ -11,6 +11,7 @@ into a regex pattern) from an actual docstring delimiter. Python's `#` line comm
 still scanned the same line-oriented way as every other hash-comment language, alongside
 its docstrings.
 """
+
 from __future__ import annotations
 
 import ast
@@ -19,16 +20,71 @@ from dataclasses import dataclass
 
 _HASH = frozenset(
     {
-        "sh", "bash", "zsh", "ksh", "csh", "fish", "py", "pyi", "pyw", "rb", "pl", "pm",
-        "tcl", "r", "jl", "nim", "cr", "ex", "exs", "elm", "ps1", "psd1", "psm1",
+        "sh",
+        "bash",
+        "zsh",
+        "ksh",
+        "csh",
+        "fish",
+        "py",
+        "pyi",
+        "pyw",
+        "rb",
+        "pl",
+        "pm",
+        "tcl",
+        "r",
+        "jl",
+        "nim",
+        "cr",
+        "ex",
+        "exs",
+        "elm",
+        "ps1",
+        "psd1",
+        "psm1",
     }
 )
 _SLASH = frozenset(
     {
-        "c", "cc", "cpp", "cxx", "h", "hh", "hpp", "hxx", "cs", "d", "dart", "go", "groovy",
-        "gvy", "java", "js", "jsx", "cjs", "mjs", "cts", "mts", "kt", "kts", "m", "mm",
-        "php", "rs", "scala", "swift", "ts", "tsx", "v", "zig", "fs", "fsi", "fsx",
-        "svelte", "vue",
+        "c",
+        "cc",
+        "cpp",
+        "cxx",
+        "h",
+        "hh",
+        "hpp",
+        "hxx",
+        "cs",
+        "d",
+        "dart",
+        "go",
+        "groovy",
+        "gvy",
+        "java",
+        "js",
+        "jsx",
+        "cjs",
+        "mjs",
+        "cts",
+        "mts",
+        "kt",
+        "kts",
+        "m",
+        "mm",
+        "php",
+        "rs",
+        "scala",
+        "swift",
+        "ts",
+        "tsx",
+        "v",
+        "zig",
+        "fs",
+        "fsi",
+        "fsx",
+        "svelte",
+        "vue",
     }
 )
 _DASHDASH = frozenset({"sql", "hs", "lhs", "lua"})
@@ -122,7 +178,9 @@ def _python_docstrings(text: str) -> list[Comment]:
     except SyntaxError:
         return []
     nodes = [tree] + [
-        n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
     ]
     found = []
     for node in nodes:

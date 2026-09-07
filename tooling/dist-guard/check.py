@@ -21,6 +21,7 @@ Exit codes: 0 clean/current; 1 a committed binary is not allowlisted, or the all
 drifted from its producer / is missing; 2 usage or allowlist-source error (e.g. more than one
 entry in `dist_guard.allowlist.ENTRIES`).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,6 +36,7 @@ _ALLOWLIST_PATH = Path(__file__).resolve().parent / "allowlist.json"
 
 
 def cmd_scan(root: Path) -> int:
+    """Cmd scan."""
     try:
         permitted = allowlist.load(_ALLOWLIST_PATH)
     except (OSError, ValueError, KeyError) as exc:
@@ -42,16 +44,28 @@ def cmd_scan(root: Path) -> int:
         return 2
     violations = scanner.scan(root, permitted)
     if violations:
-        print(f"dist-guard: FAIL — {len(violations)} committed binary(ies) outside the SC-DISTRIBUTION allowlist:", file=sys.stderr)
+        print(
+            f"dist-guard: FAIL — {len(violations)} committed binary(ies) outside the "
+            f"SC-DISTRIBUTION allowlist:",
+            file=sys.stderr,
+        )
         for v in violations:
             print(f"  - {v}", file=sys.stderr)
-        print("dist-guard: distribute built artifacts through CD (release-*.yml), not the git tree", file=sys.stderr)
+        print(
+            "dist-guard: distribute built artifacts through CD (release-*.yml), not the git tree",
+            file=sys.stderr,
+        )
         return 1
-    print(f"dist-guard: OK — no committed binary outside the allowlist ({len(permitted)} entry allowed) under {root}", file=sys.stderr)
+    print(
+        f"dist-guard: OK — no committed binary outside the allowlist ({len(permitted)} entry "
+        f"allowed) under {root}",
+        file=sys.stderr,
+    )
     return 0
 
 
 def cmd_generate(root: Path) -> int:
+    """Cmd generate."""
     try:
         rendered = allowlist.render()
     except ValueError as exc:
@@ -63,6 +77,7 @@ def cmd_generate(root: Path) -> int:
 
 
 def cmd_check(root: Path) -> int:
+    """Cmd check."""
     try:
         want = allowlist.render()
     except ValueError as exc:
@@ -73,13 +88,18 @@ def cmd_check(root: Path) -> int:
         return 1
     have = _ALLOWLIST_PATH.read_text(encoding="utf-8")
     if have != want:
-        print(f"dist-guard: {_ALLOWLIST_PATH} drifted from its producer (dist_guard/allowlist.py) — run `generate`", file=sys.stderr)
+        print(
+            f"dist-guard: {_ALLOWLIST_PATH} drifted from its producer (dist_guard/allowlist.py) — "
+            f"run `generate`",
+            file=sys.stderr,
+        )
         return 1
     print("dist-guard: allowlist.json is current with its producer", file=sys.stderr)
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Main."""
     ap = argparse.ArgumentParser(description="SC-DISTRIBUTION no-committed-binaries guard.")
     ap.add_argument("command", choices=["scan", "generate", "check"])
     ap.add_argument("--root", default=".", help="Repo root to operate on (default: cwd).")

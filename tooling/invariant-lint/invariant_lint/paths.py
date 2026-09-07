@@ -6,6 +6,7 @@ entry means the same thing regardless of which checkout the reader happens to si
 This repo is located from this file; every other repo defaults to a sibling directory of
 it, which an explicit override replaces.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

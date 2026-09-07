@@ -6,6 +6,7 @@ the package works on plain values and stays testable against a throwaway repo.
 
 Nothing in this module writes to a repository.
 """
+
 from __future__ import annotations
 
 import subprocess

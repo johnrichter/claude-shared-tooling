@@ -7,6 +7,7 @@ discovery-based completeness). Rung-1 symbol resolution and rung-3 test-id resol
 NOT exercised here — those belong to tooling/invariant-lint, per the schema's
 x-verification-model — and neither is the rung-2 declared-vs-actual firing check.
 """
+
 from __future__ import annotations
 
 import copy
@@ -91,72 +92,96 @@ def _without(entry: dict, *keys: str) -> dict:
 
 
 class SchemaValidityTests(unittest.TestCase):
+    """Schema validity tests."""
+
     def test_schema_is_valid_draft_2020_12(self):
+        """Test schema is valid draft 2020 12."""
         Draft202012Validator.check_schema(SCHEMA)
 
     def test_seed_registry_validates(self):
+        """Test seed registry validates."""
         errors = sorted(Draft202012Validator(SCHEMA).iter_errors(REGISTRY), key=lambda e: e.message)
         self.assertEqual([], [f"{list(e.absolute_path)}: {e.message}" for e in errors])
 
     def test_each_minimal_entry_validates(self):
+        """Test each minimal entry validates."""
         for rung in range(1, 6):
             with self.subTest(rung=rung):
                 self.assertEqual([], _errors(_entry(rung)))
 
 
 class RequiredCoreFieldTests(unittest.TestCase):
+    """Required core field tests."""
+
     def test_missing_rung_fails(self):
+        """Test missing rung fails."""
         self.assertTrue(_errors(_without(_entry(2), "rung")))
 
     def test_missing_fail_direction_fails(self):
+        """Test missing fail direction fails."""
         self.assertTrue(_errors(_without(_entry(2), "fail_direction")))
 
     def test_missing_blast_radius_fails(self):
+        """Test missing blast radius fails."""
         self.assertTrue(_errors(_without(_entry(2), "blast_radius")))
 
     def test_missing_owner_fails_at_rung_4(self):
+        """Test missing owner fails at rung 4."""
         self.assertTrue(_errors(_without(_entry(4), "owner")))
 
     def test_lower_rung_without_reason_fails(self):
+        """Test lower rung without reason fails."""
         for rung in (3, 4, 5):
             with self.subTest(rung=rung):
                 self.assertTrue(_errors(_without(_entry(rung), "reason_lower_rung")))
 
     def test_deny_gate_needs_no_reason(self):
+        """Test deny gate needs no reason."""
         self.assertEqual([], _errors(_without(_entry(2), "reason_lower_rung")))
 
 
 class PerRungConsumerFieldTests(unittest.TestCase):
+    """Per rung consumer field tests."""
+
     def test_rung_1_without_symbol_fails(self):
+        """Test rung 1 without symbol fails."""
         self.assertTrue(_errors(_without(_entry(1), "fail_fast_symbol")))
 
     def test_rung_2_without_trigger_fails(self):
+        """Test rung 2 without trigger fails."""
         self.assertTrue(_errors(_without(_entry(2), "trigger")))
 
     def test_rung_2_without_gate_id_fails(self):
+        """Test rung 2 without gate id fails."""
         self.assertTrue(_errors(_without(_entry(2), "gate_id")))
 
     def test_rung_3_without_test_id_fails(self):
+        """Test rung 3 without test id fails."""
         self.assertTrue(_errors(_without(_entry(3), "test_id")))
 
     def test_rung_4_without_floor_fails(self):
+        """Test rung 4 without floor fails."""
         self.assertTrue(_errors(_without(_entry(4), "compliance_floors")))
 
     def test_rung_5_without_doc_path_fails(self):
+        """Test rung 5 without doc path fails."""
         self.assertTrue(_errors(_without(_entry(5), "doc_path")))
 
     def test_rung_4_and_5_pass_completeness_only(self):
         # Nothing beyond field presence is asserted at these rungs; a complete entry validates.
+        """Test rung 4 and 5 pass completeness only."""
         self.assertEqual([], _errors(_entry(4)))
         self.assertEqual([], _errors(_entry(5)))
 
     def test_entry_may_not_claim_a_stronger_rungs_field(self):
         # A rung-1 entry carrying a rung-2 trigger claims a verification it does not have.
+        """Test entry may not claim a stronger rungs field."""
         self.assertTrue(_errors(_entry(1, trigger="PreToolUse:Write on some path scope")))
         # A rung-5 doc entry carrying a rung-3 test id, likewise.
         self.assertTrue(_errors(_entry(5, test_id="owner/tests/test_x.py::CaseTests")))
 
     def test_measured_status_requires_rates_and_nonnull_floor(self):
+        """Test measured status requires rates and nonnull floor."""
         measured = _entry(4, measurement_status="measured")
         self.assertTrue(_errors(measured))  # no measured_rates, floor still null
         measured.update(
@@ -168,8 +193,16 @@ class PerRungConsumerFieldTests(unittest.TestCase):
 
 
 class RestatementTests(unittest.TestCase):
-    GATES = {"owner.gate": {"path": "marketplace/x/gate.sh", "owner": "owner",
-                            "kind": "pretooluse-hook", "status": "active"}}
+    """Restatement tests."""
+
+    GATES = {
+        "owner.gate": {
+            "path": "marketplace/x/gate.sh",
+            "owner": "owner",
+            "kind": "pretooluse-hook",
+            "status": "active",
+        }
+    }
 
     def _pair(self, with_reference: bool) -> list[dict]:
         strong = _entry(2, id="owner.gate.case")
@@ -185,17 +218,23 @@ class RestatementTests(unittest.TestCase):
         return [strong, weak]
 
     def test_restatement_without_reference_fails(self):
+        """Test restatement without reference fails."""
         violations = check.check_restatement(self._pair(with_reference=False), self.GATES)
         self.assertTrue(violations)
 
     def test_restatement_with_reference_passes(self):
+        """Test restatement with reference passes."""
         violations = check.check_restatement(self._pair(with_reference=True), self.GATES)
         self.assertEqual([], violations)
 
     def test_distinct_statements_do_not_collide(self):
+        """Test distinct statements do not collide."""
         a = _entry(2, id="owner.gate.a")
-        b = _entry(2, id="owner.gate.b",
-                   statement="A committed binary is refused unless it is the one documented path.")
+        b = _entry(
+            2,
+            id="owner.gate.b",
+            statement="A committed binary is refused unless it is the one documented path.",
+        )
         self.assertEqual([], check.check_restatement([a, b], self.GATES))
 
 
@@ -209,49 +248,68 @@ class CompletenessTests(unittest.TestCase):
         hooks_dir = root / "plugins" / owner / "hooks"
         hooks_dir.mkdir(parents=True)
         (hooks_dir / f"{owner}-gate.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-        manifest = {"hooks": {"PreToolUse": [{"matcher": "Write|Edit",
-                                              "hooks": [{"type": "command", "command": command}]}]}}
+        manifest = {
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Write|Edit", "hooks": [{"type": "command", "command": command}]}
+                ]
+            }
+        }
         (hooks_dir / "hooks.json").write_text(json.dumps(manifest), encoding="utf-8")
         return root
 
     def _registry(self, in_scope: list[str]) -> dict:
         return {
             "schema": "invariant-registry@1.0.0",
-            "discovery": {"roots": [{"repo": "marketplace", "strategy": "claude-plugin-hooks",
-                                     "globs": ["plugins/*/hooks/hooks.json"],
-                                     "in_scope_owners": in_scope}]},
+            "discovery": {
+                "roots": [
+                    {
+                        "repo": "marketplace",
+                        "strategy": "claude-plugin-hooks",
+                        "globs": ["plugins/*/hooks/hooks.json"],
+                        "in_scope_owners": in_scope,
+                    }
+                ]
+            },
             "gates": {},
             "invariants": [],
         }
 
     def test_in_scope_undeclared_gate_is_a_violation(self):
+        """Test in scope undeclared gate is a violation."""
         root = self._marketplace("foo", "$CLAUDE_PLUGIN_ROOT/hooks/foo-gate.sh")
         repos = {"marketplace": root, "ai-shared-lib": _REPO_ROOT}
         violations, unclaimed, unresolved = check.check_completeness(
-            self._registry(["foo"]), repos, _REPO_ROOT)
+            self._registry(["foo"]), repos, _REPO_ROOT
+        )
         self.assertTrue(any("foo-gate.sh" in v for v in violations))
         self.assertEqual([], unclaimed)
         self.assertEqual([], unresolved)
 
     def test_out_of_scope_gate_is_unclaimed_not_a_violation(self):
+        """Test out of scope gate is unclaimed not a violation."""
         root = self._marketplace("foo", "$CLAUDE_PLUGIN_ROOT/hooks/foo-gate.sh")
         repos = {"marketplace": root, "ai-shared-lib": _REPO_ROOT}
-        violations, unclaimed, _ = check.check_completeness(
-            self._registry([]), repos, _REPO_ROOT)
+        violations, unclaimed, _ = check.check_completeness(self._registry([]), repos, _REPO_ROOT)
         self.assertEqual([], violations)
         self.assertTrue(any("foo-gate.sh" in u for u in unclaimed))
 
     def test_absent_checkout_is_unresolved_not_a_violation(self):
+        """Test absent checkout is unresolved not a violation."""
         repos = {"marketplace": None, "ai-shared-lib": _REPO_ROOT}
         violations, _, unresolved = check.check_completeness(
-            self._registry(["foo"]), repos, _REPO_ROOT)
+            self._registry(["foo"]), repos, _REPO_ROOT
+        )
         self.assertEqual([], violations)
         self.assertEqual(["marketplace"], unresolved)
 
 
 class SeedLintTests(unittest.TestCase):
+    """Seed lint tests."""
+
     def test_seed_registry_passes_the_lint(self):
         # Only this checkout is present; sibling roots report NOT CHECKED, not a failure.
+        """Test seed registry passes the lint."""
         self.assertEqual(0, check.run(_REGISTRY_PATH, _SCHEMA_PATH, [], require_roots=False))
 
 

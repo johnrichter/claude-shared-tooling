@@ -13,6 +13,7 @@ Coverage (mirrors the guardrail's stated contract):
     4. Frozen-home paths (from frozen-homes.json) are documented or checked for
        plausibility in the repo structure.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -20,7 +21,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 _GUARD = Path(__file__).resolve().parent.parent / "tooling" / "freeze-guard" / "check.py"
 _spec = importlib.util.spec_from_file_location("freeze_guard_check", _GUARD)
@@ -40,15 +41,19 @@ class FreezeGuardTests(unittest.TestCase):
     def test_is_under_frozen_home_nested_path(self):
         """A path under a frozen home is detected."""
         frozen = ["plugin-homes/datadog-docs-agent"]
-        self.assertTrue(guard.is_under_frozen_home("plugin-homes/datadog-docs-agent/README.md", frozen))
-        self.assertTrue(guard.is_under_frozen_home("plugin-homes/datadog-docs-agent/src/plugin.py", frozen))
+        self.assertTrue(
+            guard.is_under_frozen_home("plugin-homes/datadog-docs-agent/README.md", frozen)
+        )
+        self.assertTrue(
+            guard.is_under_frozen_home("plugin-homes/datadog-docs-agent/src/plugin.py", frozen)
+        )
 
     def test_is_under_frozen_home_deep_nesting(self):
         """Deeply nested paths under frozen homes are detected."""
         frozen = ["corpus/datadog-code-agent"]
-        self.assertTrue(guard.is_under_frozen_home(
-            "corpus/datadog-code-agent/data/models/v1/spec.json", frozen
-        ))
+        self.assertTrue(
+            guard.is_under_frozen_home("corpus/datadog-code-agent/data/models/v1/spec.json", frozen)
+        )
 
     def test_is_under_frozen_home_prefix_match_requires_boundary(self):
         """Prefix matches without a path separator are NOT frozen (boundary check)."""
@@ -56,12 +61,10 @@ class FreezeGuardTests(unittest.TestCase):
         # A path that starts with the frozen dir name but lacks the separator
         # should not be considered frozen (e.g., if someone had a sibling dir
         # named "plugin-homes/datadog-docs-agent-backup").
-        self.assertFalse(guard.is_under_frozen_home(
-            "plugin-homes/datadog-docs-agent-backup", frozen
-        ))
-        self.assertFalse(guard.is_under_frozen_home(
-            "plugin-homes/datadog-docs-agent_alt", frozen
-        ))
+        self.assertFalse(
+            guard.is_under_frozen_home("plugin-homes/datadog-docs-agent-backup", frozen)
+        )
+        self.assertFalse(guard.is_under_frozen_home("plugin-homes/datadog-docs-agent_alt", frozen))
 
     def test_is_under_frozen_home_sibling_not_frozen(self):
         """Sibling directories are not frozen."""
@@ -86,20 +89,19 @@ class FreezeGuardTests(unittest.TestCase):
         """Windows path separators are normalized to forward slashes."""
         frozen = ["plugin-homes/datadog-docs-agent"]
         # The function normalizes backslashes to forward slashes.
-        self.assertTrue(guard.is_under_frozen_home(
-            "plugin-homes\\datadog-docs-agent\\file.py", frozen
-        ))
+        self.assertTrue(
+            guard.is_under_frozen_home("plugin-homes\\datadog-docs-agent\\file.py", frozen)
+        )
 
     def test_load_frozen_homes_valid(self):
         """Loading a valid frozen-homes.json succeeds."""
         with tempfile.TemporaryDirectory() as td:
             manifest_path = Path(td) / "frozen-homes.json"
             manifest_path.write_text(
-                json.dumps({
-                    "version": "1.0.0",
-                    "frozen_homes": ["plugin-homes/datadog-docs-agent"]
-                }),
-                encoding="utf-8"
+                json.dumps(
+                    {"version": "1.0.0", "frozen_homes": ["plugin-homes/datadog-docs-agent"]}
+                ),
+                encoding="utf-8",
             )
             homes = guard.load_frozen_homes(manifest_path)
             self.assertEqual(homes, ["plugin-homes/datadog-docs-agent"])
@@ -124,8 +126,7 @@ class FreezeGuardTests(unittest.TestCase):
             root = Path(td)
             manifest_path = root / "frozen-homes.json"
             manifest_path.write_text(
-                json.dumps({"frozen_homes": ["plugin-homes/datadog-docs-agent"]}),
-                encoding="utf-8"
+                json.dumps({"frozen_homes": ["plugin-homes/datadog-docs-agent"]}), encoding="utf-8"
             )
             with patch.object(guard, "get_changed_files", return_value=[]):
                 success, violations = guard.check_freeze(root, manifest_path)
@@ -138,8 +139,7 @@ class FreezeGuardTests(unittest.TestCase):
             root = Path(td)
             manifest_path = root / "frozen-homes.json"
             manifest_path.write_text(
-                json.dumps({"frozen_homes": ["plugin-homes/datadog-docs-agent"]}),
-                encoding="utf-8"
+                json.dumps({"frozen_homes": ["plugin-homes/datadog-docs-agent"]}), encoding="utf-8"
             )
             changed_files = [
                 "scripts/check_secrets.py",
@@ -157,8 +157,7 @@ class FreezeGuardTests(unittest.TestCase):
             root = Path(td)
             manifest_path = root / "frozen-homes.json"
             manifest_path.write_text(
-                json.dumps({"frozen_homes": ["plugin-homes/datadog-docs-agent"]}),
-                encoding="utf-8"
+                json.dumps({"frozen_homes": ["plugin-homes/datadog-docs-agent"]}), encoding="utf-8"
             )
             changed_files = ["plugin-homes/datadog-docs-agent/README.md"]
             with patch.object(guard, "get_changed_files", return_value=changed_files):
@@ -172,13 +171,15 @@ class FreezeGuardTests(unittest.TestCase):
             root = Path(td)
             manifest_path = root / "frozen-homes.json"
             manifest_path.write_text(
-                json.dumps({
-                    "frozen_homes": [
-                        "plugin-homes/datadog-docs-agent",
-                        "corpus/datadog-code-agent"
-                    ]
-                }),
-                encoding="utf-8"
+                json.dumps(
+                    {
+                        "frozen_homes": [
+                            "plugin-homes/datadog-docs-agent",
+                            "corpus/datadog-code-agent",
+                        ]
+                    }
+                ),
+                encoding="utf-8",
             )
             changed_files = [
                 "plugin-homes/datadog-docs-agent/src/plugin.py",
@@ -198,8 +199,7 @@ class FreezeGuardTests(unittest.TestCase):
             root = Path(td)
             manifest_path = root / "frozen-homes.json"
             manifest_path.write_text(
-                json.dumps({"frozen_homes": ["corpus/datadog-docs-agent"]}),
-                encoding="utf-8"
+                json.dumps({"frozen_homes": ["corpus/datadog-docs-agent"]}), encoding="utf-8"
             )
             changed_files = ["corpus/datadog-docs-agent/data/config.yaml"]
             with patch.object(guard, "get_changed_files", return_value=changed_files):
@@ -213,13 +213,15 @@ class FreezeGuardTests(unittest.TestCase):
             root = Path(td)
             manifest_path = root / "frozen-homes.json"
             manifest_path.write_text(
-                json.dumps({
-                    "frozen_homes": [
-                        "plugin-homes/datadog-docs-agent",
-                        "corpus/datadog-code-agent"
-                    ]
-                }),
-                encoding="utf-8"
+                json.dumps(
+                    {
+                        "frozen_homes": [
+                            "plugin-homes/datadog-docs-agent",
+                            "corpus/datadog-code-agent",
+                        ]
+                    }
+                ),
+                encoding="utf-8",
             )
             changed_files = [
                 "plugin-homes/datadog-docs-agent/plugin.py",  # Violation
@@ -241,7 +243,12 @@ class FreezeGuardIntegrationTests(unittest.TestCase):
 
     def test_canonical_frozen_homes_loaded(self):
         """The canonical frozen-homes.json loads successfully."""
-        manifest_path = Path(__file__).resolve().parent.parent / "tooling" / "freeze-guard" / "frozen-homes.json"
+        manifest_path = (
+            Path(__file__).resolve().parent.parent
+            / "tooling"
+            / "freeze-guard"
+            / "frozen-homes.json"
+        )
         self.assertTrue(manifest_path.exists(), f"frozen-homes.json not found at {manifest_path}")
         frozen_homes = guard.load_frozen_homes(manifest_path)
         self.assertIsInstance(frozen_homes, list)
@@ -249,7 +256,12 @@ class FreezeGuardIntegrationTests(unittest.TestCase):
 
     def test_canonical_frozen_homes_structure(self):
         """The canonical frozen-homes.json has the expected structure."""
-        manifest_path = Path(__file__).resolve().parent.parent / "tooling" / "freeze-guard" / "frozen-homes.json"
+        manifest_path = (
+            Path(__file__).resolve().parent.parent
+            / "tooling"
+            / "freeze-guard"
+            / "frozen-homes.json"
+        )
         with manifest_path.open("r", encoding="utf-8") as f:
             data = json.load(f)
         self.assertIn("frozen_homes", data)
@@ -268,7 +280,12 @@ class FreezeGuardIntegrationTests(unittest.TestCase):
         This test verifies the JSON actually contains these paths (or documents
         why a full drift check is not yet possible).
         """
-        manifest_path = Path(__file__).resolve().parent.parent / "tooling" / "freeze-guard" / "frozen-homes.json"
+        manifest_path = (
+            Path(__file__).resolve().parent.parent
+            / "tooling"
+            / "freeze-guard"
+            / "frozen-homes.json"
+        )
         frozen_homes = guard.load_frozen_homes(manifest_path)
 
         expected_paths = {
@@ -284,8 +301,9 @@ class FreezeGuardIntegrationTests(unittest.TestCase):
         # (they will exist once the plugins are released/vendored).
         # This assertion confirms the paths in frozen-homes.json match the spec.
         self.assertEqual(
-            actual_paths, expected_paths,
-            f"frozen_homes mismatch: expected {expected_paths}, got {actual_paths}"
+            actual_paths,
+            expected_paths,
+            f"frozen_homes mismatch: expected {expected_paths}, got {actual_paths}",
         )
 
     def test_frozen_homes_paths_not_yet_in_worktree(self):

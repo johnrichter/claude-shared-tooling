@@ -6,17 +6,20 @@
   "allowlist" — roster-only input, but checked against the existing on-disk ID
                  set first (may only grow, never drop an ID).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 from . import render
 
 
 @dataclass(frozen=True)
 class Target:
+    """Target."""
+
     repo: str  # "ai-shared-lib" | "marketplace"
     rel_path: str
     kind: str
@@ -59,4 +62,5 @@ TARGETS: list[Target] = [
 
 
 def resolve(target: Target, roots: dict[str, Path]) -> Path:
+    """Resolve."""
     return roots[target.repo] / target.rel_path

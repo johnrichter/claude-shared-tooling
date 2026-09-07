@@ -15,6 +15,7 @@ Gate direction is deliberately opposite to the runtime's: a host that cannot ver
 signature at provisioning time falls open to the raw OS tool, but a release gate that
 cannot verify a signature FAILS -- an unverifiable artifact is not a releasable one.
 """
+
 from __future__ import annotations
 
 import json
@@ -151,7 +152,10 @@ def evaluate(
             read is never treated as an absence of defects.
         ContractError: the contract and this interpreter disagree about an evidence kind.
     """
-    results = [_resolve(contract, record, root, enumerator.id, verifier) for enumerator in contract.enumerators]
+    results = [
+        _resolve(contract, record, root, enumerator.id, verifier)
+        for enumerator in contract.enumerators
+    ]
     pauses = _pauses(contract, record, pause_register)
     written_by = contract.hooks.get("release_pause", {}).get("written_by", "")
     return Transaction(
@@ -174,7 +178,9 @@ def _resolve(
     enumerator = contract.enumerator(enumerator_id)
     binding = record.bindings.get(enumerator_id)
     if binding is None:
-        return _result(contract, enumerator_id, Status.MISSING, "binding-absent", enumerator.missing_message)
+        return _result(
+            contract, enumerator_id, Status.MISSING, "binding-absent", enumerator.missing_message
+        )
     if binding.is_waiver:
         return _waiver_result(contract, enumerator_id, binding)
 
@@ -205,7 +211,8 @@ def _waiver_result(contract: Contract, enumerator_id: str, binding: Binding) -> 
             enumerator_id,
             Status.UNSATISFIED,
             "waiver-not-permitted",
-            f"enumerator '{enumerator_id}' can never be declared not-applicable, and this release declares it so with reason '{waiver.reason}'",
+            f"enumerator '{enumerator_id}' can never be declared not-applicable, and this release "
+            f"declares it so with reason '{waiver.reason}'",
         )
     if waiver.reason not in allowed:
         return _result(
@@ -213,17 +220,34 @@ def _waiver_result(contract: Contract, enumerator_id: str, binding: Binding) -> 
             enumerator_id,
             Status.UNSATISFIED,
             "waiver-not-declared",
-            f"reason '{waiver.reason}' is not declared for enumerator '{enumerator_id}' (allowed: {', '.join(sorted(allowed))})",
+            f"reason '{waiver.reason}' is not declared for enumerator '{enumerator_id}' (allowed: "
+            f"{', '.join(sorted(allowed))})",
         )
-    message = contract.message("not_applicable", id=enumerator_id, reason=waiver.reason, detail=waiver.detail)
-    return Result(enumerator_id=enumerator_id, status=Status.NOT_APPLICABLE, code=waiver.reason, detail=waiver.detail, message=message)
+    message = contract.message(
+        "not_applicable", id=enumerator_id, reason=waiver.reason, detail=waiver.detail
+    )
+    return Result(
+        enumerator_id=enumerator_id,
+        status=Status.NOT_APPLICABLE,
+        code=waiver.reason,
+        detail=waiver.detail,
+        message=message,
+    )
 
 
-def _result(contract: Contract, enumerator_id: str, status: Status, code: str, detail: str) -> Result:
+def _result(
+    contract: Contract, enumerator_id: str, status: Status, code: str, detail: str
+) -> Result:
     """Build a result with the contract's message template for its status."""
-    key = {Status.SATISFIED: "satisfied", Status.MISSING: "missing", Status.UNSATISFIED: "unsatisfied"}[status]
+    key = {
+        Status.SATISFIED: "satisfied",
+        Status.MISSING: "missing",
+        Status.UNSATISFIED: "unsatisfied",
+    }[status]
     message = contract.message(key, id=enumerator_id, code=code, detail=detail)
-    return Result(enumerator_id=enumerator_id, status=status, code=code, detail=detail, message=message)
+    return Result(
+        enumerator_id=enumerator_id, status=status, code=code, detail=detail, message=message
+    )
 
 
 def _substitutions(record: Record) -> dict[str, str]:
@@ -254,7 +278,9 @@ def _with_defaults(kind: EvidenceKind, binding: Binding, record: Record) -> dict
         if name in params or not isinstance(declaration, dict) or "default" not in declaration:
             continue
         default = declaration["default"]
-        params[name] = render_template(default, substitutions) if isinstance(default, str) else default
+        params[name] = (
+            render_template(default, substitutions) if isinstance(default, str) else default
+        )
     return params
 
 
@@ -268,7 +294,11 @@ def _json_field_equals_version(context: _Context) -> tuple[str | None, str]:
     if not found:
         return "pointer-absent", f"{path}: {context.params['pointer']} resolves to nothing"
     if value != context.version:
-        return "value-mismatch", f"{path}: {context.params['pointer']} is {value!r}, not the released version {context.version!r}"
+        return (
+            "value-mismatch",
+            f"{path}: {context.params['pointer']} is {value!r}, not the released version "
+            f"{context.version!r}",
+        )
     return None, f"{path} states version {context.version}"
 
 
@@ -288,9 +318,17 @@ def _catalog_entry(context: _Context) -> tuple[str | None, str]:
     for entry in entries:
         if isinstance(entry, dict) and entry.get(name_field) == entry_name:
             if version_field not in entry:
-                return "version-field-absent", f"{path}: entry {entry_name!r} carries no {version_field!r} field, so the catalog cannot agree with the module about a version"
+                return (
+                    "version-field-absent",
+                    f"{path}: entry {entry_name!r} carries no {version_field!r} field, so the "
+                    f"catalog cannot agree with the module about a version",
+                )
             if entry[version_field] != context.version:
-                return "value-mismatch", f"{path}: entry {entry_name!r} is at {entry[version_field]!r}, not the released version {context.version!r}"
+                return (
+                    "value-mismatch",
+                    f"{path}: entry {entry_name!r} is at {entry[version_field]!r}, not the "
+                    f"released version {context.version!r}",
+                )
             return None, f"{path} publishes {entry_name} at {context.version}"
     return "entry-absent", f"{path}: no entry whose {name_field!r} is {entry_name!r}"
 
@@ -299,7 +337,11 @@ def _enable_state(context: _Context) -> tuple[str | None, str]:
     """The consumer settings mirror this module at its expected enable state."""
     key = context.params["key"]
     if key.endswith("@"):
-        return "binding-invalid", "the default enable-state key needs subject.marketplace, which the record does not declare -- supply an explicit key"
+        return (
+            "binding-invalid",
+            "the default enable-state key needs subject.marketplace, which the record does not "
+            "declare -- supply an explicit key",
+        )
     path = context.path(context.params["path"])
     document, failure = _read_json(path)
     if failure is not None:
@@ -324,7 +366,11 @@ def _git_tag(context: _Context) -> tuple[str | None, str]:
     templates = context.contract.changed_module_rule.get("tag_templates", ())
     conventional = [render_template(template, substitutions) for template in templates]
     if tag not in conventional:
-        return "tag-off-convention", f"tag {tag!r} matches none of the conventional names for this module and version: {', '.join(conventional)}"
+        return (
+            "tag-off-convention",
+            f"tag {tag!r} matches none of the conventional names for this module and version: "
+            f"{', '.join(conventional)}",
+        )
     if not gitstate.is_repo(repo):
         return "git-unavailable", f"{repo} is not a git working tree"
     if not gitstate.tag_exists(repo, tag):
@@ -332,7 +378,11 @@ def _git_tag(context: _Context) -> tuple[str | None, str]:
 
     manifest_path, manifest_pointer = _tag_manifest_binding(context)
     if manifest_path is None or manifest_pointer is None:
-        return "manifest-binding-absent", f"tag {tag!r} exists, but no manifest binding says what the module's version should be at it"
+        return (
+            "manifest-binding-absent",
+            f"tag {tag!r} exists, but no manifest binding says what the module's version should be "
+            f"at it",
+        )
     relative = os.path.relpath(context.path(manifest_path), repo)
     blob = gitstate.file_at_ref(repo, tag, relative)
     if blob is None:
@@ -343,7 +393,11 @@ def _git_tag(context: _Context) -> tuple[str | None, str]:
         return "tag-tree-mismatch", f"tag {tag!r}: {relative} is not valid JSON ({exc})"
     found, value = resolve_pointer(document, manifest_pointer)
     if not found or value != context.version:
-        return "tag-tree-mismatch", f"tag {tag!r}: {relative} states {value!r}, not the released version {context.version!r} -- the tag and the version are not one transaction"
+        return (
+            "tag-tree-mismatch",
+            f"tag {tag!r}: {relative} states {value!r}, not the released version "
+            f"{context.version!r} -- the tag and the version are not one transaction",
+        )
     return None, f"{repo}: tag {tag} points at {relative} @ {context.version}"
 
 
@@ -383,29 +437,47 @@ def _signed_manifest(context: _Context) -> tuple[str | None, str]:
     except provisioning.ManifestError as exc:
         return "manifest-unparsable", f"{manifest_path}: {exc}"
     if not provisioning.is_canonical(text):
-        return "manifest-non-canonical", f"{manifest_path} is not the canonical rendering of its own content -- it was not produced by a single deterministic pass"
+        return (
+            "manifest-non-canonical",
+            f"{manifest_path} is not the canonical rendering of its own content -- it was not "
+            f"produced by a single deterministic pass",
+        )
 
     signature = context.path(context.params["signature"])
     public_key = context.path(context.params["public_key"])
-    verification = provisioning.verify_manifest(manifest_path, signature, public_key, verifier=context.verifier)
+    verification = provisioning.verify_manifest(
+        manifest_path, signature, public_key, verifier=context.verifier
+    )
     if verification.verdict is not provisioning.SignatureVerdict.VERIFIED:
         return verification.code, verification.detail
     manifest = verification.manifest
     assert manifest is not None  # a VERIFIED verification always carries one
 
     if manifest.version != context.version:
-        return "version-mismatch", f"{manifest_path} states version {manifest.version!r}, not the released version {context.version!r}"
+        return (
+            "version-mismatch",
+            f"{manifest_path} states version {manifest.version!r}, not the released version "
+            f"{context.version!r}",
+        )
     for arch in context.params.get("require_arches", ()):
         if manifest.artifact(arch) is None:
             return "arch-absent", f"{manifest_path} carries no artifact for required arch {arch!r}"
 
-    artifact_dir = context.path(context.params["artifact_dir"]) if context.params.get("artifact_dir") else manifest_path.parent
+    artifact_dir = (
+        context.path(context.params["artifact_dir"])
+        if context.params.get("artifact_dir")
+        else manifest_path.parent
+    )
     for artifact in manifest.artifacts:
         mismatch = provisioning.check_artifact(artifact_dir / artifact.filename, artifact)
         if mismatch is not None:
             code = "artifact-absent" if "not present" in mismatch else "artifact-mismatch"
             return code, mismatch
-    return None, f"{manifest_path} verified against {public_key}; {len(manifest.artifacts)} artifact(s) match their recorded digests"
+    return (
+        None,
+        f"{manifest_path} verified against {public_key}; {len(manifest.artifacts)} artifact(s) "
+        f"match their recorded digests",
+    )
 
 
 def _pin_equals_version(context: _Context) -> tuple[str | None, str]:
@@ -413,7 +485,11 @@ def _pin_equals_version(context: _Context) -> tuple[str | None, str]:
     path = context.path(context.params["path"])
     pointer, pattern = context.params.get("pointer"), context.params.get("pattern")
     if bool(pointer) == bool(pattern):
-        return "binding-invalid", "the binding must name exactly one of 'pointer' (a JSON pin) or 'pattern' (a regex over the file's text)"
+        return (
+            "binding-invalid",
+            "the binding must name exactly one of 'pointer' (a JSON pin) or 'pattern' (a regex "
+            "over the file's text)",
+        )
 
     if pointer:
         document, failure = _read_json(path)
@@ -440,7 +516,10 @@ def _pin_equals_version(context: _Context) -> tuple[str | None, str]:
     if len(distinct) > 1:
         return "pin-disagreement", f"{path} pins more than one version: {', '.join(distinct)}"
     if distinct[0] != context.version:
-        return "value-mismatch", f"{path} pins {distinct[0]!r}, not the released version {context.version!r}"
+        return (
+            "value-mismatch",
+            f"{path} pins {distinct[0]!r}, not the released version {context.version!r}",
+        )
     return None, f"{path} pins {context.version}"
 
 
@@ -500,7 +579,11 @@ def _pauses(contract: Contract, record: Record, register: Path | None) -> list[P
     for index, entry in enumerate(data["entries"]):
         if not isinstance(entry, dict):
             raise RecordError(f"{register}: entries[{index}] is not an object")
-        missing = [field for field in ("defect_id", "owner", "owner_kind", "invariant_id", "status") if not entry.get(field)]
+        missing = [
+            field
+            for field in ("defect_id", "owner", "owner_kind", "invariant_id", "status")
+            if not entry.get(field)
+        ]
         if missing:
             raise RecordError(f"{register}: entries[{index}] is missing {', '.join(missing)}")
         if entry["owner"] != record.subject.name or entry["status"] != "open":

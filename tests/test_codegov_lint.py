@@ -23,6 +23,7 @@ Coverage:
     8. `cli.main` end to end: `--files` on a clean fixture exits 0, on a planted violation
        exits 1, and `--diff` against an empty-tree-equivalent ref resolves and runs.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -82,7 +83,11 @@ class MilestoneIdTests(unittest.TestCase):
 
     def test_planted_violations_fire(self):
         """Each id shape the policy bans is caught."""
-        cases = ["M1.P2.T1 marker left in by mistake", "see Task 7 for context", "SC-DEPPOLICY governs this"]
+        cases = [
+            "M1.P2.T1 marker left in by mistake",
+            "see Task 7 for context",
+            "SC-DEPPOLICY governs this",
+        ]
         for text in cases:
             with self.subTest(text=text):
                 violations = rules.scan_comment("f.py", 1, text)
@@ -124,7 +129,9 @@ class DeadCodeTests(unittest.TestCase):
         for text in cases:
             with self.subTest(text=text):
                 violations = rules.scan_comment("f.py", 1, text)
-                self.assertIn("DEAD-CODE", _rule_names(violations), f"expected DEAD-CODE for {text!r}")
+                self.assertIn(
+                    "DEAD-CODE", _rule_names(violations), f"expected DEAD-CODE for {text!r}"
+                )
 
     def test_prose_opening_with_a_code_keyword_never_fires(self):
         """A sentence opening with a keyword the rule also matches on stays clean.
@@ -147,7 +154,9 @@ class DeadCodeTests(unittest.TestCase):
         for text in cases:
             with self.subTest(text=text):
                 violations = rules.scan_comment("f.py", 1, text)
-                self.assertNotIn("DEAD-CODE", _rule_names(violations), f"unexpected DEAD-CODE for {text!r}")
+                self.assertNotIn(
+                    "DEAD-CODE", _rule_names(violations), f"unexpected DEAD-CODE for {text!r}"
+                )
 
 
 class PythonHashCommentExtractionTests(unittest.TestCase):
@@ -193,7 +202,14 @@ class DocPresenceTests(unittest.TestCase):
 
     def test_go_exported_func_with_doc_is_clean(self):
         """An exported Go func documented on the line above it is clean."""
-        lines = ["package foo", "", "// Bar returns a constant.", "func Bar() int {", "\treturn 1", "}"]
+        lines = [
+            "package foo",
+            "",
+            "// Bar returns a constant.",
+            "func Bar() int {",
+            "\treturn 1",
+            "}",
+        ]
         violations = rules.scan_doc_presence("f.go", "go", lines)
         self.assertEqual(violations, [])
 
@@ -273,7 +289,9 @@ class PythonDocstringRuleTests(unittest.TestCase):
             src = repo_root / "scratch.py"
             src.write_text("def foo():\n    return 1\n", encoding="utf-8")
             with tempfile.TemporaryDirectory() as cfg_dir:
-                violations = pydocs.scan_python_docstrings([src], repo_root, Path(cfg_dir) / "ruff.toml")
+                violations = pydocs.scan_python_docstrings(
+                    [src], repo_root, Path(cfg_dir) / "ruff.toml"
+                )
             self.assertIn("MISSING-API-DOC", _rule_names(violations))
 
     def test_google_style_docstring_is_clean(self):
@@ -282,11 +300,14 @@ class PythonDocstringRuleTests(unittest.TestCase):
             repo_root = Path(tmp)
             src = repo_root / "scratch.py"
             src.write_text(
-                '"""Scratch module."""\n\n\ndef foo():\n    """Return one.\n\n    Returns:\n        int: Always 1.\n    """\n    return 1\n',
+                '"""Scratch module."""\n\n\ndef foo():\n    """Return one.\n\n    Returns:\n'
+                '        int: Always 1.\n    """\n    return 1\n',
                 encoding="utf-8",
             )
             with tempfile.TemporaryDirectory() as cfg_dir:
-                violations = pydocs.scan_python_docstrings([src], repo_root, Path(cfg_dir) / "ruff.toml")
+                violations = pydocs.scan_python_docstrings(
+                    [src], repo_root, Path(cfg_dir) / "ruff.toml"
+                )
             self.assertEqual(violations, [])
 
 
@@ -303,7 +324,10 @@ class CliEndToEndTests(unittest.TestCase):
         """`--files` on a clean fixture exits 0 and reports no violations."""
         with tempfile.TemporaryDirectory() as tmp:
             src = Path(tmp) / "scratch.go"
-            src.write_text("package foo\n\n// Bar returns a constant.\nfunc Bar() int {\n\treturn 1\n}\n", encoding="utf-8")
+            src.write_text(
+                "package foo\n\n// Bar returns a constant.\nfunc Bar() int {\n\treturn 1\n}\n",
+                encoding="utf-8",
+            )
             code, output = self._run(["--files", str(src)])
             self.assertEqual(code, 0)
             self.assertIn("no violations", output)

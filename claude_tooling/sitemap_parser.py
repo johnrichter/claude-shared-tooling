@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-sitemap_parser.py — Fetch, parse, window-filter, and prefix-filter any XML sitemap.
+"""sitemap_parser.py — Fetch, parse, window-filter, and prefix-filter any XML sitemap.
 
 Usage:
     python3 sitemap_parser.py --url URL [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--prefix /path/]
@@ -92,14 +91,22 @@ def fetch_sitemap(url: str) -> bytes | None:
         with urlopen(req, timeout=FETCH_TIMEOUT) as resp:
             return resp.read()
     except URLError as exc:
-        print(f"[sitemap-parser] WARNING: sitemap unreachable ({exc}) — returning empty result", file=sys.stderr)
+        print(
+            f"[sitemap-parser] WARNING: sitemap unreachable ({exc}) — returning empty result",
+            file=sys.stderr,
+        )
         return None
     except Exception as exc:
-        print(f"[sitemap-parser] WARNING: unexpected fetch error ({exc}) — returning empty result", file=sys.stderr)
+        print(
+            f"[sitemap-parser] WARNING: unexpected fetch error ({exc}) — returning empty result",
+            file=sys.stderr,
+        )
         return None
 
 
-def _parse_urlset(root: ET.Element, since: date | None, until: date | None, prefix: str | None) -> list[dict]:
+def _parse_urlset(
+    root: ET.Element, since: date | None, until: date | None, prefix: str | None
+) -> list[dict]:
     """Extract {loc, lastmod} records from a <urlset> root, applying filters."""
     records = []
     for url_elem in root:
@@ -149,10 +156,16 @@ def parse_sitemap(
     try:
         root = ET.fromstring(xml_bytes)
     except ET.ParseError as exc:
-        print(f"[sitemap-parser] WARNING: XML parse error ({exc}) — returning empty result", file=sys.stderr)
+        print(
+            f"[sitemap-parser] WARNING: XML parse error ({exc}) — returning empty result",
+            file=sys.stderr,
+        )
         return []
     except Exception as exc:
-        print(f"[sitemap-parser] WARNING: unexpected parse error ({exc}) — returning empty result", file=sys.stderr)
+        print(
+            f"[sitemap-parser] WARNING: unexpected parse error ({exc}) — returning empty result",
+            file=sys.stderr,
+        )
         return []
 
     root_name = _local(root.tag)
@@ -163,7 +176,8 @@ def parse_sitemap(
     if root_name == "sitemapindex":
         if _depth >= MAX_SITEMAPINDEX_DEPTH:
             print(
-                "[sitemap-parser] WARNING: sitemapindex nesting exceeds one level — skipping deeper levels",
+                "[sitemap-parser] WARNING: sitemapindex nesting exceeds one level — skipping "
+                "deeper levels",
                 file=sys.stderr,
             )
             return []
@@ -179,11 +193,22 @@ def parse_sitemap(
             if child_bytes is None:
                 continue  # fetch failure already warned by _fetch
             records.extend(
-                parse_sitemap(child_bytes, since=since, until=until, prefix=prefix, _fetch=_fetch, _depth=_depth + 1)
+                parse_sitemap(
+                    child_bytes,
+                    since=since,
+                    until=until,
+                    prefix=prefix,
+                    _fetch=_fetch,
+                    _depth=_depth + 1,
+                )
             )
         return records
 
-    print(f"[sitemap-parser] WARNING: unrecognized root element <{root_name}> — returning empty result", file=sys.stderr)
+    print(
+        f"[sitemap-parser] WARNING: unrecognized root element <{root_name}> — returning empty "
+        f"result",
+        file=sys.stderr,
+    )
     return []
 
 
@@ -201,13 +226,22 @@ def parse_sitemap_url(
 
 
 def main() -> None:
+    """Main."""
     parser = argparse.ArgumentParser(
         description="Fetch, parse, window-filter, and prefix-filter an XML sitemap."
     )
-    parser.add_argument("--url", required=True, metavar="URL", help="Sitemap URL to fetch (urlset or sitemapindex).")
-    parser.add_argument("--since", metavar="YYYY-MM-DD", help="Inclusive start of the <lastmod> date window.")
-    parser.add_argument("--until", metavar="YYYY-MM-DD", help="Inclusive end of the <lastmod> date window.")
-    parser.add_argument("--prefix", metavar="/path/", help="Exact leading path-segment filter, e.g. /news/.")
+    parser.add_argument(
+        "--url", required=True, metavar="URL", help="Sitemap URL to fetch (urlset or sitemapindex)."
+    )
+    parser.add_argument(
+        "--since", metavar="YYYY-MM-DD", help="Inclusive start of the <lastmod> date window."
+    )
+    parser.add_argument(
+        "--until", metavar="YYYY-MM-DD", help="Inclusive end of the <lastmod> date window."
+    )
+    parser.add_argument(
+        "--prefix", metavar="/path/", help="Exact leading path-segment filter, e.g. /news/."
+    )
     args = parser.parse_args()
 
     try:
@@ -225,7 +259,10 @@ def main() -> None:
         records = parse_sitemap_url(args.url, since=since, until=until, prefix=args.prefix)
     except Exception as exc:
         # Belt-and-suspenders: never let an unexpected error block a caller.
-        print(f"[sitemap-parser] WARNING: unexpected error ({exc}) — returning empty result", file=sys.stderr)
+        print(
+            f"[sitemap-parser] WARNING: unexpected error ({exc}) — returning empty result",
+            file=sys.stderr,
+        )
         records = []
 
     print(json.dumps(records, ensure_ascii=False, separators=(",", ":")))

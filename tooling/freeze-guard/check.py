@@ -19,6 +19,7 @@ In CI the changed surface is a committed PR: pass --base with the base ref
 uncommitted working tree is inspected, which is empty in a clean CI checkout —
 use that mode for local pre-commit checks only.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -127,6 +128,7 @@ def check_freeze(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Main."""
     ap = argparse.ArgumentParser(
         description="SC-FREEZE guardrail — deny writes to frozen plugin/corpus homes."
     )

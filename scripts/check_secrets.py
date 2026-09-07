@@ -12,6 +12,7 @@ Usage:
     python3 scripts/check_secrets.py            # scan repo root (exit 1 on any match)
     python3 scripts/check_secrets.py --root P   # scan a different root
 """
+
 from __future__ import annotations
 
 import argparse
@@ -20,11 +21,37 @@ from pathlib import Path
 
 # Directories never scanned (VCS internals, build/venv artifacts).
 # ".git-worktrees" mirrors the .gitignore entry — never scan transient worktree checkouts.
-SKIP_DIRS = {".git", ".git-worktrees", ".venv", "venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "node_modules", "dist", "build", "target"}
+SKIP_DIRS = {
+    ".git",
+    ".git-worktrees",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "node_modules",
+    "dist",
+    "build",
+    "target",
+}
 SKIP_SUFFIX_DIRS = (".egg-info",)
 
 # Binary/asset extensions we never text-scan.
-BINARY_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".zip", ".gz", ".whl", ".pyc", ".ico", ".woff", ".woff2"}
+BINARY_SUFFIXES = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".pdf",
+    ".zip",
+    ".gz",
+    ".whl",
+    ".pyc",
+    ".ico",
+    ".woff",
+    ".woff2",
+}
 
 # The AWS-access-key-id label, named once because matches_pattern dispatches its
 # exemption on it: a rename here stays in sync with SECRET_PATTERNS by construction.
@@ -91,6 +118,7 @@ def scan(root: Path, self_path: Path) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Main."""
     ap = argparse.ArgumentParser(description="Secret-scanner guardrail (stdlib-only).")
     ap.add_argument("--root", default=None, help="Repo root to scan (default: parent of scripts/).")
     args = ap.parse_args(argv)

@@ -280,10 +280,7 @@ mod public_api_tests {
         };
 
         assert_eq!(build(Tokenizer::CaseSplit).search("bar", 10).len(), 1);
-        assert_eq!(
-            build(Tokenizer::WholeIdentifier).search("bar", 10).len(),
-            0
-        );
+        assert_eq!(build(Tokenizer::WholeIdentifier).search("bar", 10).len(), 0);
     }
 
     /// Build/search agreement, by construction: there is no `search`

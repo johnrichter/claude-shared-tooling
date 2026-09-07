@@ -5,6 +5,7 @@
 contract CI hits); the allowlist producer's invariants (at-most-one, empty steady state,
 byte-for-byte currency) run in-process against the committed artifact.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -31,11 +32,15 @@ def _run_git(root: Path, *args: str) -> None:
 def _run_guard(root: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(_CHECK), *args, "--root", str(root)],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 
 class ScanSubprocessTests(unittest.TestCase):
+    """Scan subprocess tests."""
+
     def _repo(self) -> Path:
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
@@ -43,7 +48,9 @@ class ScanSubprocessTests(unittest.TestCase):
         _run_git(root, "init", "-q")
         _run_git(root, "config", "user.email", "test@example.com")
         _run_git(root, "config", "user.name", "Test")
-        _run_git(root, "config", "core.excludesFile", "/dev/null")  # ignore any host global gitignore
+        _run_git(
+            root, "config", "core.excludesFile", "/dev/null"
+        )  # ignore any host global gitignore
         return root
 
     def _commit_executable(self, root: Path, rel: str, data: bytes) -> None:
@@ -52,9 +59,12 @@ class ScanSubprocessTests(unittest.TestCase):
         p.write_bytes(data)
         p.chmod(0o755)
         _run_git(root, "add", rel)
-        _run_git(root, "update-index", "--chmod=+x", rel)  # force 100755 regardless of core.filemode
+        _run_git(
+            root, "update-index", "--chmod=+x", rel
+        )  # force 100755 regardless of core.filemode
 
     def test_planted_binary_rejected(self):
+        """Test planted binary rejected."""
         root = self._repo()
         self._commit_executable(root, "bin/planted", _BINARY)
         result = _run_guard(root, "scan")
@@ -63,19 +73,23 @@ class ScanSubprocessTests(unittest.TestCase):
 
     def test_clean_tree_accepted(self):
         # Post-deletion steady state: no committed binary, empty allowlist -> scan exits 0.
+        """Test clean tree accepted."""
         root = self._repo()
         self._commit_executable(root, "bin/run.sh", b"#!/bin/sh\necho hi\n")
         result = _run_guard(root, "scan")
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
 
     def test_executable_text_ignored(self):
+        """Test executable text ignored."""
         root = self._repo()
         self._commit_executable(root, "bin/run.sh", b"#!/bin/sh\necho hi\n")
         result = _run_guard(root, "scan")
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
 
     def test_non_executable_binary_ignored(self):
-        # A committed binary asset without the exec bit is check_no_raw_binary.py's concern, not this guard's.
+        # A committed binary asset without the exec bit is check_no_raw_binary.py's concern, not
+        # this guard's.
+        """Test non executable binary ignored."""
         root = self._repo()
         p = root / "asset.dat"
         p.write_bytes(_BINARY)
@@ -85,14 +99,19 @@ class ScanSubprocessTests(unittest.TestCase):
 
 
 class AllowlistProducerTests(unittest.TestCase):
+    """Allowlist producer tests."""
+
     def test_render_matches_committed_json_byte_for_byte(self):
+        """Test render matches committed json byte for byte."""
         self.assertEqual(allowlist.render(), _ALLOWLIST_JSON.read_text(encoding="utf-8"))
 
     def test_committed_allowlist_is_empty(self):
+        """Test committed allowlist is empty."""
         self.assertEqual(allowlist.load(_ALLOWLIST_JSON), frozenset())
 
     def test_zero_or_one_entry_is_valid(self):
         # At-most-one lower boundary: empty (steady state) and a lone entry both render.
+        """Test zero or one entry is valid."""
         original = allowlist.ENTRIES
         try:
             allowlist.ENTRIES = []
@@ -103,6 +122,7 @@ class AllowlistProducerTests(unittest.TestCase):
             allowlist.ENTRIES = original
 
     def test_more_than_one_entry_is_a_hard_error(self):
+        """Test more than one entry is a hard error."""
         original = allowlist.ENTRIES
         allowlist.ENTRIES = [
             {"path": "go/.bin/one", "reason": "x"},
@@ -115,6 +135,7 @@ class AllowlistProducerTests(unittest.TestCase):
             allowlist.ENTRIES = original
 
     def test_check_reports_committed_allowlist_current(self):
+        """Test check reports committed allowlist current."""
         result = _run_guard(_DIST_GUARD, "check")
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
 

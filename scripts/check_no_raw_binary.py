@@ -32,17 +32,29 @@ Usage:
     python3 scripts/check_no_raw_binary.py --tracked --root .        # CI, authoritative
     python3 scripts/check_no_raw_binary.py --tracked --max-bytes N   # tune the threshold
 """
+
 from __future__ import annotations
 
 import argparse
 import subprocess
-import sys
 from pathlib import Path
 
 # Directories never scanned (VCS internals, build/venv/test-cache artifacts).
 # Mirrors check_secrets.py's SKIP_DIRS so the two guardrails agree on what a
 # "real" repo path is (shared-directory-enumerator-drift).
-SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", ".pytest_cache", ".cache", ".mypy_cache", ".ruff_cache", "node_modules", "dist", "build"}
+SKIP_DIRS = {
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "node_modules",
+    "dist",
+    "build",
+}
 SKIP_SUFFIX_DIRS = (".egg-info",)
 
 # Explicit escape hatch for a future documented exception — a specific
@@ -54,6 +66,7 @@ SNIFF_BYTES = 8000  # git's own is-binary heuristic reads this many leading byte
 
 
 def in_skip_dir(rel_path: Path) -> bool:
+    """In skip dir."""
     parts = set(rel_path.parts)
     if parts & SKIP_DIRS:
         return True
@@ -61,8 +74,11 @@ def in_skip_dir(rel_path: Path) -> bool:
 
 
 def is_binary_content(path: Path) -> bool:
-    """True if the file's leading bytes look binary: a NUL byte, or a chunk
-    that fails UTF-8 decoding (git's is-binary heuristic, content-based)."""
+    """True if the file's leading bytes look binary.
+
+    A NUL byte, or a chunk that fails UTF-8 decoding (git's is-binary heuristic,
+    content-based).
+    """
     try:
         with path.open("rb") as f:
             prefix = f.read(SNIFF_BYTES)
@@ -82,7 +98,10 @@ def is_lfs_routed(root: Path, rel_path: Path) -> bool:
     try:
         result = subprocess.run(
             ["git", "check-attr", "filter", "--", str(rel_path)],
-            cwd=root, capture_output=True, text=True, check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
         )
     except OSError:
         return False
@@ -91,16 +110,25 @@ def is_lfs_routed(root: Path, rel_path: Path) -> bool:
 
 
 def staged_candidates(root: Path) -> list[str]:
+    """Staged candidates."""
     result = subprocess.run(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=AM"],
-        cwd=root, capture_output=True, text=True, check=True,
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return [line for line in result.stdout.splitlines() if line]
 
 
 def tracked_candidates(root: Path) -> list[str]:
+    """Tracked candidates."""
     result = subprocess.run(
-        ["git", "ls-files"], cwd=root, capture_output=True, text=True, check=True,
+        ["git", "ls-files"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return [line for line in result.stdout.splitlines() if line]
 
@@ -124,17 +152,36 @@ def scan(root: Path, candidates: list[str], max_bytes: int) -> list[str]:
             continue
         if is_lfs_routed(root, rel_path):
             continue
-        failures.append(f"{rel_path}: raw binary ({size} bytes, over {max_bytes}-byte threshold, not LFS-routed)")
+        failures.append(
+            f"{rel_path}: raw binary ({size} bytes, over {max_bytes}-byte threshold, not "
+            f"LFS-routed)"
+        )
     return failures
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="No-raw-binary guard: content-based, catches binaries no extension glob names.")
+    """Main."""
+    ap = argparse.ArgumentParser(
+        description="No-raw-binary guard: content-based, catches binaries no extension glob names."
+    )
     mode = ap.add_mutually_exclusive_group()
-    mode.add_argument("--staged", action="store_true", help="Scan staged additions/modifications (default; for the pre-commit hook).")
-    mode.add_argument("--tracked", action="store_true", help="Scan the full tracked tree (for CI; also catches already-committed raw binaries).")
+    mode.add_argument(
+        "--staged",
+        action="store_true",
+        help="Scan staged additions/modifications (default; for the pre-commit hook).",
+    )
+    mode.add_argument(
+        "--tracked",
+        action="store_true",
+        help="Scan the full tracked tree (for CI; also catches already-committed raw binaries).",
+    )
     ap.add_argument("--root", default=None, help="Repo root to scan (default: parent of scripts/).")
-    ap.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES, help=f"Size threshold in bytes (default: {DEFAULT_MAX_BYTES}).")
+    ap.add_argument(
+        "--max-bytes",
+        type=int,
+        default=DEFAULT_MAX_BYTES,
+        help=f"Size threshold in bytes (default: {DEFAULT_MAX_BYTES}).",
+    )
     args = ap.parse_args(argv)
 
     self_path = Path(__file__).resolve()

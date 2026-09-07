@@ -11,6 +11,7 @@ hold). Enumerator COVERAGE is deliberately not a schema question: an unaccounted
 enumerator is a partial release, so it is reported as a gate failure naming the
 enumerator rather than as a malformed record.
 """
+
 from __future__ import annotations
 
 import json
@@ -138,7 +139,9 @@ class Contract:
         try:
             return Template(template).substitute(fields)
         except (KeyError, ValueError) as exc:
-            raise ContractError(f"{self.path}: message '{key}' cannot be rendered ({exc})") from None
+            raise ContractError(
+                f"{self.path}: message '{key}' cannot be rendered ({exc})"
+            ) from None
 
 
 @dataclass(frozen=True)
@@ -225,13 +228,20 @@ def load_contract(path: Path | None = None) -> Contract:
             missing_message=raw.get("missing_message", "no binding"),
         )
         if enumerator.evidence_kind not in kinds:
-            raise ContractError(f"{contract_path}: enumerator '{enumerator.id}' names unknown evidence kind '{enumerator.evidence_kind}'")
+            raise ContractError(
+                f"{contract_path}: enumerator '{enumerator.id}' names unknown evidence kind "
+                f"'{enumerator.evidence_kind}'"
+            )
         enumerators.append(enumerator)
     if not enumerators:
-        raise ContractError(f"{contract_path}: the enumerator list is empty -- there is no transaction to check")
+        raise ContractError(
+            f"{contract_path}: the enumerator list is empty -- there is no transaction to check"
+        )
     duplicates = _duplicates([e.id for e in enumerators])
     if duplicates:
-        raise ContractError(f"{contract_path}: enumerator id(s) declared more than once: {', '.join(duplicates)}")
+        raise ContractError(
+            f"{contract_path}: enumerator id(s) declared more than once: {', '.join(duplicates)}"
+        )
 
     contract = Contract(
         version=_require(contract_path, data, "version", str),
@@ -244,7 +254,16 @@ def load_contract(path: Path | None = None) -> Contract:
         messages=_require(contract_path, data, "messages", dict),
         path=contract_path,
     )
-    for key in ("prefix", "satisfied", "not_applicable", "missing", "unsatisfied", "paused", "pass", "fail"):
+    for key in (
+        "prefix",
+        "satisfied",
+        "not_applicable",
+        "missing",
+        "unsatisfied",
+        "paused",
+        "pass",
+        "fail",
+    ):
         if key not in contract.messages:
             raise ContractError(f"{contract_path}: messages is missing template '{key}'")
     return contract
@@ -273,7 +292,10 @@ def load_record(path: Path, contract: Contract) -> Record:
         raise RecordError(f"{path}: schema is {schema!r}, expected {RECORD_SCHEMA!r}")
     declared = data.get("contract")
     if declared != contract.version:
-        raise RecordError(f"{path}: written against contract {declared!r}, but the loaded contract is {contract.version!r}")
+        raise RecordError(
+            f"{path}: written against contract {declared!r}, but the loaded contract is "
+            f"{contract.version!r}"
+        )
 
     version = _require(path, data, "version", str, RecordError)
     if not _VERSION_RE.match(version):
@@ -315,23 +337,37 @@ def _binding(path: Path, contract: Contract, enumerator_id: str, raw: dict[str, 
     """Parse one binding, validating waiver shape or evidence parameter names."""
     if "not_applicable" in raw:
         if len(raw) != 1:
-            raise RecordError(f"{path}: binding for '{enumerator_id}' mixes a not-applicable declaration with evidence")
+            raise RecordError(
+                f"{path}: binding for '{enumerator_id}' mixes a not-applicable declaration with "
+                f"evidence"
+            )
         waiver = raw["not_applicable"]
         if not isinstance(waiver, dict):
-            raise RecordError(f"{path}: binding for '{enumerator_id}': not_applicable must be an object")
+            raise RecordError(
+                f"{path}: binding for '{enumerator_id}': not_applicable must be an object"
+            )
         for field in ("reason", "detail"):
             if not isinstance(waiver.get(field), str) or not waiver[field].strip():
-                raise RecordError(f"{path}: binding for '{enumerator_id}': not_applicable.{field} must be a non-empty string")
+                raise RecordError(
+                    f"{path}: binding for '{enumerator_id}': not_applicable.{field} must be a "
+                    f"non-empty string"
+                )
         return Binding(params=None, waiver=Waiver(reason=waiver["reason"], detail=waiver["detail"]))
 
     kind = contract.evidence_kind(contract.enumerator(enumerator_id).evidence_kind)
     allowed = set(kind.required) | set(kind.optional)
     unknown = sorted(set(raw) - allowed)
     if unknown:
-        raise RecordError(f"{path}: binding for '{enumerator_id}' carries parameter(s) '{', '.join(unknown)}' that evidence kind '{kind.name}' does not declare")
+        raise RecordError(
+            f"{path}: binding for '{enumerator_id}' carries parameter(s) '{', '.join(unknown)}' "
+            f"that evidence kind '{kind.name}' does not declare"
+        )
     missing = sorted(set(kind.required) - set(raw))
     if missing:
-        raise RecordError(f"{path}: binding for '{enumerator_id}' is missing required parameter(s) '{', '.join(missing)}' of evidence kind '{kind.name}'")
+        raise RecordError(
+            f"{path}: binding for '{enumerator_id}' is missing required parameter(s) "
+            f"'{', '.join(missing)}' of evidence kind '{kind.name}'"
+        )
     return Binding(params=dict(raw), waiver=None)
 
 
@@ -423,7 +459,13 @@ def _read_json(path: Path, error: type[RuntimeError]) -> dict[str, Any]:
     return data
 
 
-def _require(path: Path, data: dict[str, Any], key: str, kind: type, error: type[RuntimeError] = ContractError) -> Any:
+def _require(
+    path: Path,
+    data: dict[str, Any],
+    key: str,
+    kind: type,
+    error: type[RuntimeError] = ContractError,
+) -> Any:
     """Return `data[key]`, raising `error` when absent or of the wrong type."""
     value = data.get(key)
     if not isinstance(value, kind):

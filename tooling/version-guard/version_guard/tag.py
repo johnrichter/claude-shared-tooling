@@ -5,6 +5,7 @@ at the repo root) or a module rooted below the repo root (`<path>/[v]X.Y.Z`, e.g
 `go/git/v1.2.0` or `schemas/model-roster/v1.0.0`). The prefix is the claim; this module
 checks the claim against the tree it was cut from.
 """
+
 from __future__ import annotations
 
 import re
@@ -19,9 +20,11 @@ _MANIFEST_NAMES = ("go.mod", "Cargo.toml", "pyproject.toml")
 
 
 def _cargo_declares_package(manifest: Path) -> bool:
-    """Whether a `Cargo.toml` declares a `[package]` — i.e. is a releasable crate, not a
-    `[workspace]`-only container manifest (which carries no `[package]` and versions no
-    crate of its own)."""
+    """Whether a `Cargo.toml` declares a `[package]` — a releasable crate.
+
+    Not a `[workspace]`-only container manifest (which carries no `[package]` and versions no
+    crate of its own).
+    """
     try:
         data = tomllib.loads(manifest.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError):

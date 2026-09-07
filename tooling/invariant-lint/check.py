@@ -19,6 +19,7 @@ Usage:
 Exit codes: 0 every shipped rung-1/rung-3 entry resolves and runs; 1 one or more do not;
 2 the harness itself could not run (unreadable registry, bad arguments — never a silent pass).
 """
+
 from __future__ import annotations
 
 import sys

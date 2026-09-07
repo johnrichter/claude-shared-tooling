@@ -5,6 +5,7 @@ actively-maintained implementation of that check, rather than a hand-rolled docs
 parser. Requires `ruff` on PATH, installed from this package's `requirements.txt` into an
 isolated environment, never the system/global interpreter's package set.
 """
+
 from __future__ import annotations
 
 import json
@@ -36,14 +37,24 @@ def ruff_available() -> bool:
     return shutil.which("ruff") is not None
 
 
-def scan_python_docstrings(paths: list[Path], repo_root: Path, config_path: Path) -> list[Violation]:
+def scan_python_docstrings(
+    paths: list[Path], repo_root: Path, config_path: Path
+) -> list[Violation]:
     """Run ruff's Google-convention docstring rules over `paths`, return violations."""
     py_paths = [p for p in paths if p.suffix == ".py"]
     if not py_paths:
         return []
     config_path.write_text(_CONFIG, encoding="utf-8")
     result = subprocess.run(
-        ["ruff", "check", "--config", str(config_path), "--output-format", "json", *map(str, py_paths)],
+        [
+            "ruff",
+            "check",
+            "--config",
+            str(config_path),
+            "--output-format",
+            "json",
+            *map(str, py_paths),
+        ],
         cwd=repo_root,
         capture_output=True,
         text=True,

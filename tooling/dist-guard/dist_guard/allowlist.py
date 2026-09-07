@@ -4,6 +4,7 @@ Edit ENTRIES here, never `allowlist.json` directly, then run `check.py generate`
 it. `check.py check` regenerates in memory and diffs against disk, so a hand-edit or a source
 change landed without regenerating both fail the same way.
 """
+
 from __future__ import annotations
 
 import json
@@ -12,6 +13,8 @@ from typing import TypedDict
 
 
 class Entry(TypedDict):
+    """Entry."""
+
     path: str
     reason: str
 
@@ -36,7 +39,10 @@ def render() -> str:
     """Deterministic JSON rendering of ENTRIES — the file `generate` writes to disk."""
     _assert_at_most_one(ENTRIES)
     doc = {
-        "generated_by": f"{_GENERATED_BY} — do not hand-edit; run `python3 tooling/dist-guard/check.py generate`",
+        "generated_by": (
+            f"{_GENERATED_BY} — do not hand-edit; run "
+            "`python3 tooling/dist-guard/check.py generate`"
+        ),
         "entries": ENTRIES,
     }
     return json.dumps(doc, indent=2, sort_keys=False) + "\n"

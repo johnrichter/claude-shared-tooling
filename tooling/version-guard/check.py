@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""version-guard — SC-VERSIONING enforcement: tag-prefix/module-path parity, and Rust
-git-tag-only cross-module dependencies. Stdlib-only, no install: run it from a checkout.
+"""version-guard — SC-VERSIONING enforcement (stdlib-only, run from a checkout).
+
+Enforces tag-prefix/module-path parity, and Rust git-tag-only cross-module dependencies.
 
 Commands:
     check-tag   Reject a tag whose path prefix isn't a real module path in this tree.
@@ -16,6 +17,7 @@ Usage:
     python3 tooling/version-guard/check.py check-deps
     python3 tooling/version-guard/check.py commands --module go/git --version 1.2.0
 """
+
 from __future__ import annotations
 
 import argparse
@@ -54,18 +56,32 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="version-guard", description="Enforce SC-VERSIONING.")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
-    check_tag_cmd = subcommands.add_parser("check-tag", help="Reject a tag whose prefix isn't a real module path.")
+    check_tag_cmd = subcommands.add_parser(
+        "check-tag", help="Reject a tag whose prefix isn't a real module path."
+    )
     check_tag_cmd.add_argument("tag", help="The tag to check, e.g. go/git/v1.2.0 or v0.2.2.")
-    check_tag_cmd.add_argument("--repo-root", type=Path, default=Path.cwd(), help="Repository root (default: cwd).")
+    check_tag_cmd.add_argument(
+        "--repo-root", type=Path, default=Path.cwd(), help="Repository root (default: cwd)."
+    )
     check_tag_cmd.set_defaults(handler=_check_tag)
 
-    check_deps_cmd = subcommands.add_parser("check-deps", help="Reject any Rust path/relative dependency.")
-    check_deps_cmd.add_argument("--repo-root", type=Path, default=Path.cwd(), help="Repository root (default: cwd).")
+    check_deps_cmd = subcommands.add_parser(
+        "check-deps", help="Reject any Rust path/relative dependency."
+    )
+    check_deps_cmd.add_argument(
+        "--repo-root", type=Path, default=Path.cwd(), help="Repository root (default: cwd)."
+    )
     check_deps_cmd.set_defaults(handler=_check_deps)
 
-    commands_cmd = subcommands.add_parser("commands", help="Print the exact tag-and-release command set.")
-    commands_cmd.add_argument("--module", default="", help="Module path, empty for the top-level module (default: '').")
-    commands_cmd.add_argument("--version", required=True, help="Version being released, e.g. 1.2.0.")
+    commands_cmd = subcommands.add_parser(
+        "commands", help="Print the exact tag-and-release command set."
+    )
+    commands_cmd.add_argument(
+        "--module", default="", help="Module path, empty for the top-level module (default: '')."
+    )
+    commands_cmd.add_argument(
+        "--version", required=True, help="Version being released, e.g. 1.2.0."
+    )
     commands_cmd.add_argument("--commit", default="HEAD", help="Commit-ish to tag (default: HEAD).")
     commands_cmd.set_defaults(handler=_commands)
 
@@ -83,7 +99,11 @@ def _check_deps(args: argparse.Namespace) -> int:
     if violations:
         for violation in violations:
             print(f"version-guard: {violation}", file=sys.stderr)
-        print(f"version-guard: {len(violations)} Rust path/relative dependency(ies) found; require a git-tag dependency instead", file=sys.stderr)
+        print(
+            f"version-guard: {len(violations)} Rust path/relative dependency(ies) found; require a "
+            f"git-tag dependency instead",
+            file=sys.stderr,
+        )
         return _VIOLATION
     print("version-guard: no Rust path/relative dependencies found")
     return 0

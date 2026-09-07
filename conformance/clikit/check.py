@@ -24,6 +24,7 @@ divergence was found, a golden is absent, a golden is not canonical, or a golden
 with the contract - pause and have a human judge it; 2 the harness itself could not run (a
 toolchain absent, an implementation that would not build).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -166,7 +167,9 @@ def render(implementation: Implementation, out_root: Path) -> Rendering:
             artifacts at all (a build failure rather than a divergence).
     """
     if shutil.which(implementation.tool) is None:
-        raise HarnessError(f"{implementation.tool} is not on PATH, so {implementation.name} cannot be checked")
+        raise HarnessError(
+            f"{implementation.tool} is not on PATH, so {implementation.name} cannot be checked"
+        )
 
     env = dict(os.environ, **{ARTIFACT_ENV: str(out_root)})
     completed = subprocess.run(
@@ -187,7 +190,8 @@ def render(implementation: Implementation, out_root: Path) -> Rendering:
             artifacts[name] = path.read_text(encoding="utf-8")
     if not artifacts:
         raise HarnessError(
-            f"{implementation.name} emitted no artifacts - it did not reach the rendering step:\n{output}"
+            f"{implementation.name} emitted no artifacts - it did not reach the rendering "
+            f"step:\n{output}"
         )
     return Rendering(implementation.name, artifacts, completed.returncode, output)
 
@@ -388,8 +392,7 @@ def _pairing_agrees_across_contract_files(rules: dict[str, ClassRule]) -> list[s
     golden below is judged against both, so it is reported before the records are.
     """
     table = {
-        entry["status"]: entry["code"]
-        for entry in _read_json(CONTRACT)["exit_taxonomy"]["classes"]
+        entry["status"]: entry["code"] for entry in _read_json(CONTRACT)["exit_taxonomy"]["classes"]
     }
     findings = []
     for status, rule in sorted(rules.items()):
@@ -407,7 +410,10 @@ def _judge_class(record: dict, rule: ClassRule) -> list[str]:
     """Check one record against its own class's branch: pairing, presence, governing code."""
     findings = []
     if record.get("exit_code") != rule.exit_code:
-        findings.append(f"exit_code {record.get('exit_code')} does not pair with this status (want {rule.exit_code})")
+        findings.append(
+            f"exit_code {record.get('exit_code')} does not pair with this status (want "
+            f"{rule.exit_code})"
+        )
     for name in sorted(rule.required - set(record)):
         findings.append(f"this class requires {name}")
     for name in sorted(rule.forbidden & set(record)):
@@ -445,7 +451,9 @@ def _judge_diagnostics(
                 findings.append(f"{where}.triage is not an object")
                 continue
             if triage.get("kind") not in triage_kinds:
-                findings.append(f"{where}.triage kind {triage.get('kind')!r} is not one of the three")
+                findings.append(
+                    f"{where}.triage kind {triage.get('kind')!r} is not one of the three"
+                )
             unknown = sorted(set(triage) - triage_fields)
             if unknown:
                 findings.append(f"{where}.triage carries unknown field(s) {unknown}")
@@ -463,7 +471,10 @@ def check_shape_coverage() -> list[str]:
     """
     cases = load_cases()
     diagnostics = [
-        diagnostic for case in cases for array in ("errors", "caveats") for diagnostic in case.get(array, [])
+        diagnostic
+        for case in cases
+        for array in ("errors", "caveats")
+        for diagnostic in case.get(array, [])
     ]
     triages = [diagnostic.get("triage", {}) for diagnostic in diagnostics]
     statuses = [entry["status"] for entry in _read_json(CONTRACT)["exit_taxonomy"]["classes"]]
@@ -551,7 +562,9 @@ def check_case_coverage(renderings: list[Rendering]) -> list[str]:
             continue
         missing = sorted(set(expected) - set(rendered))
         extra = sorted(set(rendered) - set(expected))
-        detail = f"unrendered={missing} unknown={extra}" if missing or extra else f"order={rendered}"
+        detail = (
+            f"unrendered={missing} unknown={extra}" if missing or extra else f"order={rendered}"
+        )
         findings.append(
             f"{rendering.implementation} did not render the input set's "
             f"{len(expected)} case(s) in order: {detail}"
@@ -578,7 +591,9 @@ def _parse_exit_codes(exit_codes: str) -> dict[str, tuple[str, int]]:
     return declared
 
 
-def _diff(name: str, got: str | None, want: str | None, got_label: str, want_label: str) -> list[str]:
+def _diff(
+    name: str, got: str | None, want: str | None, got_label: str, want_label: str
+) -> list[str]:
     """First differing line between two artifact bodies, named by case where there is one."""
     if got is None:
         return [f"{name} was not emitted by {got_label}"]
@@ -595,7 +610,8 @@ def _diff(name: str, got: str | None, want: str | None, got_label: str, want_lab
             continue
         case = f" ({ids[index]})" if name == RESULTS and index < len(ids) else ""
         return [
-            f"{name} line {index + 1}{case}:\n  {got_label:<7} {got_line}\n  {want_label:<7} {want_line}"
+            f"{name} line {index + 1}{case}:\n  {got_label:<7} {got_line}\n  {want_label:<7} "
+            f"{want_line}"
         ]
     return [f"{name} differs from {want_label} only in trailing bytes"]
 
@@ -639,7 +655,8 @@ def run_gate(quiet: bool = False) -> int:
             print(f"clikit-conformance: {finding}", file=sys.stderr)
         print(
             f"clikit-conformance: {len(findings)} finding(s) - PAUSE: the implementations of one "
-            "CLI output contract are not proven byte-identical, and a human must judge every line above",
+            "CLI output contract are not proven byte-identical, and a human must judge every line "
+            "above",
             file=sys.stderr,
         )
         return _DIVERGENCE
@@ -647,7 +664,10 @@ def run_gate(quiet: bool = False) -> int:
     failed = [rendering for rendering in renderings if rendering.exit_code != 0]
     if failed:
         for rendering in failed:
-            print(f"clikit-conformance: {rendering.implementation} test failed:\n{rendering.output}", file=sys.stderr)
+            print(
+                f"clikit-conformance: {rendering.implementation} test failed:\n{rendering.output}",
+                file=sys.stderr,
+            )
         return _HARNESS_ERROR
 
     print(
@@ -714,7 +734,10 @@ def record_goldens() -> int:
         for name in GOLDEN_ARTIFACTS:
             (golden_dir / name).write_text(agreed[name], encoding="utf-8")
 
-    print(f"clikit-conformance: recorded {len(GOLDEN_ARTIFACTS)} golden(s) from an agreed rendering", file=sys.stderr)
+    print(
+        f"clikit-conformance: recorded {len(GOLDEN_ARTIFACTS)} golden(s) from an agreed rendering",
+        file=sys.stderr,
+    )
     return _OK
 
 
@@ -756,7 +779,10 @@ def run_selftest() -> int:
     """
     print("clikit-conformance selftest: clean tree must pass", file=sys.stderr)
     if run_gate(quiet=True) != _OK:
-        print("clikit-conformance selftest: the clean tree does not pass, nothing else is meaningful", file=sys.stderr)
+        print(
+            "clikit-conformance selftest: the clean tree does not pass, nothing else is meaningful",
+            file=sys.stderr,
+        )
         return _HARNESS_ERROR
 
     for plant in PLANTS:
@@ -768,7 +794,8 @@ def run_selftest() -> int:
             return _HARNESS_ERROR
         if outcome != _DIVERGENCE:
             print(
-                f"clikit-conformance selftest: the gate returned {outcome} for a planted drift, want {_DIVERGENCE}",
+                f"clikit-conformance selftest: the gate returned {outcome} for a planted drift, "
+                f"want {_DIVERGENCE}",
                 file=sys.stderr,
             )
             return _DIVERGENCE
@@ -778,16 +805,21 @@ def run_selftest() -> int:
         outcome = _with_golden_removed(name, lambda: run_gate(quiet=True))
         if outcome != _DIVERGENCE:
             print(
-                f"clikit-conformance selftest: the gate returned {outcome} for an absent golden, want {_DIVERGENCE}",
+                f"clikit-conformance selftest: the gate returned {outcome} for an absent golden, "
+                f"want {_DIVERGENCE}",
                 file=sys.stderr,
             )
             return _DIVERGENCE
         if not (SUITE / "golden" / name).is_file():
-            print("clikit-conformance selftest: the gate did not restore the golden it moved aside", file=sys.stderr)
+            print(
+                "clikit-conformance selftest: the gate did not restore the golden it moved aside",
+                file=sys.stderr,
+            )
             return _HARNESS_ERROR
 
     print(
-        "clikit-conformance selftest: plant - a record whose exit code does not pair with its status",
+        "clikit-conformance selftest: plant - a record whose exit code does not pair with its "
+        "status",
         file=sys.stderr,
     )
     if not _oracle_rejects_a_mispaired_record():
@@ -798,7 +830,8 @@ def run_selftest() -> int:
         return _DIVERGENCE
 
     print(
-        f"clikit-conformance selftest: {len(PLANTS) + len(GOLDEN_ARTIFACTS) + 1} plant(s) caught, tree restored",
+        f"clikit-conformance selftest: {len(PLANTS) + len(GOLDEN_ARTIFACTS) + 1} plant(s) caught, "
+        f"tree restored",
         file=sys.stderr,
     )
     return _OK
@@ -871,8 +904,12 @@ def main(argv: list[str] | None = None) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--record", action="store_true", help="rewrite the goldens from an agreed rendering")
-    mode.add_argument("--selftest", action="store_true", help="prove the gate catches a planted drift")
+    mode.add_argument(
+        "--record", action="store_true", help="rewrite the goldens from an agreed rendering"
+    )
+    mode.add_argument(
+        "--selftest", action="store_true", help="prove the gate catches a planted drift"
+    )
     args = parser.parse_args(argv)
 
     try:

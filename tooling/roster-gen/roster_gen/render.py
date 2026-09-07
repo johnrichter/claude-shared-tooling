@@ -5,6 +5,7 @@ new file text out. The CLI owns all file IO so rendering stays independently
 testable and every output comes from the same in-memory roster snapshot —
 the one-rendering-pass guarantee.
 """
+
 from __future__ import annotations
 
 import json
@@ -31,27 +32,38 @@ class NarrowingError(Exception):
 
 
 def _num(x: float) -> float | int:
-    """A price as a bare int when it's whole, else the float — matches the
-    on-disk convention in both anthropic-specifications.json copies."""
+    """A price as a bare int when it's whole, else the float.
+
+    Matches the on-disk convention in both anthropic-specifications.json copies.
+    """
     return int(x) if float(x).is_integer() else x
 
 
 def _js_num(x: float) -> str:
-    """A price as a JS literal, always with a decimal point — matches
-    build-engine.workflow.js's DEFAULT_RATES convention (`25.0`, not `25`)."""
+    """A price as a JS literal, always with a decimal point.
+
+    Matches build-engine.workflow.js's DEFAULT_RATES convention (`25.0`, not `25`).
+    """
     x = float(x)
     return f"{x:.1f}" if x.is_integer() else str(x)
 
 
 def _rate_row(table: dict[str, float]) -> dict[str, float | int]:
-    """A price table reordered to the on-disk convention: input, cache_write_5m,
-    cache_write_1h, cache_read, output."""
-    return {k: _num(table[k]) for k in ("input", "cache_write_5m", "cache_write_1h", "cache_read", "output")}
+    """A price table reordered to the on-disk convention.
+
+    Order: input, cache_write_5m, cache_write_1h, cache_read, output.
+    """
+    return {
+        k: _num(table[k])
+        for k in ("input", "cache_write_5m", "cache_write_1h", "cache_read", "output")
+    }
 
 
 # ---- anthropic-specifications.json (both copies render identically) ----
 
+
 def render_specs(roster: dict[str, Any], tag: str) -> str:
+    """Render specs."""
     models = roster["models"]
     ids = order.capability_order(select(models, lambda r: priced(r) is not None), models)
     variant_ids = [mid for mid in ids if "1m" in models[mid].get("context_variants", {})]
@@ -115,7 +127,9 @@ def render_specs(roster: dict[str, Any], tag: str) -> str:
 
 # ---- plan-schema.json: only $defs.task.properties.model is roster-derived ----
 
+
 def patch_plan_schema(existing_text: str, roster: dict[str, Any], tag: str) -> str:
+    """Patch plan schema."""
     doc = json.loads(existing_text)
     models = roster["models"]
     sentinels = list(roster["effort_exempt_sentinels"])
@@ -125,7 +139,9 @@ def patch_plan_schema(existing_text: str, roster: dict[str, Any], tag: str) -> s
     # from that row's own variant data, never hand-added. Unlisted in PLAN_ENUM_ORDER, so the
     # sequencer tail rule places every one of them after the fixed-order block and before the
     # sentinels, as a block of its own (never interleaved with its base id).
-    variant_ids = [f"{mid}[1m]" for mid in new_work if "1m" in models[mid].get("context_variants", {})]
+    variant_ids = [
+        f"{mid}[1m]" for mid in new_work if "1m" in models[mid].get("context_variants", {})
+    ]
     enum = order.sequence(new_work + variant_ids, order.PLAN_ENUM_ORDER) + sentinels
     missing = [s for s in REQUIRED_SENTINELS if s not in enum]
     if missing:
@@ -134,7 +150,8 @@ def patch_plan_schema(existing_text: str, roster: dict[str, Any], tag: str) -> s
     model_prop = doc["$defs"]["task"]["properties"]["model"]
     model_prop["enum"] = enum
     model_prop["description"] = (
-        "Pinned full model ID for the software-engineer on this task, chosen per governance-model-tiering."
+        "Pinned full model ID for the software-engineer on this task, chosen per "
+        "governance-model-tiering."
     )
     model_prop["$comment"] = (
         GENERATED_BY.format(tag=tag)
@@ -155,6 +172,7 @@ _JS_BLOCK_RE = re.compile(
 
 
 def patch_build_engine(existing_text: str, roster: dict[str, Any], tag: str) -> str:
+    """Patch build engine."""
     models = roster["models"]
     ids = order.capability_order(select(models, lambda r: priced(r) is not None), models)
 
@@ -162,7 +180,8 @@ def patch_build_engine(existing_text: str, roster: dict[str, Any], tag: str) -> 
     rows = [", ".join(pairs[i : i + 4]) + "," for i in range(0, len(pairs), 4)]
     body = "\n  ".join(rows)
     block = (
-        f"// >>> roster-gen:generated (tag={tag}) — do not hand-edit this block; edit the roster and regenerate <<<\n"
+        f"// >>> roster-gen:generated (tag={tag}) — do not hand-edit this block; edit the roster "
+        f"and regenerate <<<\n"
         f"const DEFAULT_RATES = {{\n  {body}\n}}\n"
         f"// <<< roster-gen:generated <<<\n"
     )
@@ -174,7 +193,11 @@ def patch_build_engine(existing_text: str, roster: dict[str, Any], tag: str) -> 
 
 # ---- hooks/model-roster: the model-gate's allowlist (whole file) ----
 
-def render_gate_allowlist(roster: dict[str, Any], tag: str, existing_ids: set[str] | None = None) -> str:
+
+def render_gate_allowlist(
+    roster: dict[str, Any], tag: str, existing_ids: set[str] | None = None
+) -> str:
+    """Render gate allowlist."""
     models = roster["models"]
     ids = select(models, lambda r: r["selectable"] != "retired")
     if existing_ids is not None:
@@ -215,7 +238,8 @@ def _capability_table(roster: dict[str, Any], tag: str) -> str:
     models = roster["models"]
     ids = order.capability_order(select(models, lambda r: r["selectable"] != "retired"), models)
     rows = [
-        "| Model | Selectable | Context window | Max output | Price $/Mtok (in / out) | Effort available |",
+        "| Model | Selectable | Context window | Max output | Price $/Mtok (in / out) | Effort "
+        "available |",
         "|---|---|---|---|---|---|",
     ]
     for mid in ids:
@@ -234,8 +258,10 @@ def _capability_table(roster: dict[str, Any], tag: str) -> str:
 
 
 def patch_tiering_doc(existing_text: str, roster: dict[str, Any], tag: str) -> str:
+    """Patch tiering doc."""
     block = (
-        f"<!-- roster-gen:generated (tag={tag}) — do not hand-edit; edit the roster and regenerate -->\n"
+        f"<!-- roster-gen:generated (tag={tag}) — do not hand-edit; edit the roster and regenerate "
+        f"-->\n"
         f"{_capability_table(roster, tag)}"
         f"<!-- roster-gen:end -->\n"
     )
@@ -244,5 +270,7 @@ def patch_tiering_doc(existing_text: str, roster: dict[str, Any], tag: str) -> s
         return new_text
     new_text, count = _MD_BOOTSTRAP_RE.subn(block, existing_text, count=1)
     if count != 1:
-        raise ValueError("could not locate the capability snapshot table in governance-model-tiering.md")
+        raise ValueError(
+            "could not locate the capability snapshot table in governance-model-tiering.md"
+        )
     return new_text

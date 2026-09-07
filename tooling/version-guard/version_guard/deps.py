@@ -1,11 +1,11 @@
-"""Rust dependency rule: a crate depends on another module by git tag, never by a
-path/relative dependency.
+"""Rust dependency rule: a crate depends on another module by git tag, not a path dep.
 
 A `path = "..."` dependency only ever resolves inside the checkout that produced it, so it
 can't survive the module crossing a repo boundary (or even just being tagged and consumed
 independently of its neighbor). `git = "...", tag = "..."` is the only cross-module
 dependency this repo's SC-VERSIONING convention recognizes.
 """
+
 from __future__ import annotations
 
 import re
@@ -32,7 +32,11 @@ class PathDepViolation:
     path: str
 
     def __str__(self) -> str:
-        return f"{self.manifest}:{self.line}: {self.dependency!r} is a path dependency ({self.path!r}); use a git tag dependency instead"
+        """Implement `__str__`."""
+        return (
+            f"{self.manifest}:{self.line}: {self.dependency!r} is a path dependency "
+            f"({self.path!r}); use a git tag dependency instead"
+        )
 
 
 def _is_dependency_section(section: str) -> bool:
@@ -41,15 +45,17 @@ def _is_dependency_section(section: str) -> bool:
 
 
 def _dependency_subtable_name(section: str) -> str | None:
-    """If `section` is a dotted dependency subtable — `[dependencies.<name>]` and its
-    `target.*`/`workspace`-scoped forms — the depended-on crate name; else None. In a
-    subtable the crate name is the section, and a bare `path = "..."` line is its field; in
-    a plain `[dependencies]` table the keys are the crate names, so `path` is a crate, not a
-    field."""
+    """The depended-on crate name if `section` is a dotted dependency subtable, else None.
+
+    A dotted subtable is `[dependencies.<name>]` and its `target.*`/`workspace`-scoped forms.
+    In a subtable the crate name is the section, and a bare `path = "..."` line is its field;
+    in a plain `[dependencies]` table the keys are the crate names, so `path` is a crate, not
+    a field.
+    """
     parts = section.replace('"', "").replace("'", "").split(".")
     for i, part in enumerate(parts):
         if part in _DEP_SECTION_WORDS and i < len(parts) - 1:
-            return ".".join(parts[i + 1:])
+            return ".".join(parts[i + 1 :])
     return None
 
 
