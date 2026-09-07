@@ -49,12 +49,12 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly CLIKIT_BIN="${CLIKIT_BIN:-${SCRIPT_DIR}/../../go/.bin/clikit}"
 
 if [[ ! -x "$CLIKIT_BIN" ]]; then
-  # The helper never hand-writes JSON — that is the whole reason it exists. Without
-  # the emitter it cannot produce a record, so per the clikit contract a surface
-  # that cannot write its record exits 90 with no record on stdout; the diagnostic
-  # goes to stderr, which is not part of the result.
-  printf 'clikit-emit: emitter binary not found at %s; build go/clikit or set CLIKIT_BIN to an emitter path\n' "$CLIKIT_BIN" >&2
-  exit 90
+	# The helper never hand-writes JSON — that is the whole reason it exists. Without
+	# the emitter it cannot produce a record, so per the clikit contract a surface
+	# that cannot write its record exits 90 with no record on stdout; the diagnostic
+	# goes to stderr, which is not part of the result.
+	printf 'clikit-emit: emitter binary not found at %s; build go/clikit or set CLIKIT_BIN to an emitter path\n' "$CLIKIT_BIN" >&2
+	exit 90
 fi
 
 # Invoke the clikit emitter with all arguments passed through.

@@ -278,6 +278,18 @@ jobs:
         if: ${{ !inputs.dry_run }}
         run: language-tools security --language python --dir "${{ inputs.project_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
 
+      # Failure-path capture (contract section 10): export the per-check records a
+      # failed check wrote under .language-tools/log so a gate_negative.toolchain.error
+      # travels with the run instead of needing a local re-probe. Changes no check's
+      # invocation, target root, subject set or verdict.
+      - name: Capture language-tools logs on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: language-tools-logs-python-source-checks
+          path: ${{ github.workspace }}/.language-tools/log/
+          if-no-files-found: ignore
+
   build-test:
     name: build-test
     needs: source-checks
@@ -432,3 +444,12 @@ jobs:
       - name: Extra steps (repository-specific checks language-tools doesn't cover)
         if: ${{ !inputs.dry_run && inputs.extra_steps != '' }}
         run: ${{ inputs.extra_steps }}
+
+      # Failure-path capture (contract section 10). Matrix-scoped artifact name.
+      - name: Capture language-tools logs on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: language-tools-logs-python-build-test-${{ matrix.os }}
+          path: ${{ github.workspace }}/.language-tools/log/
+          if-no-files-found: ignore

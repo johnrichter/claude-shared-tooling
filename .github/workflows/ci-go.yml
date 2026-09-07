@@ -261,6 +261,20 @@ jobs:
         if: ${{ !inputs.dry_run }}
         run: language-tools security --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
 
+      # Failure-path capture (contract section 10): a failed check writes its raw
+      # tool output to a per-check record under .language-tools/log that the run
+      # otherwise discards, so a gate_negative.toolchain.error can only be triaged
+      # from a local re-probe. Export that directory as an artifact on failure so
+      # the record travels with the run. This changes no check's invocation, target
+      # root, subject set or verdict — it only publishes what a failed check wrote.
+      - name: Capture language-tools logs on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: language-tools-logs-go-source-checks
+          path: ${{ github.workspace }}/.language-tools/log/
+          if-no-files-found: ignore
+
   build-test:
     name: build-test
     needs: source-checks
@@ -361,8 +375,13 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
+          # --batch --yes so gpg never prompts: the amd64 image already ships a
+          # google-chrome.gpg, and a bare --dearmor asks to overwrite it on a
+          # /dev/tty a runner step has not got, which is what killed this step
+          # (gpg: cannot open '/dev/tty') on amd64 while it passed on arm64,
+          # whose image ships no such file.
           curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
-            | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+            | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/google-chrome.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
             | sudo tee /etc/apt/sources.list.d/google-chrome.list
           sudo apt-get update
@@ -399,7 +418,14 @@ jobs:
           set -euo pipefail
           brew update
           brew install --cask google-chrome
-          "$(brew --prefix)/bin/google-chrome" --version || true   # OD60: print what was installed
+          # A cask drops the .app bundle under /Applications and puts no CLI on
+          # the Homebrew bin prefix, so $(brew --prefix)/bin/google-chrome does
+          # not exist and the verify step below resolves an empty path. Link the
+          # bundle's own executable onto the prefix (OD64) so the copy that wins
+          # on PATH is the cask's, ahead of the image's own Chrome, and its
+          # --version equals the installed cask.
+          ln -sf "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" "$(brew --prefix)/bin/google-chrome"
+          "$(brew --prefix)/bin/google-chrome" --version   # OD60: print what was installed
 
       - name: Verify installed Chrome wins on PATH (macOS)
         if: runner.os == 'macOS'
@@ -454,9 +480,18 @@ jobs:
         if: ${{ !inputs.dry_run }}
         run: language-tools build --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
 
+      # Absolute --dir for the unit pair only: the unit check wraps go test in
+      # gotestsum and writes junit.xml and coverage.out at <dir>/<name>, while it
+      # already runs with the working directory set to <dir>. A relative --dir
+      # (e.g. go/agentcontract) doubles into <dir>/<dir>/<name>, whose parent does
+      # not exist, so gotestsum exits 1 with "no such file or directory" in ~30 ms
+      # having run zero tests. An absolute --dir makes that write path absolute, so
+      # it resolves to the real directory. Same target root, same subject set — the
+      # value is identical, only the path is anchored. build and test e2e write no
+      # such <dir>-relative output and stay on the plain relative --dir.
       - name: language-tools test unit
         if: ${{ !inputs.dry_run }}
-        run: language-tools test unit --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log" --timeout "${{ inputs.test_timeout }}s"
+        run: language-tools test unit --language go --dir "${{ github.workspace }}/${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log" --timeout "${{ inputs.test_timeout }}s"
 
       - name: language-tools test e2e
         if: ${{ !inputs.dry_run }}
@@ -465,3 +500,13 @@ jobs:
       - name: Extra steps (repository-specific checks language-tools doesn't cover)
         if: ${{ !inputs.dry_run && inputs.extra_steps != '' }}
         run: ${{ inputs.extra_steps }}
+
+      # Failure-path capture (contract section 10). Matrix-scoped artifact name so
+      # each platform's record uploads without colliding with the others'.
+      - name: Capture language-tools logs on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: language-tools-logs-go-build-test-${{ matrix.os }}
+          path: ${{ github.workspace }}/.language-tools/log/
+          if-no-files-found: ignore

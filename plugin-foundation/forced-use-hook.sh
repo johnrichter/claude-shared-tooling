@@ -55,13 +55,13 @@ command_str="$(printf '%s' "${payload}" | jq -r '.tool_input.command // empty' 2
 # the live hook and the adoption-measuring registry never disagree about
 # what counts as a match.
 matches_prefix() {
-  cmd="$1"
-  prefix="$2"
-  [ "${cmd}" = "${prefix}" ] && return 0
-  case "${cmd}" in
-  "${prefix} "*) return 0 ;;
-  esac
-  return 1
+	cmd="$1"
+	prefix="$2"
+	[ "${cmd}" = "${prefix}" ] && return 0
+	case "${cmd}" in
+	"${prefix} "*) return 0 ;;
+	esac
+	return 1
 }
 
 # raw_matches TOOL_NAME COMMAND OP_RAW_JSON -- true iff this invocation is a
@@ -72,86 +72,86 @@ matches_prefix() {
 # also counts with `i`, and a shared name here would have the caller's index
 # reset every time this scan finds no match, looping the caller forever.
 raw_matches() {
-  raw_tool="$(printf '%s' "$3" | jq -r '.tool_name')"
-  [ "${raw_tool}" = "$1" ] || return 1
-  [ "${raw_tool}" = "Bash" ] || return 0
-  prefix_count="$(printf '%s' "$3" | jq -r '.command_prefixes // [] | length')"
-  [ "${prefix_count}" -eq 0 ] && return 0
-  rm_i=0
-  while [ "${rm_i}" -lt "${prefix_count}" ]; do
-    p="$(printf '%s' "$3" | jq -r --argjson i "${rm_i}" '.command_prefixes[$i]')"
-    matches_prefix "$2" "${p}" && return 0
-    rm_i=$((rm_i + 1))
-  done
-  return 1
+	raw_tool="$(printf '%s' "$3" | jq -r '.tool_name')"
+	[ "${raw_tool}" = "$1" ] || return 1
+	[ "${raw_tool}" = "Bash" ] || return 0
+	prefix_count="$(printf '%s' "$3" | jq -r '.command_prefixes // [] | length')"
+	[ "${prefix_count}" -eq 0 ] && return 0
+	rm_i=0
+	while [ "${rm_i}" -lt "${prefix_count}" ]; do
+		p="$(printf '%s' "$3" | jq -r --argjson i "${rm_i}" '.command_prefixes[$i]')"
+		matches_prefix "$2" "${p}" && return 0
+		rm_i=$((rm_i + 1))
+	done
+	return 1
 }
 
 # cli_bin_path BIN_ENV BIN_NAME -- prints the resolved absolute path of an
 # available CLI (BIN_ENV's value if it names an executable file, else
 # `command -v` BIN_NAME), or nothing (and a nonzero exit) when unavailable.
 cli_bin_path() {
-  bin_env="$1"
-  bin_name="$2"
-  if [ -n "${bin_env}" ]; then
-    eval "candidate=\${${bin_env}:-}"
-    if [ -n "${candidate}" ] && [ -x "${candidate}" ]; then
-      printf '%s' "${candidate}"
-      return 0
-    fi
-  fi
-  if [ -n "${bin_name}" ] && command -v "${bin_name}" >/dev/null 2>&1; then
-    command -v "${bin_name}"
-    return 0
-  fi
-  return 1
+	bin_env="$1"
+	bin_name="$2"
+	if [ -n "${bin_env}" ]; then
+		eval "candidate=\${${bin_env}:-}"
+		if [ -n "${candidate}" ] && [ -x "${candidate}" ]; then
+			printf '%s' "${candidate}"
+			return 0
+		fi
+	fi
+	if [ -n "${bin_name}" ] && command -v "${bin_name}" >/dev/null 2>&1; then
+		command -v "${bin_name}"
+		return 0
+	fi
+	return 1
 }
 
 log_eval() {
-  # $1 operation, $2 outcome
-  [ -n "${PF_HOOKEVAL_LOG:-}" ] || return 0
-  jq -cn \
-    --arg session_id "${session_id}" \
-    --arg tool_name "${tool_name}" \
-    --arg operation "$1" \
-    --arg outcome "$2" \
-    '{session_id:$session_id,tool_name:$tool_name,operation:$operation,outcome:$outcome,denies_tool_exists:false}' \
-    >>"${PF_HOOKEVAL_LOG}"
+	# $1 operation, $2 outcome
+	[ -n "${PF_HOOKEVAL_LOG:-}" ] || return 0
+	jq -cn \
+		--arg session_id "${session_id}" \
+		--arg tool_name "${tool_name}" \
+		--arg operation "$1" \
+		--arg outcome "$2" \
+		'{session_id:$session_id,tool_name:$tool_name,operation:$operation,outcome:$outcome,denies_tool_exists:false}' \
+		>>"${PF_HOOKEVAL_LOG}"
 }
 
 emit_deny() {
-  # $1 reason
-  jq -cn --arg r "$1" \
-    '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
+	# $1 reason
+	jq -cn --arg r "$1" \
+		'{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
 }
 
 op_count="$(jq -r '.operations | length' "${PF_ROUTING_RULES}" 2>/dev/null || echo 0)"
 i=0
 while [ "${i}" -lt "${op_count}" ]; do
-  op="$(jq -c --argjson i "${i}" '.operations[$i]' "${PF_ROUTING_RULES}")"
-  i=$((i + 1))
+	op="$(jq -c --argjson i "${i}" '.operations[$i]' "${PF_ROUTING_RULES}")"
+	i=$((i + 1))
 
-  op_name="$(printf '%s' "${op}" | jq -r '.name')"
-  raw="$(printf '%s' "${op}" | jq -c '.raw')"
-  raw_tool="$(printf '%s' "${raw}" | jq -r '.tool_name')"
-  [ "${raw_tool}" = "${tool_name}" ] || continue
+	op_name="$(printf '%s' "${op}" | jq -r '.name')"
+	raw="$(printf '%s' "${op}" | jq -c '.raw')"
+	raw_tool="$(printf '%s' "${raw}" | jq -r '.tool_name')"
+	[ "${raw_tool}" = "${tool_name}" ] || continue
 
-  if ! raw_matches "${tool_name}" "${command_str}" "${raw}"; then
-    log_eval "${op_name}" "not_applicable"
-    continue
-  fi
+	if ! raw_matches "${tool_name}" "${command_str}" "${raw}"; then
+		log_eval "${op_name}" "not_applicable"
+		continue
+	fi
 
-  bin_env="$(printf '%s' "${op}" | jq -r '.cli.bin_env // empty')"
-  bin_name="$(printf '%s' "${op}" | jq -r '.cli.bin_name // empty')"
-  usage_hint="$(printf '%s' "${op}" | jq -r '.cli.usage_hint // empty')"
+	bin_env="$(printf '%s' "${op}" | jq -r '.cli.bin_env // empty')"
+	bin_name="$(printf '%s' "${op}" | jq -r '.cli.bin_name // empty')"
+	usage_hint="$(printf '%s' "${op}" | jq -r '.cli.usage_hint // empty')"
 
-  if bin_path="$(cli_bin_path "${bin_env}" "${bin_name}")"; then
-    log_eval "${op_name}" "fired"
-    emit_deny "forced-use: '${op_name}' is governed by ${bin_name} (available at ${bin_path}). Use \`${usage_hint}\` instead of this raw invocation."
-    exit 0
-  fi
+	if bin_path="$(cli_bin_path "${bin_env}" "${bin_name}")"; then
+		log_eval "${op_name}" "fired"
+		emit_deny "forced-use: '${op_name}' is governed by ${bin_name} (available at ${bin_path}). Use \`${usage_hint}\` instead of this raw invocation."
+		exit 0
+	fi
 
-  log_eval "${op_name}" "failed_open"
-  exit 0
+	log_eval "${op_name}" "failed_open"
+	exit 0
 done
 
 exit 0

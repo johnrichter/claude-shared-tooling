@@ -1,0 +1,29 @@
+# cargo-deny policy for the rust/ workspace. Without this file cargo-deny falls
+# back to its built-in defaults, whose license allow-list is empty, so it
+# rejects every crate's license — including the workspace's own MIT — and exits
+# non-zero before it can report a real advisory, ban or source problem. (The
+# rust security check reads cargo-deny's exit code, not its stderr JSON, so an
+# empty-allow-list rejection surfaces only as "cargo deny exited 4 with no
+# parsed diagnostics" — a fatal, not a finding.) This file supplies the license
+# policy the tool needs; it adds no advisory ignore, no ban skip and no lowered
+# severity, so every real finding the four checks can raise still fails the check.
+
+# `allow` is exactly the set of SPDX licenses the workspace's bm25 dependency
+# graph resolves to today — MIT and Apache-2.0 (the workspace's own crates and
+# unicode-normalization), and Zlib (tinyvec, offered Zlib OR Apache-2.0 OR MIT).
+# All OSI-approved and permissive. The set is kept exact rather than a
+# convenience superset: a dependency that introduces any other license is
+# rejected until it is vetted and added here, which is the whole point of
+# pinning the set. (A superset would trip cargo-deny's own license-not-encountered
+# warnings for the unused entries — harmless to this check's verdict, which reads
+# the exit code, but a false signal to anyone reading the raw output.)
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Zlib",
+]
+
+# Advisories, bans and sources keep cargo-deny's own defaults: a RustSec
+# vulnerability or an unknown crate source still fails the check. Nothing here
+# ignores an advisory or allows a banned crate.

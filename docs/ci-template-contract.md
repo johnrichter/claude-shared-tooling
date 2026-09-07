@@ -10,7 +10,7 @@ tags:
   - owner:public
 links:
   - project:fleet-04-adoption:design
-updated: 2026-09-06T16:30:00Z
+updated: 2026-09-07T00:00:00Z
 ---
 
 # CI template contract
@@ -114,11 +114,13 @@ jobs:
       # ...activation + provisioning...
       - name: language-tools build
         run: language-tools build --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
-      - name: language-tools test unit
-        run: language-tools test unit --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log" --timeout "${{ inputs.test_timeout }}s"
+      - name: language-tools test unit        # unit pair anchors --dir absolute; see note below
+        run: language-tools test unit --language go --dir "${{ github.workspace }}/${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log" --timeout "${{ inputs.test_timeout }}s"
       - name: language-tools test e2e
         run: language-tools test e2e --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log" --timeout "${{ inputs.test_timeout }}s"
 ```
+
+**The unit pair anchors `--dir` absolute.** `language-tools test unit` wraps `go test` in gotestsum and writes `junit.xml` and `coverage.out` at `<dir>/<name>`, while the check already runs with its working directory set to `<dir>`. A relative `--dir` (e.g. `go/agentcontract`) therefore doubles into `<dir>/<dir>/<name>`, whose parent does not exist, and gotestsum exits 1 in ~30 ms having run zero tests. `ci-go.yml` passes this one step `--dir "${{ github.workspace }}/${{ inputs.module_dir }}"` so the write path resolves absolute against the real directory. The target root and subject set are unchanged — only the path is anchored. `build` and `test e2e` write no `<dir>`-relative output and keep the plain relative `--dir`. The dir-relative write is a `language-tools` behavior, not the template's; the anchoring is the template-side remedy the pinned binary needs, and the rust unit pair (which writes `lcov.info` the same way) carries the same latent shape behind its own source-checks gate.
 
 ---
 
@@ -384,11 +386,14 @@ Three of the 22 reach no mise backend and install through the system package man
     kcov --version   # OD60: print what was installed
 
 # Ubuntu — Google Chrome via Google's own apt repository (Go test e2e legs on both Ubuntu targets).
+# gpg runs --batch --yes: the amd64 image already ships google-chrome.gpg, and a bare --dearmor
+# asks to overwrite it on a /dev/tty a runner step has not got — which fails the step on amd64
+# (gpg: cannot open '/dev/tty') while it passes on arm64, whose image ships no such file.
 - name: Install Google Chrome (apt, Google repository)
   run: |
     set -euo pipefail
     curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
-      | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+      | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/google-chrome.gpg
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
       | sudo tee /etc/apt/sources.list.d/google-chrome.list
     sudo apt-get update
@@ -403,7 +408,11 @@ Three of the 22 reach no mise backend and install through the system package man
     set -euo pipefail
     brew update                      # OD59: refresh the image's own Homebrew
     brew install --cask google-chrome
-    "$(brew --prefix)/bin/google-chrome" --version || true   # OD60: print what was installed
+    # A cask drops the .app bundle under /Applications and puts no CLI on the Homebrew bin
+    # prefix, so link the bundle's own executable onto the prefix (OD64): the copy that wins on
+    # PATH is then the cask's, ahead of the image's own Chrome, and its --version equals it.
+    ln -sf "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" "$(brew --prefix)/bin/google-chrome"
+    "$(brew --prefix)/bin/google-chrome" --version   # OD60: print what was installed
 ```
 
 ---
@@ -412,7 +421,7 @@ Three of the 22 reach no mise backend and install through the system package man
 
 F80 measures Homebrew 6.0.13 present on the macOS image on 2026-08-26, with its PATH resolution **proven on Intel** through `/usr/local/bin` and **unproven on arm64**, where the prefix is `/opt/homebrew/bin`. No build script writes an `/etc/paths.d` entry for Homebrew, and the image's `bashrc` exports `/usr/local/bin` (the Intel prefix) but never `/opt/homebrew/bin` (the arm64 prefix).
 
-**A macOS job maps the Homebrew prefix onto PATH before its first `brew` step.** The check step that runs `checkbashisms` or Chrome inherits the same mapping, because the binaries Homebrew installs land in that same prefix. Prefix by arch: `/opt/homebrew/bin` on arm64, `/usr/local/bin` on Intel.
+**A macOS job maps the Homebrew prefix onto PATH before its first `brew` step.** The check step that runs `checkbashisms` or Chrome inherits the same mapping, because the binaries Homebrew installs land in that same prefix. Prefix by arch: `/opt/homebrew/bin` on arm64, `/usr/local/bin` on Intel. A **cask** is the exception: it installs an `.app` bundle under `/Applications` and puts nothing on the bin prefix, so the Chrome install step links the bundle's own executable onto the prefix (section 6) — without that link the mapping is inert and the resolution check below resolves an empty path.
 
 **Installed browser wins on PATH (OD64).** The mapping puts the Homebrew prefix **ahead of** the image's own Chrome location, so a check resolves the copy the template installed rather than the one the image shipped. Installing without winning the PATH leaves OD56 unmet. (F77: the images ship Chrome 151.0.7922.137 on `ubuntu-24.04` and 150.0.7871.187 on `macos-26-arm64` on 2026-08-26; the templates use none of them.)
 
@@ -457,7 +466,7 @@ Shared inputs across the seven templates. A common role takes a common name; onl
 | Input | Type | Default | Templates | Role |
 |---|---|---|---|---|
 | `runs_on` | string | `"ubuntu-24.04"`* | all seven | Fully qualified runner label (section 1); never floating. |
-| `module_dir` / `crate_dir` / `project_dir` / `script_root` / `target_root` | string | `"."` | Go / Rust / Python / shell / workflow | Target root `language-tools` checks, relative to the checked-out repo (`--dir`). Shell recurses from its root (OD54); workflow's adapter enumerates every tracked body at or below it (WFRULES clause (a)). |
+| `module_dir` / `crate_dir` / `project_dir` / `script_root` / `target_root` | string | `"."` | Go / Rust / Python / shell / workflow | Target root `language-tools` checks, relative to the checked-out repo (`--dir`), except the Go unit pair, which passes it absolute as `${{ github.workspace }}/<input>` (section 1 note). Shell recurses from its root (OD54); workflow's adapter enumerates every tracked body at or below it (WFRULES clause (a)). |
 | `mise_version` | string | measured latest stable patch (section 9) | five of seven | mise release the template installs. `ci-shell.yml` and `ci-workflow.yml` pin a step-scoped env var instead (section 9). |
 | `dry_run` | boolean | `false` | six of seven | `true` installs and verifies mise + language-tools and stops; check steps and `extra_steps` are skipped. `ci-workflow.yml` carries none (below). |
 | `test_timeout` | number | `300` | four CI templates | Seconds; defect 3 (below). |
@@ -495,7 +504,7 @@ inputs:
 # Every test subcommand step applies it. The `s` suffix converts the numeric-seconds input to a
 # Go duration (a bare integer fails to parse as a duration).
 - name: language-tools test unit
-  run: language-tools test unit --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log" --timeout "${{ inputs.test_timeout }}s"
+  run: language-tools test unit --language go --dir "${{ github.workspace }}/${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log" --timeout "${{ inputs.test_timeout }}s"
 ```
 
 ---
@@ -547,6 +556,21 @@ A step fails the job on any non-zero exit. A template maps no exit code itself a
 
 **Diagnostic surface.** Every check emits one JSON result record (`schema_version: 1`) carrying `command`, `status`, `exit_code`, and an `errors[]` array. Each error carries `code`, `context` (`check`, `dir`, `language`), `message`, and a `triage` object (`instruction`, `kind`). Each diagnostic names a file; each diagnostic whose tool reports a position also names a line (SC2). Every check step passes an absolute `--log-dir` (`${{ github.workspace }}/.language-tools/log`), so per-check logs land in one known location a reader can collect. Templates surface fatal shell-level problems through GitHub `::error::` annotations (the activation and provisioning steps above); the check records themselves are the binary's own JSON.
 
+**Failure-path capture.** A `gate_negative.toolchain.error` reports only `<tool> exited N with no parsed diagnostics; see log_ref for raw output` in the capped result — the raw tool output the reader needs sits in the per-check record under `--log-dir`, which the run otherwise discards, so the error is untriageable from the run alone. Every CI check job (each of the five CI templates: `source-checks` and `build-test` for the three compiled-language templates, the single `checks` job for `ci-shell.yml` and `ci-workflow.yml`) therefore ends with one artifact-upload step, guarded `if: ${{ failure() }}`, that publishes the whole `--log-dir` tree when a prior step failed the job. It exports what a failed check already wrote — it runs no check, and changes no invocation, target root, subject set or verdict. The artifact name is scoped by language and job (and by `matrix.os` for the `build-test` matrix) so no two uploads in one self-test run collide (`upload-artifact@v4` rejects a duplicate name). Two limits this capture cannot lift, both language-tools-side and not the template's to fix: a multi-tool check routed in-process (Rust `security`, the `test` kinds) writes no sub-tool stdout/stderr into its record, so the captured log names which tool exited non-zero but not why; and a check whose failure is an infra fault before any record is written leaves nothing to upload (`if-no-files-found: ignore`).
+
+```yaml
+# Last step of every CI check job. Publishes the --log-dir tree on the failure path so a
+# gate_negative.toolchain.error is triageable from the run. Name scoped by language + job (+
+# matrix.os on build-test) for run-wide uniqueness. Runs no check; exports what one wrote.
+- name: Capture language-tools logs on failure
+  if: ${{ failure() }}
+  uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+  with:
+    name: language-tools-logs-go-source-checks
+    path: ${{ github.workspace }}/.language-tools/log/
+    if-no-files-found: ignore
+```
+
 ### The workflow-track override (WFRULES clause (f))
 
 `ci-workflow.yml` is the one template that converts two of the taxonomy's classes into a GitHub annotation instead of letting the step fail outright on any non-zero exit. `workflow lint`'s own two soft outcomes — a currency warning and a currency/rule-one error — surface inline on the pull request rather than send a reader to a log.
@@ -591,4 +615,4 @@ The step captures the exit code through an `if`/`else` guard around the check in
 
 ## 11. actionlint verification
 
-Every YAML block above was extracted, wrapped in a `workflow_call` scaffold where it is a step or job fragment, and linted with `actionlint 1.7.12`. Result: **0 findings across all blocks.** The SC39 blocks added for `ci-workflow.yml` pass the same check. Re-run: extract each fenced `yaml` block, paste into a scratch workflow (steps under a `runs-on: ubuntu-latest` job; job maps under `jobs:`; the `on: workflow_call` input/env snippets under a minimal workflow header) and run `actionlint`.
+Every YAML block above was extracted, wrapped in a `workflow_call` scaffold where it is a step or job fragment, and linted with `actionlint 1.7.12`. Result: **0 findings across all blocks.** The SC39 blocks added for `ci-workflow.yml`, the section 6 Chrome-provisioning blocks (non-interactive `gpg`, the cask-binary link), and the section 10 failure-path capture block all pass the same check. Re-run: extract each fenced `yaml` block, paste into a scratch workflow (steps under a `runs-on: ubuntu-latest` job; job maps under `jobs:`; the `on: workflow_call` input/env snippets under a minimal workflow header) and run `actionlint`.

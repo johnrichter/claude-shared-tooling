@@ -164,6 +164,15 @@ target/
 .git-worktrees/
 .claude/worktrees/
 
+# language-tools per-check log output (the CI templates' --log-dir target, and
+# where a local re-probe writes) — runner/local artifact, never repo content.
+.language-tools/
+
+# go test unit-pair byproducts (gotestsum junit/coverage output) — runner/local
+# artifact, never repo content.
+junit.xml
+coverage.out
+
 # .NET
 obj/
 
