@@ -4,5 +4,5 @@
 # The authority is the CI required check (.github/workflows/ci.yml).
 set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
-python3 "$ROOT/scripts/check_secrets.py" --root "$ROOT"
-python3 "$ROOT/scripts/check_no_raw_binary.py" --staged --root "$ROOT"
+python3 "${ROOT}/scripts/check_secrets.py" --root "${ROOT}"
+python3 "${ROOT}/scripts/check_no_raw_binary.py" --staged --root "${ROOT}"

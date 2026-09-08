@@ -8,7 +8,8 @@
 
 set -euo pipefail
 
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
 readonly CLIKIT_EMIT="${SCRIPT_DIR}/clikit-emit"
 
 # Path to the clikit binary. In production, this resolves to the real emitter.
@@ -28,17 +29,17 @@ test_case() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 
 	local actual_exit
-	if eval "$command" >/dev/null 2>&1; then
+	if eval "${command}" >/dev/null 2>&1; then
 		actual_exit=0
 	else
 		actual_exit=$?
 	fi
 
-	if [[ $actual_exit -eq $expected_exit ]]; then
-		echo "PASS: $name"
+	if [[ ${actual_exit} -eq ${expected_exit} ]]; then
+		echo "PASS: ${name}"
 		return 0
 	else
-		echo "FAIL: $name (expected exit $expected_exit, got $actual_exit)"
+		echo "FAIL: ${name} (expected exit ${expected_exit}, got ${actual_exit})"
 		TESTS_FAILED=$((TESTS_FAILED + 1))
 		return 1
 	fi
@@ -50,35 +51,35 @@ test_case() {
 TESTS_RUN=$((TESTS_RUN + 1))
 t1_stdout=""
 t1_exit=0
-t1_stdout="$(CLIKIT_BIN=/nonexistent/clikit "$CLIKIT_EMIT" --command test --status success --exit-code 0 2>/dev/null)" || t1_exit=$?
-if [[ $t1_exit -eq 90 && -z "$t1_stdout" ]]; then
+t1_stdout="$(CLIKIT_BIN=/nonexistent/clikit "${CLIKIT_EMIT}" --command test --status success --exit-code 0 2>/dev/null)" || t1_exit=$?
+if [[ ${t1_exit} -eq 90 && -z "${t1_stdout}" ]]; then
 	echo "PASS: missing_emitter_exits_90_with_empty_stdout"
 else
-	echo "FAIL: missing_emitter_exits_90_with_empty_stdout (exit=$t1_exit, stdout='$t1_stdout')"
+	echo "FAIL: missing_emitter_exits_90_with_empty_stdout (exit=${t1_exit}, stdout='${t1_stdout}')"
 	TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
 # Test 2: Helper delegates to the emitter when available.
 # This test only runs if the clikit binary is built.
-if [[ -x "$CLIKIT_BIN" ]]; then
+if [[ -x "${CLIKIT_BIN}" ]]; then
 	# Success record should exit with the specified code.
 	test_case \
 		"success_record_exits_0_via_emitter" \
-		"$CLIKIT_EMIT --command test,cmd --status success --exit-code 0" \
+		"${CLIKIT_EMIT} --command test,cmd --status success --exit-code 0" \
 		0
 
 	# Conflict should exit with the specified code.
 	test_case \
 		"conflict_record_exits_41_via_emitter" \
-		"$CLIKIT_EMIT --command test,cmd --status conflict --exit-code 41 --error test.err 'message'" \
+		"${CLIKIT_EMIT} --command test,cmd --status conflict --exit-code 41 --error test.err 'message'" \
 		41
 
 	# The record on stdout is produced by the emitter and is canonical JSON with
 	# RFC 8785 lexicographically-ordered keys (the property the helper must never
 	# violate by hand-writing).
 	TESTS_RUN=$((TESTS_RUN + 1))
-	emitted="$("$CLIKIT_EMIT" --command test,cmd --status success --exit-code 0 2>/dev/null || true)"
-	if printf '%s' "$emitted" | python3 -c '
+	emitted="$("${CLIKIT_EMIT}" --command test,cmd --status success --exit-code 0 2>/dev/null || true)"
+	if printf '%s' "${emitted}" | python3 -c '
 import json,sys
 raw=sys.stdin.read()
 obj=json.loads(raw)
@@ -92,20 +93,20 @@ sys.exit(0 if raw.strip()==canon(obj) else 1)
 '; then
 		echo "PASS: emitter_output_is_canonical_json"
 	else
-		echo "FAIL: emitter_output_is_canonical_json (stdout not RFC 8785 canonical: '$emitted')"
+		echo "FAIL: emitter_output_is_canonical_json (stdout not RFC 8785 canonical: '${emitted}')"
 		TESTS_FAILED=$((TESTS_FAILED + 1))
 	fi
 else
-	echo "SKIP: clikit emitter binary not found at $CLIKIT_BIN"
+	echo "SKIP: clikit emitter binary not found at ${CLIKIT_BIN}"
 	echo "      (integration tests require the emitter to be built)"
 fi
 
 # Summary.
 echo ""
-echo "Tests run: $TESTS_RUN"
-echo "Tests failed: $TESTS_FAILED"
+echo "Tests run: ${TESTS_RUN}"
+echo "Tests failed: ${TESTS_FAILED}"
 
-if [[ $TESTS_FAILED -eq 0 ]]; then
+if [[ ${TESTS_FAILED} -eq 0 ]]; then
 	echo "All tests passed."
 	exit 0
 else

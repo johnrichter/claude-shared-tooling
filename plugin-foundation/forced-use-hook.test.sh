@@ -6,7 +6,8 @@
 
 set -euo pipefail
 
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
 readonly HOOK="${SCRIPT_DIR}/forced-use-hook.sh"
 readonly ROUTING_RULES="${SCRIPT_DIR}/testdata/routing-rules.json"
 readonly ROUTING_RULES_MULTI_BASH="${SCRIPT_DIR}/testdata/routing-rules-multi-bash.json"
@@ -52,7 +53,8 @@ fi
 if jq -e 'select(.operation == "status" and .outcome == "fired" and .denies_tool_exists == false)' "${log_file}" >/dev/null 2>&1; then
 	pass "fired_outcome_logged_without_denying_tool_exists"
 else
-	fail "fired_outcome_logged_without_denying_tool_exists (log: $(cat "${log_file}"))"
+	log_contents="$(cat "${log_file}")"
+	fail "fired_outcome_logged_without_denying_tool_exists (log: ${log_contents})"
 fi
 
 # Test 2: same raw usage, CLI unavailable -- fails open (no deny, no stdout),
@@ -70,7 +72,8 @@ fi
 if jq -e 'select(.operation == "status" and .outcome == "failed_open" and .denies_tool_exists == false)' "${log_file}" >/dev/null 2>&1; then
 	pass "failed_open_outcome_logged_without_denying_tool_exists"
 else
-	fail "failed_open_outcome_logged_without_denying_tool_exists (log: $(cat "${log_file}"))"
+	log_contents="$(cat "${log_file}")"
+	fail "failed_open_outcome_logged_without_denying_tool_exists (log: ${log_contents})"
 fi
 
 # Test 3: a Bash command that is already the sanctioned CLI invocation is
@@ -84,7 +87,8 @@ out3="$(
 if [[ -z "${out3}" ]] && jq -e 'select(.operation == "status" and .outcome == "not_applicable")' "${log_file}" >/dev/null 2>&1; then
 	pass "cli_usage_itself_is_not_applicable"
 else
-	fail "cli_usage_itself_is_not_applicable (out='${out3}', log: $(cat "${log_file}"))"
+	log_contents="$(cat "${log_file}")"
+	fail "cli_usage_itself_is_not_applicable (out='${out3}', log: ${log_contents})"
 fi
 
 # Test 4: a non-Bash raw route (Read) with no command_prefixes matches
@@ -98,7 +102,8 @@ if printf '%s' "${out4}" | jq -e '.hookSpecificOutput.permissionDecision == "den
 	jq -e 'select(.operation == "config" and .outcome == "fired")' "${log_file}" >/dev/null 2>&1; then
 	pass "non_bash_raw_route_with_no_prefixes_matches_unconditionally"
 else
-	fail "non_bash_raw_route_with_no_prefixes_matches_unconditionally (out='${out4}', log: $(cat "${log_file}"))"
+	log_contents="$(cat "${log_file}")"
+	fail "non_bash_raw_route_with_no_prefixes_matches_unconditionally (out='${out4}', log: ${log_contents})"
 fi
 
 # Test 5: a tool no operation names is entirely irrelevant -- no stdout, no
@@ -111,7 +116,8 @@ out5="$(
 if [[ -z "${out5}" && ! -s "${log_file}" ]]; then
 	pass "unrelated_tool_is_silently_ignored"
 else
-	fail "unrelated_tool_is_silently_ignored (out='${out5}', log: $(cat "${log_file}"))"
+	log_contents="$(cat "${log_file}")"
+	fail "unrelated_tool_is_silently_ignored (out='${out5}', log: ${log_contents})"
 fi
 
 # Test 6: PF_ROUTING_RULES missing/unset degrades to a silent no-op.
@@ -123,7 +129,8 @@ out6="$(
 if [[ -z "${out6}" && ! -s "${log_file}" ]]; then
 	pass "missing_routing_rules_is_silent_no_op"
 else
-	fail "missing_routing_rules_is_silent_no_op (out='${out6}', log: $(cat "${log_file}"))"
+	log_contents="$(cat "${log_file}")"
+	fail "missing_routing_rules_is_silent_no_op (out='${out6}', log: ${log_contents})"
 fi
 
 # Test 7: a rules file with two or more Bash operations whose command_prefixes
@@ -138,7 +145,8 @@ if out7="$(
 		jq -es 'map(select(.outcome == "not_applicable") | .operation) == ["status", "log", "diff"]' "${log_file}" | grep -q true; then
 		pass "multi_bash_op_non_match_terminates_within_timeout"
 	else
-		fail "multi_bash_op_non_match_terminates_within_timeout (out='${out7}', log: $(cat "${log_file}"))"
+		log_contents="$(cat "${log_file}")"
+		fail "multi_bash_op_non_match_terminates_within_timeout (out='${out7}', log: ${log_contents})"
 	fi
 else
 	fail "multi_bash_op_non_match_terminates_within_timeout (timed out or errored, rc=$?)"

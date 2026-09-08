@@ -106,8 +106,8 @@ on:
 
 env:
   # Named once; every step below reads this instead of restating the version.
-  # OD69 sets 3.0.0 (major bump: SC5 makes --language a required selector on `release build`).
-  LANGUAGE_TOOLS_VERSION: "3.0.0"
+  # 3.0.1 patch-bumps 3.0.0 (OD69's major bump, SC5: --language became a required selector on `release build`); 3.0.1 carries the embedded .shellcheckrc fix.
+  LANGUAGE_TOOLS_VERSION: "3.0.1"
 
 permissions:
   contents: read

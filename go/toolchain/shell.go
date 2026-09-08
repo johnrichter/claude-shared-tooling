@@ -315,11 +315,17 @@ func shellcheckConfigPath() (string, error) {
 // (OD46): shellcheck catches a broad range of quoting, quoting-adjacent and
 // correctness issues in any shell dialect; checkbashisms catches the one
 // thing shellcheck does not — a script using a bash-only construct despite
-// itself running under a plain POSIX sh shebang. checkbashisms already skips
-// a script whose own shebang names bash explicitly, so running it over the
-// whole discovered set (rather than pre-filtering by shebang here) reports
-// nothing extra for a file it would not have flagged anyway. An empty file
-// set is a trivial pass. shellcheck's --rcfile points at target.ConfigPath
+// itself running under a plain POSIX sh shebang. It reads each file's own
+// shebang, so a bash-shebanged file in the discovered set yields no bashism
+// finding and instead contributes the exit code's clean-bash-script bit
+// (checkbashismsCleanBashExit); running it over the whole set rather than
+// pre-filtering by shebang here therefore reports nothing extra for a file it
+// would not have flagged anyway. That bit is masked out before the exit code
+// is judged (below): a run whose only non-zero signal is "these were bash
+// scripts" is a pass, not a toolchain failure — a real failure surfaces as a
+// parsed "possible bashism" line or as any other exit bit (an unreadable file
+// checkbashisms could not process). An empty file set is a trivial pass.
+// shellcheck's --rcfile points at target.ConfigPath
 // when the caller set one, winning over shellcheckConfigPath's
 // language-tools constant, which remains the fallback when it is unset.
 func (shellAdapter) runLint(ctx context.Context, target Target) ([]Diagnostic, error) {
@@ -359,7 +365,7 @@ func (shellAdapter) runLint(ctx context.Context, target Target) ([]Diagnostic, e
 		return nil, err
 	}
 	cbDiags := parseCheckbashisms(cbRes.Stdout, cbRes.Stderr)
-	if len(cbDiags) == 0 && cbRes.ExitCode != 0 {
+	if len(cbDiags) == 0 && cbRes.ExitCode&^checkbashismsCleanBashExit != 0 {
 		cbDiags = append(cbDiags, fallbackDiagnostic(checkbashismsTool, cbRes.ExitCode))
 	}
 	diags = append(diags, cbDiags...)
@@ -405,6 +411,15 @@ func parseShellcheckJSON1(stdout []byte) []Diagnostic {
 	}
 	return diags
 }
+
+// checkbashismsCleanBashExit is the bit checkbashisms sets in its exit code
+// for "no bashisms were detected in a bash script" — the benign outcome for
+// every bash-shebanged file in the discovered set. checkbashisms's exit code
+// is a bitwise sum, so a wholly clean run over a set that is mostly bash
+// scripts exits with exactly this bit set and no bashism findings. runLint
+// masks it out before deciding whether a non-zero exit is a real failure, so
+// this expected signal does not become a spurious gate_negative.
+const checkbashismsCleanBashExit = 4
 
 // checkbashismsFindingRE matches checkbashisms's own per-finding header:
 // "possible bashism in <file> line <N> (<reason>):", followed by the

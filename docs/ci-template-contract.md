@@ -46,19 +46,21 @@ The fleet uses four fully qualified runner images, selected per operating system
 
 Defect 7: every template hardcodes a `language-tools` version (F9 measures 18 loci at `2.1.0` — five template `env:` blocks, twelve caller assignments, one plugin JSON file).
 
-**Rule.** Each template declares exactly **one** `LANGUAGE_TOOLS_VERSION` env locus, seven in total (the sixth was `ci-shell.yml`; the seventh is the new `ci-workflow.yml`). Its value is `3.0.0` — the version OD69 sets, a major bump because SC5 makes `--language` a required selector on an existing verb. The `governance-code` plugin JSON carries the same `3.0.0`. **No caller pins a version**: the twelve caller assignments leave with the jobs SC16 replaces (OD7).
+**Rule.** Each template declares exactly **one** `LANGUAGE_TOOLS_VERSION` env locus, seven in total (the sixth was `ci-shell.yml`; the seventh is the new `ci-workflow.yml`). Its value is `3.0.1` — a patch bump over the `3.0.0` OD69 first set (that major bump made `--language` a required selector on an existing verb, SC5). `3.0.1` carries the embedded-config fix that lints each shell script under its own shebang rather than forcing POSIX sh on all of them. The `governance-code` plugin JSON must carry the same `3.0.1`. **No caller pins a version**: the twelve caller assignments leave with the jobs SC16 replaces (OD7).
 
 | Locus | Count after | Value |
 |---|---|---|
-| Template `env:` block | 7 (one per template) | `3.0.0` |
-| `governance-code` plugin JSON | 1 | `3.0.0` |
+| Template `env:` block | 7 (one per template) | `3.0.1` |
+| `governance-code` plugin JSON | 1 | `3.0.1` |
 | Caller assignments | 0 | — (removed with the replaced jobs, OD7) |
 
 ```yaml
 env:
   # Named once per template; every step reads this instead of restating the version.
-  # OD69 sets 3.0.0 (major bump: SC5 makes --language a required selector on `release build`).
-  LANGUAGE_TOOLS_VERSION: "3.0.0"
+  # 3.0.1 is a patch bump over the 3.0.0 OD69 first set (major bump: SC5 made
+  # --language a required selector on `release build`); it carries the embedded
+  # .shellcheckrc fix that lints each script under its own shebang.
+  LANGUAGE_TOOLS_VERSION: "3.0.1"
 ```
 
 ---

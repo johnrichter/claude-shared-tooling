@@ -60,6 +60,7 @@ matches_prefix() {
 	[ "${cmd}" = "${prefix}" ] && return 0
 	case "${cmd}" in
 	"${prefix} "*) return 0 ;;
+	*) ;;
 	esac
 	return 1
 }
@@ -80,7 +81,11 @@ raw_matches() {
 	rm_i=0
 	while [ "${rm_i}" -lt "${prefix_count}" ]; do
 		p="$(printf '%s' "$3" | jq -r --argjson i "${rm_i}" '.command_prefixes[$i]')"
-		matches_prefix "$2" "${p}" && return 0
+		# raw_matches runs with errexit suspended by its caller, so this
+		# predicate's no-match return is a value to test, not an abort.
+		matches_prefix "$2" "${p}"
+		mp_rc=$?
+		[ "${mp_rc}" -eq 0 ] && return 0
 		rm_i=$((rm_i + 1))
 	done
 	return 1
@@ -135,7 +140,14 @@ while [ "${i}" -lt "${op_count}" ]; do
 	raw_tool="$(printf '%s' "${raw}" | jq -r '.tool_name')"
 	[ "${raw_tool}" = "${tool_name}" ] || continue
 
-	if ! raw_matches "${tool_name}" "${command_str}" "${raw}"; then
+	# Suspend errexit across the match probe: a nonzero (no-match, or a jq
+	# hiccup on this operation's rules) return is a value to test, never an
+	# abort -- this hook fails open, it never crashes on a probe.
+	set +e
+	raw_matches "${tool_name}" "${command_str}" "${raw}"
+	rm_rc=$?
+	set -e
+	if [ "${rm_rc}" -ne 0 ]; then
 		log_eval "${op_name}" "not_applicable"
 		continue
 	fi
@@ -144,7 +156,12 @@ while [ "${i}" -lt "${op_count}" ]; do
 	bin_name="$(printf '%s' "${op}" | jq -r '.cli.bin_name // empty')"
 	usage_hint="$(printf '%s' "${op}" | jq -r '.cli.usage_hint // empty')"
 
-	if bin_path="$(cli_bin_path "${bin_env}" "${bin_name}")"; then
+	# cli_bin_path exits nonzero (and prints nothing) when no CLI is
+	# available; suspend errexit so that fail-open path is a value to test.
+	set +e
+	bin_path="$(cli_bin_path "${bin_env}" "${bin_name}")"
+	set -e
+	if [ -n "${bin_path}" ]; then
 		log_eval "${op_name}" "fired"
 		emit_deny "forced-use: '${op_name}' is governed by ${bin_name} (available at ${bin_path}). Use \`${usage_hint}\` instead of this raw invocation."
 		exit 0

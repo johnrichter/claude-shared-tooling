@@ -7,7 +7,8 @@
 
 set -euo pipefail
 
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
 readonly SCRIPT="${SCRIPT_DIR}/download-script.sh"
 readonly RELEASE_FIXTURE="${SCRIPT_DIR}/testdata/release"
 readonly ARCHIVE="${RELEASE_FIXTURE}/v1.0.0/example-cli_1.0.0_linux_amd64.tar.gz"
@@ -49,7 +50,8 @@ else
 	fail "fresh_fetch_verifies_and_caches (exit=${exit_code}, out='${out}')"
 fi
 
-if [[ "$(cat "${data_dir}/bin/example-cli-1.0.0.sha256")" == "${EXTRACTED_DIGEST}" ]]; then
+cached_digest="$(cat "${data_dir}/bin/example-cli-1.0.0.sha256")"
+if [[ "${cached_digest}" == "${EXTRACTED_DIGEST}" ]]; then
 	pass "cached_binary_digest_matches_extracted_fixture_bytes"
 else
 	fail "cached_binary_digest_matches_extracted_fixture_bytes"
@@ -130,8 +132,9 @@ fi
 
 # Test 6: a missing required env var is a misconfiguration, not a runtime
 # provisioning outcome -- exit 2.
+data_dir6="$(fresh_data_dir)"
 set +e
-PF_PLUGIN_DATA="$(fresh_data_dir)" PF_RELEASE_BASE_URL="file://${RELEASE_FIXTURE}" PF_VERSION=1.0.0 "${SCRIPT}" >/tmp/download-script.test.stdout 2>/tmp/download-script.test.stderr
+PF_PLUGIN_DATA="${data_dir6}" PF_RELEASE_BASE_URL="file://${RELEASE_FIXTURE}" PF_VERSION=1.0.0 "${SCRIPT}" >/tmp/download-script.test.stdout 2>/tmp/download-script.test.stderr
 exit_code6=$?
 set -e
 if [[ ${exit_code6} -eq 2 ]]; then
@@ -153,7 +156,8 @@ PF_CLI_NAME=example-cli \
 if grep -q "^export EXAMPLE_CLI_BIN=\"${data_dir7}/bin/example-cli-1.0.0\"$" "${env_file}"; then
 	pass "env_file_receives_derived_bin_env_export"
 else
-	fail "env_file_receives_derived_bin_env_export (contents: $(cat "${env_file}"))"
+	env_contents="$(cat "${env_file}")"
+	fail "env_file_receives_derived_bin_env_export (contents: ${env_contents})"
 fi
 rm -f "${env_file}"
 

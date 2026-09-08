@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -210,10 +211,39 @@ const (
 
 // cargoCoverageFile is the fixed name runUnitTest writes its lcov coverage
 // report to, inside target.Dir — the same place a caller running cargo
-// llvm-cov by hand there would leave it. Coverage rides the unit-test run
-// itself rather than a second invocation, mirroring Go's gotestsum wrapper
-// (OD50).
+// llvm-cov by hand there would leave it. It is a bare filename, not joined
+// with target.Dir: the child already runs with its working directory set to
+// target.Dir (runTool sets it), so cargo-llvm-cov resolves this name against
+// that directory and lands the report there whether target.Dir is absolute
+// or relative — re-joining target.Dir onto it would double the prefix for a
+// relative dir. Coverage rides the unit-test run itself rather than a second
+// invocation, mirroring Go's gotestsum wrapper (OD50).
 const cargoCoverageFile = "lcov.info"
+
+// resolveCargoLock returns the absolute path to the Cargo.lock that governs
+// the crate at dir, or "" when none is found up to the filesystem root. cargo
+// maintains a single lockfile at the workspace root and never one per member,
+// while cargo-audit reads only ./Cargo.lock from its own working directory
+// and does not walk up — so a member crate spawned with the working directory
+// set to itself has no lockfile for cargo-audit to load. Walking up from dir
+// to the nearest ancestor Cargo.lock recovers the workspace lock, which
+// --file then names for cargo-audit explicitly.
+func resolveCargoLock(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	for {
+		if info, err := os.Stat(filepath.Join(abs, "Cargo.lock")); err == nil && !info.IsDir() {
+			return filepath.Join(abs, "Cargo.lock")
+		}
+		parent := filepath.Dir(abs)
+		if parent == abs {
+			return ""
+		}
+		abs = parent
+	}
+}
 
 // runSecurity runs cargo-audit and cargo-deny against target.Dir and merges
 // their findings (OD46): cargo-audit checks the resolved lockfile against
@@ -221,11 +251,18 @@ const cargoCoverageFile = "lcov.info"
 // source-registry policy — two different questions neither tool answers
 // alone. Both are cargo plugins (cargo-audit, cargo-deny resolved from
 // PATH), spawned through cargo exactly like every other check here — a
-// provisioned binary, never a Cargo.toml dependency.
+// provisioned binary, never a Cargo.toml dependency. cargo-audit is pointed
+// at the workspace lockfile resolveCargoLock finds, so a workspace-member
+// target audits its resolved dependency graph rather than failing to load a
+// per-member Cargo.lock cargo does not maintain.
 func (cargoAdapter) runSecurity(ctx context.Context, target Target) ([]Diagnostic, error) {
 	var diags []Diagnostic
 
-	auditRes, err := runTool(ctx, target.Dir, "cargo", []string{"audit", "--json"})
+	auditArgs := []string{"audit", "--json"}
+	if lock := resolveCargoLock(target.Dir); lock != "" {
+		auditArgs = append(auditArgs, "--file", lock)
+	}
+	auditRes, err := runTool(ctx, target.Dir, "cargo", auditArgs)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +324,7 @@ func (cargoAdapter) runUnitTest(ctx context.Context, target Target) ([]Diagnosti
 	res, err := runTool(ctx, target.Dir, "cargo", []string{
 		"llvm-cov", "nextest", "--locked", "--all-features", "--ignore-run-fail",
 		"-E", "not binary(e2e)",
-		"--lcov", "--output-path", filepath.Join(target.Dir, cargoCoverageFile),
+		"--lcov", "--output-path", cargoCoverageFile,
 	})
 	if err != nil {
 		return nil, err

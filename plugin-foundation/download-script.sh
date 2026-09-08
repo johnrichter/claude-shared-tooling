@@ -69,12 +69,29 @@ warn() {
 	echo "download-script: $*" >&2
 }
 
-require_env() {
-	eval "val=\${$1:-}"
-	if [ -z "${val}" ]; then
-		warn "required env var $1 is not set"
-		exit 2
-	fi
+# soft CMD... -- run CMD with errexit suspended, so a nonzero exit is a value
+# to test rather than an abort to crash on: this provisioner soft-fails (an
+# unresolved binary reads as "not installed"), it never crashes on a probe.
+# CMD's stdout passes through unchanged and its exit status lands in soft_rc.
+# soft itself always returns 0, so it is safe both as the command of a plain
+# assignment (capture CMD's stdout) and as a bare command (then read soft_rc).
+# It restores errexit only if it was on at entry, so it nests without a soft
+# call switching errexit back on inside another soft-run command.
+soft_rc=0
+soft() {
+	case "$-" in
+	*e*)
+		set +e
+		"$@"
+		soft_rc=$?
+		set -e
+		;;
+	*)
+		"$@"
+		soft_rc=$?
+		;;
+	esac
+	return 0
 }
 
 sha256_of() {
@@ -178,13 +195,16 @@ default_bin_env() {
 	printf '_BIN'
 }
 
-require_env PF_CLI_NAME
-require_env PF_PLUGIN_DATA
-require_env PF_RELEASE_BASE_URL
+# Required inputs: unset or empty is a plugin wiring bug, not a runtime
+# outcome, so it exits 2 (POSIX ${VAR:?} yields a nonzero, here 2) before any
+# provisioning work begins.
+: "${PF_CLI_NAME:?required env var PF_CLI_NAME is not set}"
+: "${PF_PLUGIN_DATA:?required env var PF_PLUGIN_DATA is not set}"
+: "${PF_RELEASE_BASE_URL:?required env var PF_RELEASE_BASE_URL is not set}"
 
 bin_env="${PF_BIN_ENV:-$(default_bin_env "${PF_CLI_NAME}")}"
 
-version="$(read_version || true)"
+version="$(soft read_version)"
 if [ -z "${version}" ]; then
 	warn "could not resolve a pinned version"
 	exit 1
@@ -198,8 +218,8 @@ verified=0
 # Idempotent cache fast path: bytes already on disk that still match their
 # own recorded digest need no network round trip at all.
 if [ -f "${bin_path}" ] && [ -f "${bin_sidecar}" ]; then
-	recorded="$(sha256_sidecar_value "${bin_sidecar}" || true)"
-	actual="$(sha256_of "${bin_path}" 2>/dev/null || true)"
+	recorded="$(soft sha256_sidecar_value "${bin_sidecar}")"
+	actual="$(soft sha256_of "${bin_path}" 2>/dev/null)"
 	if [ -n "${recorded}" ] && [ "${recorded}" = "${actual}" ]; then
 		verified=1
 	else
@@ -208,7 +228,7 @@ if [ -f "${bin_path}" ] && [ -f "${bin_sidecar}" ]; then
 fi
 
 if [ "${verified}" -eq 0 ]; then
-	os_arch="$(resolve_os_arch || true)"
+	os_arch="$(soft resolve_os_arch)"
 	if [ -z "${os_arch}" ]; then
 		exit 1
 	fi
@@ -225,16 +245,30 @@ if [ "${verified}" -eq 0 ]; then
 	sidecar_tmp="$(mktemp "${bin_dir}/.sha256.XXXXXX")"
 	archive_tmp="$(mktemp "${bin_dir}/.download.XXXXXX")"
 
+	# Resolve the archive's expected digest: the shared checksums.txt first,
+	# then a per-artifact sidecar. A missing digest leaves expected empty and
+	# skips the download -- an unverifiable archive is never fetched.
 	expected=""
-	if fetch "${release_dir_url}/checksums.txt" "${checksums_tmp}" 2>/dev/null; then
-		expected="$(checksum_for_artifact "${checksums_tmp}" "${archive_name}" || true)"
+	soft fetch "${release_dir_url}/checksums.txt" "${checksums_tmp}" 2>/dev/null
+	if [ "${soft_rc}" -eq 0 ]; then
+		expected="$(soft checksum_for_artifact "${checksums_tmp}" "${archive_name}")"
 	fi
-	if [ -z "${expected}" ] && fetch "${archive_url}.sha256" "${sidecar_tmp}" 2>/dev/null; then
-		expected="$(sha256_sidecar_value "${sidecar_tmp}" || true)"
+	if [ -z "${expected}" ]; then
+		soft fetch "${archive_url}.sha256" "${sidecar_tmp}" 2>/dev/null
+		if [ "${soft_rc}" -eq 0 ]; then
+			expected="$(soft sha256_sidecar_value "${sidecar_tmp}")"
+		fi
 	fi
 
-	if [ -n "${expected}" ] && fetch "${archive_url}" "${archive_tmp}"; then
-		actual="$(sha256_of "${archive_tmp}" 2>/dev/null || true)"
+	# Fetch the archive only once a digest to check it against is in hand.
+	archive_rc=1
+	if [ -n "${expected}" ]; then
+		soft fetch "${archive_url}" "${archive_tmp}"
+		archive_rc="${soft_rc}"
+	fi
+
+	if [ "${archive_rc}" -eq 0 ]; then
+		actual="$(soft sha256_of "${archive_tmp}" 2>/dev/null)"
 		if [ -n "${actual}" ] && [ "${expected}" = "${actual}" ]; then
 			extract_dir="$(mktemp -d "${bin_dir}/.extract.XXXXXX")"
 			if tar -xzf "${archive_tmp}" -C "${extract_dir}" 2>/dev/null; then
