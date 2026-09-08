@@ -183,6 +183,9 @@ jobs:
       # ubuntu-24.04 toolcache), so this and the resolve step above are the two stages it gets.
       - name: mise install --locked
         env:
+          # aqua:/ubi: metadata resolves through api.github.com; the job token buys the
+          # authenticated per-repo quota instead of the shared-IP 60/hr anonymous one (F-T12-1).
+          GITHUB_TOKEN: ${{ github.token }}
           MISE_PYTHON_COMPILE: "0"
           MISE_RUSTUP_HOME: ${{ runner.temp }}/rustup
           MISE_CARGO_HOME: ${{ runner.temp }}/cargo
@@ -210,6 +213,9 @@ jobs:
       # touched.
       - name: Provision Rust check binaries (cargo-audit, cargo-deny)
         env:
+          # aqua:/ubi: metadata resolves through api.github.com; the job token buys the
+          # authenticated per-repo quota instead of the shared-IP 60/hr anonymous one (F-T12-1).
+          GITHUB_TOKEN: ${{ github.token }}
           MISE_CONFIG_FILE: ${{ runner.temp }}/rust-source-check-tools.toml
         run: |
           set -euo pipefail
@@ -356,6 +362,9 @@ jobs:
 
       - name: mise install --locked
         env:
+          # aqua:/ubi: metadata resolves through api.github.com; the job token buys the
+          # authenticated per-repo quota instead of the shared-IP 60/hr anonymous one (F-T12-1).
+          GITHUB_TOKEN: ${{ github.token }}
           MISE_PYTHON_COMPILE: "0"
           MISE_RUSTUP_HOME: ${{ runner.temp }}/rustup
           MISE_CARGO_HOME: ${{ runner.temp }}/cargo
@@ -378,6 +387,9 @@ jobs:
       # on that backend) — the digest check is simply not run for it.
       - name: Provision Rust check binaries (cargo-nextest, cargo-llvm-cov)
         env:
+          # aqua:/ubi: metadata resolves through api.github.com; the job token buys the
+          # authenticated per-repo quota instead of the shared-IP 60/hr anonymous one (F-T12-1).
+          GITHUB_TOKEN: ${{ github.token }}
           MISE_CONFIG_FILE: ${{ runner.temp }}/rust-build-test-tools.toml
         run: |
           set -euo pipefail

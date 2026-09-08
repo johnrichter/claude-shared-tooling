@@ -141,6 +141,10 @@ jobs:
       # version on PATH (F55, F56) — this template's own steps below must resolve the pin,
       # not whatever the image ships.
       - name: mise install --locked
+        env:
+          # aqua:/ubi: metadata resolves through api.github.com; the job token buys the
+          # authenticated per-repo quota instead of the shared-IP 60/hr anonymous one (F-T12-1).
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mise install --locked

@@ -172,6 +172,9 @@ jobs:
       # template for one shared activation shape.
       - name: mise install --locked
         env:
+          # aqua:/ubi: metadata resolves through api.github.com; the job token buys the
+          # authenticated per-repo quota instead of the shared-IP 60/hr anonymous one (F-T12-1).
+          GITHUB_TOKEN: ${{ github.token }}
           MISE_PYTHON_COMPILE: "0"
         run: |
           set -euo pipefail
@@ -188,6 +191,9 @@ jobs:
       # caller's own committed mise.toml/mise.lock is never touched.
       - name: Provision Go check binaries (golangci-lint, goimports, staticcheck, gosec, govulncheck)
         env:
+          # aqua:/ubi: metadata resolves through api.github.com; the job token buys the
+          # authenticated per-repo quota instead of the shared-IP 60/hr anonymous one (F-T12-1).
+          GITHUB_TOKEN: ${{ github.token }}
           MISE_CONFIG_FILE: ${{ runner.temp }}/go-source-check-tools.toml
         run: |
           set -euo pipefail
@@ -342,6 +348,9 @@ jobs:
 
       - name: mise install --locked
         env:
+          # aqua:/ubi: metadata resolves through api.github.com; the job token buys the
+          # authenticated per-repo quota instead of the shared-IP 60/hr anonymous one (F-T12-1).
+          GITHUB_TOKEN: ${{ github.token }}
           MISE_PYTHON_COMPILE: "0"
         run: |
           set -euo pipefail
@@ -355,6 +364,9 @@ jobs:
       # F67); it wraps the test-unit leg's `go test` run. test e2e needs no extra Go binary.
       - name: Provision Go check binaries (gotestsum)
         env:
+          # aqua:/ubi: metadata resolves through api.github.com; the job token buys the
+          # authenticated per-repo quota instead of the shared-IP 60/hr anonymous one (F-T12-1).
+          GITHUB_TOKEN: ${{ github.token }}
           MISE_CONFIG_FILE: ${{ runner.temp }}/go-build-test-tools.toml
         run: |
           set -euo pipefail

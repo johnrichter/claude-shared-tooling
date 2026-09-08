@@ -169,6 +169,9 @@ jobs:
       # touched.
       - name: Provision workflow check binaries (actionlint, jq)
         env:
+          # aqua:/ubi: metadata resolves through api.github.com; the job token buys the
+          # authenticated per-repo quota instead of the shared-IP 60/hr anonymous one (F-T12-1).
+          GITHUB_TOKEN: ${{ github.token }}
           MISE_CONFIG_FILE: ${{ runner.temp }}/workflow-check-tools.toml
         run: |
           set -euo pipefail

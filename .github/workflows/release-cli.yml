@@ -204,6 +204,9 @@ jobs:
       # template for one shared activation shape.
       - name: mise install --locked
         env:
+          # aqua:/ubi: metadata resolves through api.github.com; the job token buys the
+          # authenticated per-repo quota instead of the shared-IP 60/hr anonymous one (F-T12-1).
+          GITHUB_TOKEN: ${{ github.token }}
           MISE_PYTHON_COMPILE: "0"
         run: |
           set -euo pipefail

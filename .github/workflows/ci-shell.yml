@@ -201,6 +201,9 @@ jobs:
       # mise.toml/mise.lock is never touched.
       - name: Provision shell check binaries (shellcheck, shfmt, bats-core, semgrep, jq)
         env:
+          # aqua:/ubi: metadata resolves through api.github.com; the job token buys the
+          # authenticated per-repo quota instead of the shared-IP 60/hr anonymous one (F-T12-1).
+          GITHUB_TOKEN: ${{ github.token }}
           MISE_CONFIG_FILE: ${{ runner.temp }}/shell-check-tools.toml
         run: |
           set -euo pipefail
