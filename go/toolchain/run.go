@@ -1,8 +1,11 @@
 package toolchain
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnrichter/claude-shared-tooling/go/clikit"
@@ -197,10 +200,13 @@ func Run(ctx context.Context, target Target, opts Options) (*RunResult, error) {
 }
 
 // outcome is what one route produced, and the only thing Run's shared tail —
-// counting, capping, classification, logging, caching — reads. A route that
-// spawns nothing leaves exitCode, stdout and stderr at their zero values, so
-// the tail treats it exactly like a clean tool run that happened to report
-// these diagnostics.
+// counting, capping, classification, logging, caching — reads. The subprocess
+// route fills exitCode from the one tool it spawned; the in-process route
+// leaves it zero, since no single tool among the several an adapter may spawn
+// owns the verdict there (the diagnostics do). Both routes carry the raw
+// output the tail hands writeLog: the subprocess route the one tool's streams,
+// the in-process route the concatenation of every tool it spawned (captured
+// through runTool, see inProcessCapture).
 type outcome struct {
 	exitCode int
 	diags    []Diagnostic
@@ -227,18 +233,89 @@ func runSubprocess(ctx context.Context, adapter Adapter, target Target, tool str
 	}, nil
 }
 
-// runInProcess hands the target to the adapter's own analysis, bounded by
-// the same timeout a spawned tool gets. The diagnostics it returns are the
-// whole outcome: nothing was executed, so there is no exit status for
-// classifyStatus to weigh and no raw output for the log to carry.
+// runInProcess hands the target to the adapter's own analysis, bounded by the
+// same timeout a spawned tool gets. The adapter still spawns tools — through
+// runTool, one or several — it just parses their output itself rather than
+// leaving that to Parse. An inProcessCapture rides the context so runTool
+// records each tool's raw streams as it goes, and the outcome carries their
+// concatenation: without it the log of a failed in-process check held an empty
+// stdout/stderr, the one record a reader needs when the adapter turned the
+// failure into no diagnostic Parse could. There is still no single exit status
+// for classifyStatus to weigh, so exitCode stays zero; the diagnostics carry
+// the verdict.
 func runInProcess(ctx context.Context, adapter Adapter, target Target, timeout time.Duration) (outcome, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	diags, err := adapter.RunInProcess(ctx, target)
+	capture := &inProcessCapture{}
+	diags, err := adapter.RunInProcess(withCapture(ctx, capture), target)
 	if err != nil {
 		return outcome{}, fmt.Errorf("toolchain: in-process %s check in %s: %w", target.Check, target.Dir, err)
 	}
-	return outcome{diags: diags}, nil
+	stdout, stderr := capture.streams()
+	return outcome{diags: diags, stdout: stdout, stderr: stderr}, nil
+}
+
+// inProcessCapture accumulates the raw output of every tool an in-process
+// check spawns through runTool. The subprocess route hands writeLog its one
+// tool's stdout and stderr verbatim; the in-process route spawns its tools
+// itself and used to drop that output, so a failed multi-tool check — every
+// gate_negative the cargo, python, shell and workflow adapters raise — wrote
+// an empty stdout/stderr to its log, exactly the record needed when a failure
+// produced no diagnostic. Run installs one on the context (withCapture) before
+// calling RunInProcess; runTool records into it when present, so an adapter
+// needs no change and a direct RunInProcess caller that installs none records
+// nothing. Because the log's command field stays empty on this route (Run
+// never reads Command here), each recorded block is headed by the argv that
+// produced it — the only place the in-process invocation is named.
+type inProcessCapture struct {
+	mu     sync.Mutex
+	stdout bytes.Buffer
+	stderr bytes.Buffer
+}
+
+// captureKey is the unexported context key inProcessCapture rides under, so no
+// other package can collide with or read it.
+type captureKey struct{}
+
+// withCapture returns ctx carrying c, so a runTool call inside the adapter's
+// RunInProcess records into it.
+func withCapture(ctx context.Context, c *inProcessCapture) context.Context {
+	return context.WithValue(ctx, captureKey{}, c)
+}
+
+// captureFrom returns the capture installed on ctx, or nil when none is — the
+// case for a direct RunInProcess caller that never went through Run.
+func captureFrom(ctx context.Context) *inProcessCapture {
+	c, _ := ctx.Value(captureKey{}).(*inProcessCapture)
+	return c
+}
+
+// record appends one tool invocation's raw streams, each headed by the argv
+// that produced it so a log carrying several tools' output stays attributable
+// to the tool that wrote each block.
+func (c *inProcessCapture) record(tool string, args []string, res *sysops.Result) {
+	header := "$ " + strings.TrimSpace(tool+" "+strings.Join(args, " ")) + "\n"
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stdout.WriteString(header)
+	c.stdout.Write(res.Stdout)
+	c.stderr.WriteString(header)
+	c.stderr.Write(res.Stderr)
+}
+
+// streams returns the accumulated stdout and stderr, or nil for a stream no
+// tool wrote to, so an in-process check that spawned nothing keeps the empty
+// log the zero outcome would have written.
+func (c *inProcessCapture) streams() (stdout, stderr []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stdout.Len() > 0 {
+		stdout = c.stdout.Bytes()
+	}
+	if c.stderr.Len() > 0 {
+		stderr = c.stderr.Bytes()
+	}
+	return stdout, stderr
 }
 
 // classifyStatus derives a RunResult's clikit.Status from what the tool

@@ -142,11 +142,17 @@ func (a goAdapter) RunInProcess(ctx context.Context, target Target) ([]Diagnosti
 // runTool spawns tool with args in dir and returns its captured result, or a
 // wrapped error if it could not even be started or waited on — the same
 // infrastructure-failure contract runSubprocess (run.go) upholds for the
-// single-tool route.
+// single-tool route. It is the one spawn point every in-process adapter shares,
+// so it is also where the run's inProcessCapture (when Run installed one on
+// ctx) records each tool's raw output for the log — the adapter parses the
+// result it gets back exactly as before, unaware of the capture.
 func runTool(ctx context.Context, dir, tool string, args []string) (*sysops.Result, error) {
 	res, err := sysops.Run(ctx, tool, args, sysops.Options{Dir: dir})
 	if err != nil {
 		return nil, fmt.Errorf("toolchain: run %s %v in %s: %w", tool, args, dir, err)
+	}
+	if c := captureFrom(ctx); c != nil {
+		c.record(tool, args, res)
 	}
 	return res, nil
 }

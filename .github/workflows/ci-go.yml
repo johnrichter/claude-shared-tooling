@@ -93,8 +93,8 @@ on:
 
 env:
   # Named once; every step below reads this instead of restating the version.
-  # 3.0.1 patch-bumps 3.0.0 (OD69's major bump, SC5: --language became a required selector on `release build`); 3.0.1 carries the embedded .shellcheckrc fix.
-  LANGUAGE_TOOLS_VERSION: "3.0.1"
+  # 3.0.2 patch-bumps 3.0.1 (both patch OD69's 3.0.0 major bump, SC5: --language became a required selector on `release build`); 3.0.2 carries the go/toolchain rust test-filterset fix and the in-process failure-path capture fix.
+  LANGUAGE_TOOLS_VERSION: "3.0.2"
 
 permissions:
   contents: read
@@ -419,13 +419,27 @@ jobs:
           brew update
           brew install --cask google-chrome
           # A cask drops the .app bundle under /Applications and puts no CLI on
-          # the Homebrew bin prefix, so $(brew --prefix)/bin/google-chrome does
-          # not exist and the verify step below resolves an empty path. Link the
-          # bundle's own executable onto the prefix (OD64) so the copy that wins
-          # on PATH is the cask's, ahead of the image's own Chrome, and its
-          # --version equals the installed cask.
-          ln -sf "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" "$(brew --prefix)/bin/google-chrome"
-          "$(brew --prefix)/bin/google-chrome" --version   # OD60: print what was installed
+          # the Homebrew bin prefix. A symlink there does not work: Chrome
+          # derives its framework path from the path it is invoked through, and
+          # macOS reports a symlink's own location as that path -- so invoking
+          # $(brew --prefix)/bin/google-chrome sends Chrome looking for its
+          # framework at $(brew --prefix)/Frameworks/Google Chrome
+          # Framework.framework, which does not exist; dlopen fails and it aborts
+          # (Abort trap: 6). A wrapper that exec's the bundle executable by its
+          # absolute path makes Chrome resolve the framework inside the bundle
+          # (/Applications/Google Chrome.app/Contents/Frameworks) where it
+          # actually lives, while still putting the cask's copy on the prefix
+          # ahead of the image's own Chrome (OD64) so the verify step resolves it
+          # there and its --version succeeds.
+          chrome="$(brew --prefix)/bin/google-chrome"
+          # printf, not a heredoc: a space-indented `<<'EOF'` body would put the
+          # block's leading whitespace before `#!`, so the shebang would not sit
+          # at byte 0 and a direct execve of the wrapper (as chromedp launching
+          # the browser does, not only a shell) fails ENOEXEC "exec format
+          # error". printf writes the two lines flush-left.
+          printf '#!/bin/sh\nexec "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" "$@"\n' > "${chrome}"
+          chmod +x "${chrome}"
+          "${chrome}" --version   # OD60: print what was installed
 
       - name: Verify installed Chrome wins on PATH (macOS)
         if: runner.os == 'macOS'

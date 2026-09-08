@@ -87,8 +87,8 @@ on:
 
 env:
   # Named once; the check step reads this instead of restating the version.
-  # 3.0.1 patch-bumps 3.0.0 (OD69's major bump, SC5: --language became a required selector on `release build`); 3.0.1 carries the embedded .shellcheckrc fix.
-  LANGUAGE_TOOLS_VERSION: "3.0.1"
+  # 3.0.2 patch-bumps 3.0.1 (both patch OD69's 3.0.0 major bump, SC5: --language became a required selector on `release build`); 3.0.2 carries the go/toolchain rust test-filterset fix and the in-process failure-path capture fix.
+  LANGUAGE_TOOLS_VERSION: "3.0.2"
 
 permissions:
   contents: read

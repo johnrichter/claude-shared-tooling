@@ -306,24 +306,31 @@ func (a cargoAdapter) runTest(ctx context.Context, target Target) ([]Diagnostic,
 // which wraps cargo-nextest's own run and produces an lcov coverage report
 // (cargoCoverageFile) in this one invocation rather than a second one —
 // coverage rides the same run as the tests it measures, never a pair of its
-// own. The filterset `not binary(e2e)` is the exact complement of
-// runE2ETest's `binary(e2e)`, so the two test pairs partition the crate's
-// binaries: the unit pair runs everything except the e2e integration binary,
-// which the e2e pair owns. --ignore-run-fail is required to keep coverage
-// riding the same run: cargo-llvm-cov writes no report when a wrapped test
-// fails unless told to ignore the run's failure, and that flag also forces
-// its own exit to 0 — so a failing test is detected not from the exit code
-// but from the FAIL lines nextest still prints, which parseCargoNextestFailures
-// turns into error diagnostics; a compile failure (which prints no FAIL line
-// and still exits non-zero even under --ignore-run-fail) falls through to the
-// exit-code fallback. assert_cmd and criterion are dev-dependencies a crate
-// under test declares in its own Cargo.toml, not binaries this adapter ever
-// spawns — a library resolved that way is never counted among the binaries a
-// check needs provisioned.
+// own. The filterset `not kind(test)` selects the crate's unit-test binaries
+// — the lib target's own `#[cfg(test)]` tests plus any bin target's — and is
+// the exact complement of runE2ETest's `kind(test)`, which owns the
+// integration-test binaries (every `tests/*.rs` file, Cargo's `test` kind).
+// The two pairs partition the crate's binaries by kind. The selector is a
+// `kind()` set rather than the binary name it used to name: nextest rejects a
+// `binary()` matcher that matches no binary as a filterset-parse error (exit
+// 94, "operator didn't match any binary names"), so naming a binary no crate
+// builds — no fleet crate ships a `tests/e2e.rs` — failed the parse before a
+// single test ran; a `kind()` matcher matches zero binaries without error.
+// --ignore-run-fail is required to keep coverage riding the same run:
+// cargo-llvm-cov writes no report when a wrapped test fails unless told to
+// ignore the run's failure, and that flag also forces its own exit to 0 — so a
+// failing test is detected not from the exit code but from the FAIL lines
+// nextest still prints, which parseCargoNextestFailures turns into error
+// diagnostics; a compile failure (which prints no FAIL line and still exits
+// non-zero even under --ignore-run-fail) falls through to the exit-code
+// fallback. assert_cmd and criterion are dev-dependencies a crate under test
+// declares in its own Cargo.toml, not binaries this adapter ever spawns — a
+// library resolved that way is never counted among the binaries a check needs
+// provisioned.
 func (cargoAdapter) runUnitTest(ctx context.Context, target Target) ([]Diagnostic, error) {
 	res, err := runTool(ctx, target.Dir, "cargo", []string{
 		"llvm-cov", "nextest", "--locked", "--all-features", "--ignore-run-fail",
-		"-E", "not binary(e2e)",
+		"-E", "not kind(test)",
 		"--lcov", "--output-path", cargoCoverageFile,
 	})
 	if err != nil {
@@ -337,15 +344,22 @@ func (cargoAdapter) runUnitTest(ctx context.Context, target Target) ([]Diagnosti
 }
 
 // runE2ETest runs the e2e-test pair through plain `cargo nextest run`,
-// filtered to the binary named "e2e" via nextest's own filterset DSL: an
-// integration-test file (tests/e2e.rs) is already its own nextest binary by
-// Cargo's convention, so this names no file path and no platform, and stays
-// dispatchable on every fleet target rather than assuming one host
-// architecture. assert_cmd, which that binary uses to drive the crate's own
-// CLI, is a dev-dependency exercised inside it — again never a binary this
-// adapter spawns.
+// filtered to the crate's integration-test binaries via `kind(test)`: every
+// `tests/*.rs` file is its own nextest binary of Cargo's `test` kind, so this
+// names no file path and no platform, and stays dispatchable on every fleet
+// target rather than assuming one host architecture. It selects by kind rather
+// than the binary name it used to name for the reason runUnitTest gives — a
+// `binary()` matcher naming a binary no crate builds is a filterset-parse
+// error (exit 94), which failed every crate before running. --no-tests=pass
+// makes a crate with no integration tests a clean pass rather than nextest's
+// default no-tests failure (exit 4): most crates ship none, and an absent
+// integration suite is not a check failure; a compile failure in a suite that
+// does exist still exits non-zero and falls through to the exit-code fallback.
+// assert_cmd, which such a binary uses to drive the crate's own CLI, is a
+// dev-dependency exercised inside it — again never a binary this adapter
+// spawns.
 func (cargoAdapter) runE2ETest(ctx context.Context, target Target) ([]Diagnostic, error) {
-	res, err := runTool(ctx, target.Dir, "cargo", []string{"nextest", "run", "--locked", "-E", "binary(e2e)"})
+	res, err := runTool(ctx, target.Dir, "cargo", []string{"nextest", "run", "--locked", "-E", "kind(test)", "--no-tests=pass"})
 	if err != nil {
 		return nil, err
 	}
