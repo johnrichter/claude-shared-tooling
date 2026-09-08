@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Unit tests for roster-gen: the one-rendering-pass generator over the model roster.
 
-The package lives at `tooling/roster-gen/roster_gen/` (a hyphenated parent directory, so it
-is not importable as a dotted path); that directory is put on `sys.path` here, exactly as
-`generate.py` does. Fixture rosters and repo roots are throwaway temp trees -- nothing here
-depends on the real committed marketplace repo except the one opportunistic case gated on
+The package lives at `tooling/roster_gen/roster_gen/`; `tooling` is not an importable
+package, so that directory is put on `sys.path` here, exactly as `generate.py` does. Fixture
+rosters and repo roots are throwaway temp trees -- nothing here depends on the real committed
+marketplace repo except the one opportunistic case gated on
 ROSTER_GEN_TEST_MARKETPLACE_ROOT (skipped when unset, e.g. in either repo's isolated CI job).
 
 Coverage (mirrors the generator's stated invariants):
@@ -33,7 +33,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-_TOOLING = Path(__file__).resolve().parent.parent / "tooling" / "roster-gen"
+_TOOLING = Path(__file__).resolve().parent.parent / "tooling" / "roster_gen"
 if str(_TOOLING) not in sys.path:
     sys.path.insert(0, str(_TOOLING))
 

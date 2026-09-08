@@ -56,6 +56,18 @@ jsonschema-specifications,https://github.com/python-jsonschema/jsonschema-specif
 referencing,https://github.com/python-jsonschema/referencing,MIT,Julian Berman <Julian+referencing@GrayVines.com>
 rpds-py,https://github.com/crate-py/rpds,MIT,Julian Berman <Julian+rpds@GrayVines.com>
 attrs,https://github.com/python-attrs/attrs,MIT,Hynek Schlawack <hs@ox.cx>
+defusedxml,https://github.com/tiran/defusedxml,PSF-2.0,Christian Heimes <christian@python.org>
+pytest,https://github.com/pytest-dev/pytest,MIT,Holger Krekel and others
+pytest-cov,https://github.com/pytest-dev/pytest-cov,MIT,Marc Schlaich <marc.schlaich@gmail.com>
+coverage,https://github.com/nedbat/coveragepy,Apache-2.0,Ned Batchelder and contributors
+pluggy,https://github.com/pytest-dev/pluggy,MIT,Holger Krekel <holger@merlinux.eu>
+iniconfig,https://github.com/pytest-dev/iniconfig,MIT,Ronny Pfannschmidt and Holger Krekel
+packaging,https://github.com/pypa/packaging,Apache-2.0 OR BSD-2-Clause,Donald Stufft <donald@stufft.io>
+pygments,https://github.com/pygments/pygments,BSD-2-Clause,Georg Brandl and the Pygments team
+colorama,https://github.com/tartley/colorama,BSD-3-Clause,Jonathan Hartley <tartley@tartley.com>
+exceptiongroup,https://github.com/agronholm/exceptiongroup,MIT,Alex Grönholm <alex.gronholm@nextday.fi>
+tomli,https://github.com/hukkin/tomli,MIT,Taneli Hukkinen <hukkin@users.noreply.github.com>
+typing-extensions,https://github.com/python/typing_extensions,PSF-2.0,Guido van Rossum and Jukka Lehtosalo and Łukasz Langa and Michael Lee
 zerolog,https://github.com/rs/zerolog,MIT,Olivier Poitrey
 jcs,https://github.com/gowebpki/jcs,Apache-2.0,gowebpki contributors
 go-isatty,https://github.com/mattn/go-isatty,MIT,Yasuhiro MATSUMOTO

@@ -7,7 +7,7 @@
 //     undetectable input (a dimension with no signal to measure) resolves to an explicit,
 //     loud warning rather than silently passing the whole band.
 //   - The enforcement-invariant-registry consumer: loads the registry
-//     (schemas/invariant-registry/invariant-registry.json) and exposes, for every shipped
+//     (schemas/invariant_registry/invariant-registry.json) and exposes, for every shipped
 //     rung-2 entry, the declared trigger/condition/fail-direction a caller compares against a
 //     gate's actual firing. Rung-1 and rung-3 entries are not this package's concern — they
 //     route to the invariant linter — and rung-4/rung-5 entries have no consumer at all by

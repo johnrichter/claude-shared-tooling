@@ -16,8 +16,11 @@ requires-python = ">=3.10"
 # license per the org OSS-licensing policy, pin the exact version, and record it in
 # LICENSE-3rdparty.csv. Hand-roll only when no trusted library fits — flag it, state
 # why, and get sign-off.
-# Stdlib-only in fact today — no runtime dependency yet.
-dependencies = []
+# One runtime dependency: defusedxml, the hardened XML parser sitemap_parser uses in place
+# of xml.etree to read untrusted sitemap bytes — a trusted, actively-maintained, pure-Python
+# library (PSF-licensed), vetted and pinned per the policy above and recorded in
+# LICENSE-3rdparty.csv.
+dependencies = ["defusedxml==0.7.1"]
 license = "MIT"
 license-files = ["LICENSE", "LICENSE-3rdparty.csv"]
 
@@ -28,3 +31,16 @@ article-meta = "claude_tooling.article_meta:main"
 
 [tool.setuptools]
 packages = ["claude_tooling"]
+
+# Test/dev tools the toolchain's Python test pair resolves from the project environment:
+# go/toolchain runs `uv run pytest --cov`, so pytest and pytest-cov must be project
+# dependencies rather than toolchain pins (a Python adopter declares them the same way — see
+# docs/ci-template-contract.md). jsonschema is pinned to match schemas/invariant_registry's
+# own requirements.txt, since test_invariant_registry validates against the shipped schema.
+# ruff is a toolchain pin, not a project dependency, so it is deliberately absent here.
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "jsonschema==4.26.0",
+]

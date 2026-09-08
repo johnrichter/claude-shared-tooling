@@ -30,12 +30,33 @@ import argparse
 import html
 import json
 import sys
+import urllib.request
 from html.parser import HTMLParser
 from urllib.error import URLError
-from urllib.request import Request, urlopen
 
 FETCH_TIMEOUT = 15  # seconds
 USER_AGENT = "claude-tooling-article-meta/1.0"
+_ALLOWED_SCHEMES = ("http://", "https://")
+
+
+def _http_opener() -> urllib.request.OpenerDirector:
+    """Return an opener limited to http and https.
+
+    It carries no FileHandler or FTPHandler, so a file://, ftp:// or other-scheme URL raises
+    URLError instead of being silently honored the way urlopen's default opener would.
+    """
+    opener = urllib.request.OpenerDirector()
+    for handler in (
+        urllib.request.HTTPHandler,
+        urllib.request.HTTPSHandler,
+        urllib.request.HTTPDefaultErrorHandler,
+        urllib.request.HTTPRedirectHandler,
+        urllib.request.HTTPErrorProcessor,
+        urllib.request.UnknownHandler,
+    ):
+        opener.add_handler(handler())
+    return opener
+
 
 # meta tags whose content is a candidate for each field, in priority order.
 _TITLE_META = ("og:title", "twitter:title")
@@ -96,9 +117,15 @@ def _first(metas: dict, keys: tuple) -> str | None:
 
 def fetch_html(url: str) -> str | None:
     """Fetch page HTML as text; return None on any error (warn to stderr)."""
+    if not url.startswith(_ALLOWED_SCHEMES):
+        print(
+            f"[article-meta] WARNING: refusing non-http(s) URL ({url}) — returning null fields",
+            file=sys.stderr,
+        )
+        return None
     try:
-        req = Request(url, headers={"User-Agent": USER_AGENT})
-        with urlopen(req, timeout=FETCH_TIMEOUT) as resp:
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with _http_opener().open(req, timeout=FETCH_TIMEOUT) as resp:
             raw = resp.read()
         charset = resp.headers.get_content_charset() or "utf-8"
         return raw.decode(charset, errors="replace")

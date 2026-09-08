@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Unit tests for the release-transaction contract and its interpreter.
 
-The package lives at `tooling/release-transaction/` (a hyphenated directory, so it is not
-importable as a dotted path); that directory is put on `sys.path` here, exactly as running
-`check.py` does. Fixtures are throwaway git repos and temp trees -- nothing reads the real
-repository, and no test needs a network.
+The package lives at `tooling/release_transaction/`; `tooling` is not an importable package,
+so that directory is put on `sys.path` here, exactly as running `check.py` does. Fixtures are
+throwaway git repos and temp trees -- nothing reads the real repository, and no test needs a
+network.
 
 Coverage (mirrors the contract's stated invariants):
     1. The enumerator set is pinned in the contract and nowhere else: the exact seven in
@@ -31,7 +31,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-_TOOLING = Path(__file__).resolve().parent.parent / "tooling" / "release-transaction"
+_TOOLING = Path(__file__).resolve().parent.parent / "tooling" / "release_transaction"
 if str(_TOOLING) not in sys.path:
     sys.path.insert(0, str(_TOOLING))
 

@@ -46,22 +46,22 @@ The fleet uses four fully qualified runner images, selected per operating system
 
 Defect 7: every template hardcodes a `language-tools` version (F9 measures 18 loci at `2.1.0` — five template `env:` blocks, twelve caller assignments, one plugin JSON file).
 
-**Rule.** Each template declares exactly **one** `LANGUAGE_TOOLS_VERSION` env locus, seven in total (the sixth was `ci-shell.yml`; the seventh is the new `ci-workflow.yml`). Its value is `3.0.2` — a patch bump over `3.0.1` (both patch the `3.0.0` OD69 first set, whose major bump made `--language` a required selector on an existing verb, SC5). `3.0.2` carries two `go/toolchain` fixes the binary reaches CI with only through a module retag: the rust unit/e2e test-filterset correction (a `binary()` name matcher that matched no binary failed every crate before a test ran) and the in-process failure-path output capture. The `governance-code` plugin JSON must carry the same `3.0.2`. **No caller pins a version**: the twelve caller assignments leave with the jobs SC16 replaces (OD7).
+**Rule.** Each template declares exactly **one** `LANGUAGE_TOOLS_VERSION` env locus, seven in total (the sixth was `ci-shell.yml`; the seventh is the new `ci-workflow.yml`). Its value is `3.0.3` — a patch bump over `3.0.2` (both patch the `3.0.0` OD69 first set, whose major bump made `--language` a required selector on an existing verb, SC5). `3.0.3` adds a third `go/toolchain` fix the binary reaches CI with only through a module retag: the python pytest vacuous-pass fix (a zero-collection unit or e2e run is a pass, not a failure), atop `3.0.2`'s rust unit/e2e test-filterset correction (a `binary()` name matcher that matched no binary failed every crate before a test ran) and in-process failure-path output capture. The `governance-code` plugin JSON must carry the same `3.0.3`. **No caller pins a version**: the twelve caller assignments leave with the jobs SC16 replaces (OD7).
 
 | Locus | Count after | Value |
 |---|---|---|
-| Template `env:` block | 7 (one per template) | `3.0.2` |
-| `governance-code` plugin JSON | 1 | `3.0.2` |
+| Template `env:` block | 7 (one per template) | `3.0.3` |
+| `governance-code` plugin JSON | 1 | `3.0.3` |
 | Caller assignments | 0 | — (removed with the replaced jobs, OD7) |
 
 ```yaml
 env:
   # Named once per template; every step reads this instead of restating the version.
-  # 3.0.2 patch-bumps 3.0.1 (both patch the 3.0.0 OD69 first set, whose major
-  # bump made --language a required selector on `release build`, SC5); it carries
-  # the go/toolchain rust test-filterset fix and the in-process failure-path
-  # capture fix.
-  LANGUAGE_TOOLS_VERSION: "3.0.2"
+  # 3.0.3 patch-bumps 3.0.2 (both patch the 3.0.0 OD69 first set, whose major
+  # bump made --language a required selector on `release build`, SC5); it adds the
+  # go/toolchain python pytest vacuous-pass fix atop 3.0.2's rust test-filterset
+  # and in-process failure-path capture fixes.
+  LANGUAGE_TOOLS_VERSION: "3.0.3"
 ```
 
 ---
@@ -124,6 +124,8 @@ jobs:
 ```
 
 **The unit pair anchors `--dir` absolute.** `language-tools test unit` wraps `go test` in gotestsum and writes `junit.xml` and `coverage.out` at `<dir>/<name>`, while the check already runs with its working directory set to `<dir>`. A relative `--dir` (e.g. `go/agentcontract`) therefore doubles into `<dir>/<dir>/<name>`, whose parent does not exist, and gotestsum exits 1 in ~30 ms having run zero tests. `ci-go.yml` passes this one step `--dir "${{ github.workspace }}/${{ inputs.module_dir }}"` so the write path resolves absolute against the real directory. The target root and subject set are unchanged — only the path is anchored. `build` and `test e2e` write no `<dir>`-relative output and keep the plain relative `--dir`. The dir-relative write is a `language-tools` behavior, not the template's; the anchoring is the template-side remedy the pinned binary needs, and the rust unit pair (which writes `lcov.info` the same way) carries the same latent shape behind its own source-checks gate.
+
+**A Python adopter declares its own test runner.** Where Go (gotestsum) and Rust (cargo-nextest/cargo-llvm-cov) reach the runner as toolchain pins, Python's `test unit`/`test e2e` run `uv run pytest --cov`, which resolves pytest and pytest-cov from the project's own environment. A Python caller must therefore declare **pytest** and **pytest-cov** in a `[dependency-groups]` block (uv's default `dev` group) in its `pyproject.toml` and regenerate `uv.lock`, or the unit pair exits 4 on the unrecognized `--cov` argument. ruff and mypy remain toolchain pins and are not declared. A project that ships no e2e-marked test needs nothing more: a zero-collection run — `test e2e` with every test deselected, or `test unit` on an empty suite — is a vacuous pass, not a failure.
 
 ---
 

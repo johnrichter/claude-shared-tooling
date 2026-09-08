@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI-level regression for tooling/version-guard/check.py.
+"""CLI-level regression for tooling/version_guard/check.py.
 
 Invokes it as a SUBPROCESS against throwaway fixture repos, exercising the exact
 path CI hits: argv, exit codes, and stdout/stderr. Complements
@@ -15,7 +15,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-_CHECK = Path(__file__).resolve().parent.parent / "tooling" / "version-guard" / "check.py"
+_CHECK = Path(__file__).resolve().parent.parent / "tooling" / "version_guard" / "check.py"
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 

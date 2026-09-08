@@ -1,4 +1,4 @@
-# SC-CODEGOV: required code-authoring gate (see tooling/codegov-lint/README.md).
+# SC-CODEGOV: required code-authoring gate (see tooling/codegov_lint/README.md).
 # Split out of ci.yml into its own workflow file so the check has a stable, independently
 # addressable trigger/name — every other required check lives in ci.yml's single-workflow
 # job graph gated on that file's `guardrail` job; this one can't join that `needs:` chain
@@ -7,7 +7,7 @@
 #
 # Lints only the files a push/PR actually changes, not this tree's full history — a
 # one-time full-tree audit is `--all`, not wired into this required check (see
-# tooling/codegov-lint/README.md's "Why --diff, not a full-tree scan" note).
+# tooling/codegov_lint/README.md's "Why --diff, not a full-tree scan" note).
 
 name: SC-CODEGOV
 
@@ -41,7 +41,7 @@ jobs:
       - name: Install codegov-lint dependencies
         run: |
           python3 -m venv .codegov-venv
-          .codegov-venv/bin/pip install -r tooling/codegov-lint/requirements.txt
+          .codegov-venv/bin/pip install -r tooling/codegov_lint/requirements.txt
       - name: Resolve diff base
         id: base
         run: |
@@ -61,4 +61,4 @@ jobs:
       - name: SC-CODEGOV lint (diff against base)
         run: |
           export PATH="$PWD/.codegov-venv/bin:$PATH"
-          python3 tooling/codegov-lint/check.py --diff "${{ steps.base.outputs.ref }}"
+          python3 tooling/codegov_lint/check.py --diff "${{ steps.base.outputs.ref }}"

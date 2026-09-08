@@ -94,6 +94,6 @@ print("golden records: valid")
 
 ## Versioning
 
-Released as `schemas/logkit/vX.Y.Z` — the tag prefix equals the module's path from the repository root, with no language segment (`tooling/version-guard` enforces it). Consumers pin a released tag, never this directory's `HEAD`.
+Released as `schemas/logkit/vX.Y.Z` — the tag prefix equals the module's path from the repository root, with no language segment (`tooling/version_guard` enforces it). Consumers pin a released tag, never this directory's `HEAD`.
 
 `schema_version` on the record is the record contract's **MAJOR**. Any change to the set of records that validate — including adding a level or a top-level field — is a MAJOR; the top-level field set is frozen for the life of a MAJOR, and all extension goes through `fields`. A consumer built against MAJOR *N* refuses a record declaring more than *N* rather than guessing. Full change classes and consumer expectations: `logkit-logging.spec.md`, "Versioning and back-compat".

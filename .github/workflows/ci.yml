@@ -65,9 +65,9 @@ jobs:
       # producer and fail on any byte difference, so a hand-edited allowlist.json or a producer
       # change landed without regenerating fails the same way. (The scan gate that rejects
       # committed binaries stays unwired by deliberate CI-design decision, not a live debt;
-      # see tooling/dist-guard/README.md.)
+      # see tooling/dist_guard/README.md.)
       - name: dist-guard allowlist is current with its producer (SC-CODEGOV)
-        run: python3 tooling/dist-guard/check.py check --root .
+        run: python3 tooling/dist_guard/check.py check --root .
       # SC-RESOLVE guardrail: a go.mod/go.sum that resolves to a binary/LFS
       # git attribute (instead of text) breaks external `go get` and diff/merge
       # for every consumer — this class only surfaced at the release barrier,
@@ -84,7 +84,7 @@ jobs:
           done < <(git ls-files -z -- '*go.mod')
           exit "$fail"
       # SC-FREEZE guardrail: deny writes to frozen plugin/corpus homes
-      # (single source of record: tooling/freeze-guard/frozen-homes.json).
+      # (single source of record: tooling/freeze_guard/frozen-homes.json).
       # Diff the committed surface HEAD vs the PR base (or the push's before SHA);
       # the clean CI checkout has no uncommitted state to inspect otherwise.
       - name: SC-FREEZE (no writes to frozen plugin/corpus homes)
@@ -92,9 +92,9 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
-            python3 tooling/freeze-guard/check.py --base "$BASE_SHA"
+            python3 tooling/freeze_guard/check.py --base "$BASE_SHA"
           else
-            python3 tooling/freeze-guard/check.py
+            python3 tooling/freeze_guard/check.py
           fi
       # Planted-violation test: prove the guard actually rejects frozen-home writes.
       # Creates a test file in a frozen home, runs the guard (expecting failure),
@@ -107,7 +107,7 @@ jobs:
           touch plugin-homes/datadog-docs-agent/planted-violation-test.txt
           # Run the guard in working-tree mode (no --base, so it sees uncommitted changes).
           set +e
-          python3 tooling/freeze-guard/check.py
+          python3 tooling/freeze_guard/check.py
           exit_code=$?
           set -e
           # Clean up the planted violation before checking the exit code.
@@ -134,20 +134,20 @@ jobs:
       # The invariant-registry tests validate against the published schema with the pinned
       # validator; every other test here is stdlib-only.
       - name: Install the pinned schema validator
-        run: pip install -r schemas/invariant-registry/requirements.txt
+        run: pip install -r schemas/invariant_registry/requirements.txt
       - name: Run unit tests
         run: python -m unittest discover -s tests -p "test_*.py" -v
 
-  # SC-ENFORCE guardrail: schemas/invariant-registry is the single source of record for every
+  # SC-ENFORCE guardrail: schemas/invariant_registry is the single source of record for every
   # enforcement invariant this repo and the plugins it governs ship — rung, fail direction, blast
   # radius, and the per-rung field a consumer verifies. This job runs the registry's own lint: the
   # document validates against its schema, no invariant is declared twice by restatement, every
   # declared gate path resolves, a gate publishing its own declaration agrees with the registry,
   # and every discovered in-scope gate carries an entry. Rung-1 symbol resolution and rung-3
-  # test-id resolution belong to tooling/invariant-lint, not here. Only this repository is checked
+  # test-id resolution belong to tooling/invariant_lint, not here. Only this repository is checked
   # out, so the sibling-repo discovery roots report NOT CHECKED rather than passing —
   # --require-roots is deliberately not set (a repo nobody cloned is a checkout condition, not a
-  # signal). See schemas/invariant-registry/README.md.
+  # signal). See schemas/invariant_registry/README.md.
   invariant-registry:
     name: invariant-registry
     runs-on: ubuntu-latest
@@ -161,15 +161,15 @@ jobs:
       - name: Install the pinned schema validator
         run: |
           python3 -m venv .venv
-          .venv/bin/pip install --quiet -r schemas/invariant-registry/requirements.txt
+          .venv/bin/pip install --quiet -r schemas/invariant_registry/requirements.txt
       - name: Registry is valid, non-duplicating and complete (SC-ENFORCE)
-        run: .venv/bin/python schemas/invariant-registry/check.py
+        run: .venv/bin/python schemas/invariant_registry/check.py
 
   # SC-ENFORCE guardrail: the two machine-checked rungs of the invariant registry are
   # verified, not merely declared. This job resolves every shipped rung-1 fail_fast_symbol
   # in its named source file and runs every shipped rung-3 test_id, failing on a rename, a
   # move, a deletion, a nonexistent test, or a test that resolves but is skipped. See
-  # tooling/invariant-lint/README.md.
+  # tooling/invariant_lint/README.md.
   invariant-lint:
     name: invariant-lint
     runs-on: ubuntu-latest
@@ -185,15 +185,15 @@ jobs:
       # dependency that test needs (the pinned schema validator, for the invariant-registry
       # suite) must already be on this interpreter, same as the unit-tests job.
       - name: Install the pinned schema validator
-        run: pip install -r schemas/invariant-registry/requirements.txt
+        run: pip install -r schemas/invariant_registry/requirements.txt
       - name: Rung-1 symbols resolve, rung-3 tests exist and run (SC-ENFORCE)
-        run: python3 tooling/invariant-lint/check.py
+        run: python3 tooling/invariant_lint/check.py
 
   # SC-MODELROSTER / SC-CODEGOV: schemas/model-roster/model-roster.json is the single source of
   # record for the selectable Claude model set. This job regenerates every roster-derived
   # artifact this repo commits and fails on any byte difference, so a hand-edited artifact or a
   # roster change landed without regenerating fails the same way go.anthropic-specifications.json
-  # would silently drift otherwise. See tooling/roster-currency/README.md.
+  # would silently drift otherwise. See tooling/roster_currency/README.md.
   roster-currency:
     name: roster-currency
     runs-on: ubuntu-latest
@@ -204,13 +204,13 @@ jobs:
         with:
           python-version: "3.12"
       - name: Regenerate-and-diff every roster-derived artifact
-        run: python3 tooling/roster-currency/check.py
+        run: python3 tooling/roster_currency/check.py
 
-  # SC-VERSIONING guardrail: tooling/version-guard enforces the two rules in the top-level
+  # SC-VERSIONING guardrail: tooling/version_guard enforces the two rules in the top-level
   # README's "Versioning" section — a module tag's path prefix must name a real module in
   # the tree, and no Rust crate may depend on a workspace neighbor via `path = ...` (a path
   # dependency can't survive the two crates being tagged/consumed independently). See
-  # tooling/version-guard/README.md.
+  # tooling/version_guard/README.md.
   version-guard:
     name: version-guard
     runs-on: ubuntu-latest
@@ -222,7 +222,7 @@ jobs:
           python-version: "3.12"
       - name: Tag conforms to SC-VERSIONING
         if: startsWith(github.ref, 'refs/tags/')
-        run: python3 tooling/version-guard/check.py check-tag "${GITHUB_REF_NAME}"
+        run: python3 tooling/version_guard/check.py check-tag "${GITHUB_REF_NAME}"
       # Required gate, scoped to the one documented exception: rust/frontmatter's dependency
       # on facetquery is a known, workspace-internal path dependency (see version-guard
       # README, "Today's known violation") pending a fix outside this gate's scope. Any
@@ -231,7 +231,7 @@ jobs:
       - name: No Rust path/relative dependencies
         run: |
           set +e
-          output="$(python3 tooling/version-guard/check.py check-deps 2>&1)"
+          output="$(python3 tooling/version_guard/check.py check-deps 2>&1)"
           status=$?
           set -e
           echo "$output"
@@ -243,7 +243,7 @@ jobs:
             echo "::error::unexpected version-guard violation(s) beyond the documented facetquery exception"
             exit 1
           fi
-          echo "::warning::known exception: rust/frontmatter -> facetquery path dependency (see tooling/version-guard/README.md)"
+          echo "::warning::known exception: rust/frontmatter -> facetquery path dependency (see tooling/version_guard/README.md)"
 
   # SC-CONTRACT guardrail: schemas/logkit is one record contract with several implementations,
   # and "the same event produces the same bytes" is the only property that makes it an interop

@@ -112,7 +112,7 @@ type CompletenessViolation struct {
 // x-verification-model, rungs 4 and 5 have no consumer that checks anything beyond it, and
 // this function never claims otherwise. Full schema validation (types, patterns, the
 // registry-wide restatement and resolution checks) is the registry lint's job
-// (schemas/invariant-registry/check.py); this is not a second copy of that.
+// (schemas/invariant_registry/check.py); this is not a second copy of that.
 func CheckCompleteness(reg *Registry) []CompletenessViolation {
 	var violations []CompletenessViolation
 	for _, entry := range reg.Invariants {

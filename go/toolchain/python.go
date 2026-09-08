@@ -256,6 +256,15 @@ func (a pythonAdapter) runTest(ctx context.Context, target Target) ([]Diagnostic
 // hand there would leave it.
 const pythonCoverageFile = "coverage.xml"
 
+// pytestNoTestsExitCode is the status pytest returns when a run collects zero
+// tests. Both test pairs treat it as a vacuous pass rather than a failure: a
+// project with no e2e-marked test, or an adopter whose unit suite is empty, has
+// nothing to fail — the same stance the cargo-nextest pairs take with
+// --no-tests=pass for a crate that ships no tests of the kind being run. It is
+// distinct from pytest's usage-error exit (a missing pytest-cov, say), which is
+// a real failure and still falls through to the exit-code fallback below.
+const pytestNoTestsExitCode = 5
+
 // runUnitTest runs the unit-test pair through `uv run pytest`, adding
 // coverage in this one invocation rather than a second one (pytest-cov,
 // resolved the same way pytest itself is — a project dev dependency, never a
@@ -270,6 +279,9 @@ func (pythonAdapter) runUnitTest(ctx context.Context, target Target) ([]Diagnost
 	})
 	if err != nil {
 		return nil, err
+	}
+	if res.ExitCode == pytestNoTestsExitCode {
+		return nil, nil
 	}
 	diags := parsePytestFailures(res.Stdout, res.Stderr)
 	if len(diags) == 0 && res.ExitCode != 0 {
@@ -289,6 +301,9 @@ func (pythonAdapter) runE2ETest(ctx context.Context, target Target) ([]Diagnosti
 	res, err := runTool(ctx, target.Dir, "uv", []string{"run", "pytest", "-m", "e2e"})
 	if err != nil {
 		return nil, err
+	}
+	if res.ExitCode == pytestNoTestsExitCode {
+		return nil, nil
 	}
 	diags := parsePytestFailures(res.Stdout, res.Stderr)
 	if len(diags) == 0 && res.ExitCode != 0 {

@@ -23,7 +23,7 @@ python3 -m venv .venv && .venv/bin/pip install jsonschema==4.26.0
 .venv/bin/python -m jsonschema --output plain -i schemas/plugin-validation/examples/golden-manifest.json schemas/plugin-validation/capability-manifest.schema.json
 ```
 
-Exit `0` and no output on a valid document. Install the validator into an isolated venv, never the system interpreter (`jsonschema` is already pinned in `schemas/invariant-registry/requirements.txt` for this checkout; reuse that pin rather than floating a second version).
+Exit `0` and no output on a valid document. Install the validator into an isolated venv, never the system interpreter (`jsonschema` is already pinned in `schemas/invariant_registry/requirements.txt` for this checkout; reuse that pin rather than floating a second version).
 
 ## Known limits
 

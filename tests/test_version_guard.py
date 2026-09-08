@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for tooling/version-guard: parity, path-dependency scan, command rendering.
+"""Unit tests for tooling/version_guard: parity, path-dependency scan, command rendering.
 
 Covers SC-VERSIONING tag-prefix/module-path parity (version_guard.tag), the Rust
 path-dependency scan (version_guard.deps), and the canonical tag-and-release command
@@ -16,7 +16,7 @@ import sys
 import unittest
 from pathlib import Path
 
-_VERSION_GUARD_DIR = Path(__file__).resolve().parent.parent / "tooling" / "version-guard"
+_VERSION_GUARD_DIR = Path(__file__).resolve().parent.parent / "tooling" / "version_guard"
 sys.path.insert(0, str(_VERSION_GUARD_DIR))
 
 from version_guard import commands as commands_mod  # noqa: E402

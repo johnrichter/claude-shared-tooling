@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI-level regression for tooling/release-transaction/check.py, invoked as a subprocess.
+"""CLI-level regression for tooling/release_transaction/check.py, invoked as a subprocess.
 
 Invokes the gate as a SUBPROCESS against throwaway trees, exercising the exact path CI hits.
 
@@ -20,7 +20,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-_CHECK = Path(__file__).resolve().parent.parent / "tooling" / "release-transaction" / "check.py"
+_CHECK = Path(__file__).resolve().parent.parent / "tooling" / "release_transaction" / "check.py"
 
 _NAME = "demo"
 _MODULE = "plugins/demo"

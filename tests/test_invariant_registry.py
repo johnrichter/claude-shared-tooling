@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Regression for schemas/invariant-registry — the SC-ENFORCE invariant registry.
+"""Regression for schemas/invariant_registry — the SC-ENFORCE invariant registry.
 
 Two surfaces are exercised: the schema (draft-2020-12 validity, and per-entry acceptance
 and rejection of every shape the contract pins), and the lint (restatement detection and
 discovery-based completeness). Rung-1 symbol resolution and rung-3 test-id resolution are
-NOT exercised here — those belong to tooling/invariant-lint, per the schema's
+NOT exercised here — those belong to tooling/invariant_lint, per the schema's
 x-verification-model — and neither is the rung-2 declared-vs-actual firing check.
 """
 
@@ -18,7 +18,7 @@ import unittest
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_REG_DIR = _REPO_ROOT / "schemas" / "invariant-registry"
+_REG_DIR = _REPO_ROOT / "schemas" / "invariant_registry"
 _SCHEMA_PATH = _REG_DIR / "invariant-registry.schema.json"
 _REGISTRY_PATH = _REG_DIR / "invariant-registry.json"
 
@@ -26,6 +26,7 @@ _REGISTRY_PATH = _REG_DIR / "invariant-registry.json"
 def _load_check():
     """Load check.py under a unique module name so it cannot collide with a sibling check.py."""
     spec = importlib.util.spec_from_file_location("invariant_registry_check", _REG_DIR / "check.py")
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -54,7 +55,7 @@ _REASON = "The stronger rung cannot see the whole tree, so this is the strongest
 
 def _entry(rung: int, **overrides) -> dict:
     """A minimal entry that validates at the given rung, before any override is applied."""
-    base = {
+    base: dict[str, object] = {
         "id": "owner.artifact.case",
         "statement": _STATEMENT,
         "rung": rung,
@@ -63,7 +64,7 @@ def _entry(rung: int, **overrides) -> dict:
         "owner": "owner",
         "status": "shipped",
     }
-    consumer = {
+    by_rung: dict[int, dict[str, object]] = {
         1: {"fail_fast_symbol": "owner/pkg/mod.go:Symbol"},
         2: {"trigger": "PreToolUse:Write on some path scope", "gate_id": "owner.gate"},
         3: {"reason_lower_rung": _REASON, "test_id": "owner/tests/test_x.py::CaseTests"},
@@ -74,8 +75,8 @@ def _entry(rung: int, **overrides) -> dict:
             "register_entry_id": "rp-owner-case",
         },
         5: {"reason_lower_rung": _REASON, "doc_path": "owner/docs/policy.md"},
-    }[rung]
-    base.update(consumer)
+    }
+    base.update(by_rung[rung])
     base.update(overrides)
     return base
 

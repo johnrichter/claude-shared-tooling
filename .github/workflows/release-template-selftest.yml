@@ -28,7 +28,7 @@ on:
     paths:
       - ".github/workflows/ci-*.yml"
       - ".github/workflows/release-*.yml"
-      - "tooling/dist-guard/**"
+      - "tooling/dist_guard/**"
   workflow_dispatch: {}
 
 jobs:

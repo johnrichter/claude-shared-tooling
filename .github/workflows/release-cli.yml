@@ -10,7 +10,7 @@
 # project's own metadata. `binaries` names one or more "name:package" pairs, so one call
 # releases every binary a caller ships rather than one binary per call. Archives, wheels and
 # source distributions plus two checksum manifests are attached to the official platform
-# release; nothing is committed to git for this (dist-guard, tooling/dist-guard/, enforces
+# release; nothing is committed to git for this (dist-guard, tooling/dist_guard/, enforces
 # that). A plugin-side download-script fetches the pinned version and verifies the checksum
 # before ever running the binary.
 #
@@ -124,8 +124,8 @@ on:
 
 env:
   # Named once; every step below reads this instead of restating the version.
-  # 3.0.2 patch-bumps 3.0.1 (both patch OD69's 3.0.0 major bump, SC5: --language became a required selector on `release build`); 3.0.2 carries the go/toolchain rust test-filterset fix and the in-process failure-path capture fix.
-  LANGUAGE_TOOLS_VERSION: "3.0.2"
+  # 3.0.3 patch-bumps 3.0.2 (both patch OD69's 3.0.0 major bump, SC5: --language became a required selector on `release build`); 3.0.3 adds the go/toolchain python pytest vacuous-pass fix (a zero-collection run passes) atop 3.0.2's rust test-filterset and in-process failure-path capture fixes.
+  LANGUAGE_TOOLS_VERSION: "3.0.3"
 
 permissions:
   contents: write

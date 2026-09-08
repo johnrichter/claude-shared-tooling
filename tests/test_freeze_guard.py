@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for tooling/freeze-guard/check.py — the SC-FREEZE guardrail.
+"""Unit tests for tooling/freeze_guard/check.py — the SC-FREEZE guardrail.
 
 Enforces the contract: frozen homes (plugin-homes/datadog-{docs,code}-agent and
 corpus/datadog-{docs,code}-agent) reject any write via CI/pre-merge; writes
@@ -23,8 +23,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-_GUARD = Path(__file__).resolve().parent.parent / "tooling" / "freeze-guard" / "check.py"
+_GUARD = Path(__file__).resolve().parent.parent / "tooling" / "freeze_guard" / "check.py"
 _spec = importlib.util.spec_from_file_location("freeze_guard_check", _GUARD)
+assert _spec is not None and _spec.loader is not None
 guard = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(guard)
 
@@ -80,7 +81,7 @@ class FreezeGuardTests(unittest.TestCase):
     def test_is_under_frozen_home_writable_locations(self):
         """Writable locations (toolbelt homes, arbitrary paths) are not frozen."""
         frozen = ["plugin-homes/datadog-docs-agent", "corpus/datadog-code-agent"]
-        self.assertFalse(guard.is_under_frozen_home("tooling/freeze-guard", frozen))
+        self.assertFalse(guard.is_under_frozen_home("tooling/freeze_guard", frozen))
         self.assertFalse(guard.is_under_frozen_home("scripts/check_secrets.py", frozen))
         self.assertFalse(guard.is_under_frozen_home("tests/test_freeze_guard.py", frozen))
         self.assertFalse(guard.is_under_frozen_home("README.md", frozen))
@@ -246,7 +247,7 @@ class FreezeGuardIntegrationTests(unittest.TestCase):
         manifest_path = (
             Path(__file__).resolve().parent.parent
             / "tooling"
-            / "freeze-guard"
+            / "freeze_guard"
             / "frozen-homes.json"
         )
         self.assertTrue(manifest_path.exists(), f"frozen-homes.json not found at {manifest_path}")
@@ -259,7 +260,7 @@ class FreezeGuardIntegrationTests(unittest.TestCase):
         manifest_path = (
             Path(__file__).resolve().parent.parent
             / "tooling"
-            / "freeze-guard"
+            / "freeze_guard"
             / "frozen-homes.json"
         )
         with manifest_path.open("r", encoding="utf-8") as f:
@@ -283,7 +284,7 @@ class FreezeGuardIntegrationTests(unittest.TestCase):
         manifest_path = (
             Path(__file__).resolve().parent.parent
             / "tooling"
-            / "freeze-guard"
+            / "freeze_guard"
             / "frozen-homes.json"
         )
         frozen_homes = guard.load_frozen_homes(manifest_path)
@@ -319,7 +320,7 @@ class FreezeGuardIntegrationTests(unittest.TestCase):
         # is the right approach for now.
         worktree_root = Path(__file__).resolve().parent.parent
         frozen_homes = guard.load_frozen_homes(
-            worktree_root / "tooling" / "freeze-guard" / "frozen-homes.json"
+            worktree_root / "tooling" / "freeze_guard" / "frozen-homes.json"
         )
         # None of these paths are expected to exist yet (they will after release).
         for home in frozen_homes:

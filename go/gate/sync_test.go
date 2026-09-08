@@ -10,7 +10,7 @@ import (
 // invariant-registry.json is a mechanical copy of (go:embed cannot reach outside its package
 // directory). Skips rather than fails when unreachable, so this package stays portable if
 // extracted to its own module.
-const canonicalRegistryPath = "../../schemas/invariant-registry/invariant-registry.json"
+const canonicalRegistryPath = "../../schemas/invariant_registry/invariant-registry.json"
 
 // TestEmbeddedRegistryMatchesCanonicalSource guards against drift between the embedded copy
 // and the canonical registry source, skipping when the source is unreachable.

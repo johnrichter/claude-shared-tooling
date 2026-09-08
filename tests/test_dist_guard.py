@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression for tooling/dist-guard — the SC-DISTRIBUTION no-committed-binaries guard.
+"""Regression for tooling/dist_guard — the SC-DISTRIBUTION no-committed-binaries guard.
 
 `scan` runs as a SUBPROCESS against a throwaway real git repo (the exact argv/exit-code
 contract CI hits); the allowlist producer's invariants (at-most-one, empty steady state,
@@ -14,7 +14,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-_DIST_GUARD = Path(__file__).resolve().parent.parent / "tooling" / "dist-guard"
+_DIST_GUARD = Path(__file__).resolve().parent.parent / "tooling" / "dist_guard"
 _CHECK = _DIST_GUARD / "check.py"
 _ALLOWLIST_JSON = _DIST_GUARD / "allowlist.json"
 sys.path.insert(0, str(_DIST_GUARD))

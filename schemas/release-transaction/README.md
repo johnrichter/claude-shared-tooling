@@ -2,7 +2,7 @@
 
 A release is not a sequence of steps that may each succeed. It is **one transaction over seven enumerators**, and a release missing any one of them is a partial release that fails the gate with the missing enumerator named.
 
-This directory is the contract. The interpreter that enforces it is `tooling/release-transaction/`.
+This directory is the contract. The interpreter that enforces it is `tooling/release_transaction/`.
 
 ## Layout
 

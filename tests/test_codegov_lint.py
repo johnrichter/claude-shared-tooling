@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Unit tests for codegov-lint: the mechanical code-authoring gate.
 
-The package lives at `tooling/codegov-lint/codegov_lint/` (a hyphenated parent directory,
-so it is not importable as a dotted path); that directory is put on `sys.path` here, exactly
-as `check.py` does.
+The package lives at `tooling/codegov_lint/codegov_lint/`; `tooling` is not an importable
+package, so that directory is put on `sys.path` here, exactly as `check.py` does.
 
 Coverage:
     1. Each banned-content rule class (PORT-ARCHAEOLOGY, MILESTONE-ID, DEAD-CODE) fires on a
@@ -35,7 +34,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-_PKG_ROOT = Path(__file__).resolve().parent.parent / "tooling" / "codegov-lint"
+_PKG_ROOT = Path(__file__).resolve().parent.parent / "tooling" / "codegov_lint"
 if str(_PKG_ROOT) not in sys.path:
     sys.path.insert(0, str(_PKG_ROOT))
 
@@ -231,14 +230,14 @@ class CleanFixtureTests(unittest.TestCase):
 
     def test_tool_own_source_is_clean(self):
         """Scanning every module the tool ships reports no violations."""
-        pkg_dir = _REPO_ROOT / "tooling" / "codegov-lint"
+        pkg_dir = _REPO_ROOT / "tooling" / "codegov_lint"
         paths = sorted(p for p in pkg_dir.rglob("*.py") if "__pycache__" not in p.parts)
         violations = scan.scan_files(paths, _REPO_ROOT)
         self.assertEqual(violations, [], f"expected a clean scaffold, got: {violations}")
 
     def test_scan_is_deterministic(self):
         """Scanning the same file set twice reproduces the same (empty) result."""
-        pkg_dir = _REPO_ROOT / "tooling" / "codegov-lint"
+        pkg_dir = _REPO_ROOT / "tooling" / "codegov_lint"
         paths = sorted(p for p in pkg_dir.rglob("*.py") if "__pycache__" not in p.parts)
         first = scan.scan_files(paths, _REPO_ROOT)
         second = scan.scan_files(paths, _REPO_ROOT)

@@ -259,9 +259,8 @@ class TestFetchFailure(unittest.TestCase):
 
     def test_urlerror_returns_none_and_warns(self):
         """Test urlerror returns none and warns."""
-        with patch(
-            "claude_tooling.sitemap_parser.urlopen", side_effect=URLError("simulated unreachable")
-        ):
+        with patch("claude_tooling.sitemap_parser._http_opener") as opener:
+            opener.return_value.open.side_effect = URLError("simulated unreachable")
             stderr = io.StringIO()
             with redirect_stderr(stderr):
                 result = sm.fetch_sitemap("https://unreachable.example.com/sitemap.xml")
@@ -270,9 +269,8 @@ class TestFetchFailure(unittest.TestCase):
 
     def test_parse_sitemap_url_returns_empty_list_on_fetch_failure(self):
         """Test parse sitemap url returns empty list on fetch failure."""
-        with patch(
-            "claude_tooling.sitemap_parser.urlopen", side_effect=URLError("simulated unreachable")
-        ):
+        with patch("claude_tooling.sitemap_parser._http_opener") as opener:
+            opener.return_value.open.side_effect = URLError("simulated unreachable")
             stderr = io.StringIO()
             with redirect_stderr(stderr):
                 records = sm.parse_sitemap_url("https://unreachable.example.com/sitemap.xml")

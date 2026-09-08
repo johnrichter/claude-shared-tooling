@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression for tooling/invariant-lint — the rung-1/rung-3 registry consumer.
+"""Regression for tooling/invariant_lint — the rung-1/rung-3 registry consumer.
 
 Exercises the resolvers directly (symbol resolution and test-id resolution) against real,
 already-committed targets, rather than against the live registry document: the registry's
@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_TOOL_DIR = _REPO_ROOT / "tooling" / "invariant-lint"
+_TOOL_DIR = _REPO_ROOT / "tooling" / "invariant_lint"
 
 sys.path.insert(0, str(_TOOL_DIR))
 from invariant_lint import symbols, testrun  # noqa: E402

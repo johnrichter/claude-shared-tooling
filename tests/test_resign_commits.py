@@ -171,6 +171,7 @@ class SigningTestCase(unittest.TestCase):
     """Isolate global/system git config, verify signing is available, fresh repo per test."""
 
     _ISO_KEYS = ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM")
+    _saved_env: dict[str, str | None]
 
     @classmethod
     def setUpClass(cls):

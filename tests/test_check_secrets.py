@@ -23,6 +23,7 @@ from pathlib import Path
 
 _CHECKER = Path(__file__).resolve().parent.parent / "scripts" / "check_secrets.py"
 _spec = importlib.util.spec_from_file_location("check_secrets", _CHECKER)
+assert _spec is not None and _spec.loader is not None
 cs = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cs)
 

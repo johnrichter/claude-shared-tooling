@@ -20,21 +20,47 @@ of /news/ matches /news/<slug> but never /news-and-events/... .
 Both a CLI entrypoint (`main`) and importable functions (`parse_sitemap`,
 `parse_sitemap_url`, `fetch_sitemap`) are provided.
 
-Depends only on the Python stdlib (xml.etree, urllib, argparse, json, datetime).
+Depends on the Python stdlib (urllib, argparse, json, datetime) plus defusedxml — the
+hardened parser used in place of xml.etree to read untrusted sitemap bytes, so a malicious
+document cannot mount an entity-expansion or external-entity attack.
 """
 
 import argparse
 import json
 import sys
+import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import date
 from urllib.error import URLError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+
+from defusedxml.ElementTree import fromstring
 
 USER_AGENT = "claude-tooling-sitemap-parser/1.0"
 FETCH_TIMEOUT = 15  # seconds
 MAX_SITEMAPINDEX_DEPTH = 1  # recurse exactly one level into child sitemaps
+_ALLOWED_SCHEMES = ("http://", "https://", "file://")
+
+
+def _http_opener() -> urllib.request.OpenerDirector:
+    """Return an opener limited to the schemes _ALLOWED_SCHEMES permits.
+
+    It carries the http, https and file handlers (a local sitemap fixture is a supported
+    input) and no FTPHandler or other-scheme handler, so a URL outside that set raises
+    URLError instead of being silently honored the way urlopen's default opener would.
+    """
+    opener = urllib.request.OpenerDirector()
+    for handler in (
+        urllib.request.HTTPHandler,
+        urllib.request.HTTPSHandler,
+        urllib.request.FileHandler,
+        urllib.request.HTTPDefaultErrorHandler,
+        urllib.request.HTTPRedirectHandler,
+        urllib.request.HTTPErrorProcessor,
+        urllib.request.UnknownHandler,
+    ):
+        opener.add_handler(handler())
+    return opener
 
 
 def _local(tag: str) -> str:
@@ -86,9 +112,15 @@ def _extract_date(lastmod: str) -> date | None:
 
 def fetch_sitemap(url: str) -> bytes | None:
     """Fetch sitemap bytes for `url`; return None on any network error (warns to stderr)."""
+    if not url.startswith(_ALLOWED_SCHEMES):
+        print(
+            f"[sitemap-parser] WARNING: refusing non-http(s) URL ({url}) — returning empty result",
+            file=sys.stderr,
+        )
+        return None
     try:
-        req = Request(url, headers={"User-Agent": USER_AGENT})
-        with urlopen(req, timeout=FETCH_TIMEOUT) as resp:
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with _http_opener().open(req, timeout=FETCH_TIMEOUT) as resp:
             return resp.read()
     except URLError as exc:
         print(
@@ -154,7 +186,7 @@ def parse_sitemap(
     Any parse failure returns [] with a stderr WARNING.
     """
     try:
-        root = ET.fromstring(xml_bytes)
+        root = fromstring(xml_bytes)
     except ET.ParseError as exc:
         print(
             f"[sitemap-parser] WARNING: XML parse error ({exc}) — returning empty result",

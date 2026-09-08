@@ -7,7 +7,7 @@
 # A library releases by pinning a git tag; there is nothing to archive. Consumers pull the
 # tagged source directly (a Rust git-tag dependency, a Go module tag, a documented commit).
 # A module-owning workflow calls this via `workflow_call`; it tags and cuts the official
-# platform release, nothing else — dist-guard (tooling/dist-guard/) is what keeps a built
+# platform release, nothing else — dist-guard (tooling/dist_guard/) is what keeps a built
 # artifact from ever needing to be committed in the first place.
 #
 # Shares ci-go.yml's canonical preamble (mise pin, verified fetch, platform resolution) up
@@ -61,8 +61,8 @@ on:
 
 env:
   # Named once; every step below reads this instead of restating the version.
-  # 3.0.2 patch-bumps 3.0.1 (both patch OD69's 3.0.0 major bump, SC5: --language became a required selector on `release build`); 3.0.2 carries the go/toolchain rust test-filterset fix and the in-process failure-path capture fix.
-  LANGUAGE_TOOLS_VERSION: "3.0.2"
+  # 3.0.3 patch-bumps 3.0.2 (both patch OD69's 3.0.0 major bump, SC5: --language became a required selector on `release build`); 3.0.3 adds the go/toolchain python pytest vacuous-pass fix (a zero-collection run passes) atop 3.0.2's rust test-filterset and in-process failure-path capture fixes.
+  LANGUAGE_TOOLS_VERSION: "3.0.3"
 
 permissions:
   contents: write

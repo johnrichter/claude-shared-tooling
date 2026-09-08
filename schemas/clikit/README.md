@@ -111,6 +111,6 @@ print("golden records: valid")
 
 ## Versioning
 
-Released as `schemas/clikit/vX.Y.Z` — the tag prefix equals the module's path from the repository root, with no language segment (`tooling/version-guard` enforces it). Consumers pin a released tag, never this directory's `HEAD`.
+Released as `schemas/clikit/vX.Y.Z` — the tag prefix equals the module's path from the repository root, with no language segment (`tooling/version_guard` enforces it). Consumers pin a released tag, never this directory's `HEAD`.
 
 `schema_version` on the record is the record contract's **MAJOR**. Any change to the set of records that validate — including adding an exit class or a triage kind — is a MAJOR, because downstream matches on both are exhaustive; adding an error **code** within an existing class is not a contract change at all. Full change classes and consumer expectations: `clikit-cli-contract.spec.md`, "Versioning and back-compat".
