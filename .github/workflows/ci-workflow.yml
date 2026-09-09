@@ -259,14 +259,28 @@ jobs:
         if: ${{ inputs.extra_steps != '' }}
         run: ${{ inputs.extra_steps }}
 
-      # Failure-path capture (contract section 10): export the per-check records a
-      # failed check wrote under .language-tools/log so a gate_negative.toolchain.error
-      # travels with the run instead of needing a local re-probe. Changes no check's
-      # invocation, target root, subject set or verdict.
-      - name: Capture language-tools logs on failure
-        if: ${{ failure() }}
+      # Log-artifact slug (contract section 10): derives the artifact name's third
+      # component from target_root, because an artifact name carries no path separator.
+      - name: Derive a log-artifact slug
+        id: log_slug
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          raw="${{ inputs.target_root }}"
+          slug="$(printf '%s' "${raw}" | tr -c '[:alnum:]_-' '-' | sed -e 's/^-*//' -e 's/-*$//')"
+          printf 'value=%s\n' "${slug:-root}" >> "$GITHUB_OUTPUT"
+
+      # Passing-and-failing-path capture (contract section 10): export the per-check
+      # records under .language-tools/log on both paths. The failing path carries a
+      # gate_negative.toolchain.error's raw output; the passing path carries the
+      # caveats-only run's overflow entry, whose text names log_ref and nothing else,
+      # which the failing path alone never publishes. Runs no check; exports what one
+      # wrote. Name scoped by track + job + the target-root slug, so it stays unique
+      # across every call one caller makes in one run.
+      - name: Capture language-tools logs
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: language-tools-logs-workflow-checks
+          name: language-tools-logs-workflow-checks-${{ steps.log_slug.outputs.value }}
           path: ${{ github.workspace }}/.language-tools/log/
           if-no-files-found: ignore
