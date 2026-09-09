@@ -581,7 +581,7 @@ Restated once here so no template invents its own failure mapping. The source of
 | `unsupported` | 80 | The language has no equivalent of the check (`unsupported.toolchain.check_not_supported`) — e.g. Rust/shell `vet`. |
 | `internal` | 90 | An internal fault (`internal.toolchain.run_failed`); also a pin file with no `[tools]` block (F59b). |
 
-A step fails the job on any non-zero exit. A template maps no exit code itself and adds no `continue-on-error` to a check step: the code is the contract.
+A step fails the job on any non-zero exit. A template maps no exit code itself and adds no `continue-on-error` to a check step: the code is the contract. The one exemption is the "Capture language-tools logs" step below: it runs no check and changes no invocation, target root, subject set or verdict, so a transient `actions/upload-artifact` fault (a network error, not a template or code defect) cannot decide a check job's conclusion. The cost: a genuinely broken capture can now leave a job green with no diagnostic surface published.
 
 **Diagnostic surface.** Every check emits one JSON result record (`schema_version: 1`) carrying `command`, `status`, `exit_code`, and an `errors[]` array. Each error carries `code`, `context` (`check`, `dir`, `language`), `message`, and a `triage` object (`instruction`, `kind`). Each diagnostic names a file; each diagnostic whose tool reports a position also names a line (SC2). Every check step passes an absolute `--log-dir` (`${{ github.workspace }}/.language-tools/log`), so per-check logs land in one known location a reader can collect. Templates surface fatal shell-level problems through GitHub `::error::` annotations (the activation and provisioning steps above); the check records themselves are the binary's own JSON.
 
@@ -608,6 +608,7 @@ A step fails the job on any non-zero exit. A template maps no exit code itself a
 # what one wrote.
 - name: Capture language-tools logs
   if: ${{ !cancelled() }}
+  continue-on-error: true
   uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
   with:
     name: language-tools-logs-go-source-checks-${{ steps.log_slug.outputs.value }}

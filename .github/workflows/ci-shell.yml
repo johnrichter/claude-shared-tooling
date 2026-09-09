@@ -395,6 +395,7 @@ jobs:
       # job and no matrix, so there is no matrix.os component.
       - name: Capture language-tools logs
         if: ${{ !cancelled() }}
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: language-tools-logs-shell-checks-${{ steps.log_slug.outputs.value }}

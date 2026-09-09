@@ -338,6 +338,7 @@ jobs:
       # template many times in one run and upload-artifact rejects a duplicate name.
       - name: Capture language-tools logs
         if: ${{ !cancelled() }}
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: language-tools-logs-python-source-checks-${{ steps.log_slug.outputs.value }}
@@ -524,6 +525,7 @@ jobs:
       # and upload-artifact rejects a duplicate name.
       - name: Capture language-tools logs
         if: ${{ !cancelled() }}
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: language-tools-logs-python-build-test-${{ steps.log_slug.outputs.value }}-${{ matrix.os }}
