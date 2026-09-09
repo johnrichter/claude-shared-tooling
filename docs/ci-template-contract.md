@@ -10,7 +10,7 @@ tags:
   - owner:public
 links:
   - project:fleet-04-adoption:design
-updated: 2026-09-07T00:00:00Z
+updated: 2026-09-09T10:00:00Z
 ---
 
 # CI template contract
@@ -561,14 +561,14 @@ A step fails the job on any non-zero exit. A template maps no exit code itself a
 
 **Diagnostic surface.** Every check emits one JSON result record (`schema_version: 1`) carrying `command`, `status`, `exit_code`, and an `errors[]` array. Each error carries `code`, `context` (`check`, `dir`, `language`), `message`, and a `triage` object (`instruction`, `kind`). Each diagnostic names a file; each diagnostic whose tool reports a position also names a line (SC2). Every check step passes an absolute `--log-dir` (`${{ github.workspace }}/.language-tools/log`), so per-check logs land in one known location a reader can collect. Templates surface fatal shell-level problems through GitHub `::error::` annotations (the activation and provisioning steps above); the check records themselves are the binary's own JSON.
 
-**Failure-path capture.** A `gate_negative.toolchain.error` reports only `<tool> exited N with no parsed diagnostics; see log_ref for raw output` in the capped result — the raw tool output the reader needs sits in the per-check record under `--log-dir`, which the run otherwise discards, so the error is untriageable from the run alone. Every CI check job (each of the five CI templates: `source-checks` and `build-test` for the three compiled-language templates, the single `checks` job for `ci-shell.yml` and `ci-workflow.yml`) therefore ends with one artifact-upload step, guarded `if: ${{ failure() }}`, that publishes the whole `--log-dir` tree when a prior step failed the job. It exports what a failed check already wrote — it runs no check, and changes no invocation, target root, subject set or verdict. The artifact name is scoped by language and job (and by `matrix.os` for the `build-test` matrix) so no two uploads in one self-test run collide (`upload-artifact@v4` rejects a duplicate name). Two limits this capture cannot lift, both language-tools-side and not the template's to fix: a multi-tool check routed in-process (Rust `security`, the `test` kinds) writes no sub-tool stdout/stderr into its record, so the captured log names which tool exited non-zero but not why; and a check whose failure is an infra fault before any record is written leaves nothing to upload (`if-no-files-found: ignore`).
+**Failure-path capture.** A `gate_negative.toolchain.error` reports only `<tool> exited N with no parsed diagnostics; see log_ref for raw output` in the capped result — the raw tool output the reader needs sits in the per-check record under `--log-dir`, which the run otherwise discards, so the error is untriageable from the run alone. Every CI check job (each of the five CI templates: `source-checks` and `build-test` for the three compiled-language templates, the single `checks` job for `ci-shell.yml` and `ci-workflow.yml`) therefore ends with one artifact-upload step, guarded `if: ${{ !cancelled() }}`, that publishes the whole `--log-dir` tree on the failing path and on the passing path. The failing path carries a `gate_negative.toolchain.error`'s raw output. The passing path carries the `security` check's own capped diagnostics and its overflow entry. That entry's caveat text names `log_ref` and nothing else. So a step that passes at exit 10 under SC41 publishes the findings past the 20-diagnostic cap, rather than name a log no reader can fetch. It exports what a failed check already wrote — it runs no check, and changes no invocation, target root, subject set or verdict. The artifact name is scoped by language and job (and by `matrix.os` for the `build-test` matrix) so no two uploads in one self-test run collide (`upload-artifact@v4` rejects a duplicate name). Two limits this capture cannot lift, both language-tools-side and not the template's to fix: a multi-tool check routed in-process (Rust `security`, the `test` kinds) writes no sub-tool stdout/stderr into its record, so the captured log names which tool exited non-zero but not why; and a check whose failure is an infra fault before any record is written leaves nothing to upload (`if-no-files-found: ignore`).
 
 ```yaml
 # Last step of every CI check job. Publishes the --log-dir tree on the failure path so a
 # gate_negative.toolchain.error is triageable from the run. Name scoped by language + job (+
 # matrix.os on build-test) for run-wide uniqueness. Runs no check; exports what one wrote.
 - name: Capture language-tools logs on failure
-  if: ${{ failure() }}
+  if: ${{ !cancelled() }}
   uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
   with:
     name: language-tools-logs-go-source-checks
@@ -576,9 +576,9 @@ A step fails the job on any non-zero exit. A template maps no exit code itself a
     if-no-files-found: ignore
 ```
 
-### The workflow-track override (WFRULES clause (f))
+### The exit-code annotation route (WFRULES clause (f))
 
-`ci-workflow.yml` is the one template that converts two of the taxonomy's classes into a GitHub annotation instead of letting the step fail outright on any non-zero exit. `workflow lint`'s own two soft outcomes — a currency warning and a currency/rule-one error — surface inline on the pull request rather than send a reader to a log.
+`ci-workflow.yml` converts two of the taxonomy's classes into a GitHub annotation, rather than let the step fail outright on any non-zero exit. It applies that conversion to every check it runs. Four further steps carry the same conversion, and no others do. They are each language template's own `security` step, per SC41 and OD72. That step is the only place a language template applies it, so every other check in those four templates still fails on any non-zero exit. `--allow-warnings` is not optional in either use. Without it the binary folds a caveats-only run into `gate_negative` at exit 20, and the step never sees a 10. `workflow lint`'s own two soft outcomes — a currency warning and a currency/rule-one error — surface inline on the pull request rather than send a reader to a log.
 
 | Exit code | Status | Template behavior |
 |---|---|---|
@@ -594,7 +594,7 @@ The step captures the exit code through an `if`/`else` guard around the check in
   run: |
     set -euo pipefail
     result="${RUNNER_TEMP}/workflow-lint-result.json"
-    if language-tools workflow lint --dir "${{ inputs.target_root }}" --log-dir "${{ github.workspace }}/.language-tools/log" > "${result}"; then
+    if language-tools workflow lint --dir "${{ inputs.target_root }}" --log-dir "${{ github.workspace }}/.language-tools/log" --allow-warnings > "${result}"; then
       exit_code=0
     else
       exit_code=$?
