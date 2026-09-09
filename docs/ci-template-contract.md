@@ -596,7 +596,7 @@ A step fails the job on any non-zero exit. A template maps no exit code itself a
   run: |
     set -euo pipefail
     raw="${{ inputs.module_dir }}"
-    slug="$(printf '%s' "${raw}" | tr -c '[:alnum:]._-' '-' | sed -e 's/^-*//' -e 's/-*$//')"
+    slug="$(printf '%s' "${raw}" | tr -c '[:alnum:]_-' '-' | sed -e 's/^-*//' -e 's/-*$//')"
     printf 'value=%s\n' "${slug:-root}" >> "$GITHUB_OUTPUT"
 
 # Last step of every CI check job. Publishes the --log-dir tree on the failing path and on

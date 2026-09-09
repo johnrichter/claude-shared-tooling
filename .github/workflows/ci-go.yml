@@ -13,14 +13,16 @@
 # caller beyond mise.toml + mise.lock at the checked-out repo root and go.mod at
 # `module_dir`; every other decision is a typed input.
 #
-# Check-tool provisioning (contract section 5): the six binaries install from a
+# Check-tool provisioning (contract section 5): the seven binaries install from a
 # template-owned mise config written to RUNNER_TEMP and pointed at via MISE_CONFIG_FILE,
 # never the caller's own committed mise.toml/mise.lock — a caller's toolchain pin and
 # lockfile stay exactly what the caller committed. Each is pinned at its latest stable
-# version (OD49). golangci-lint, staticcheck, gosec and gotestsum resolve through the aqua
-# backend, which records a per-platform digest; goimports and govulncheck resolve through
-# the go backend, which records none (F67) — the digest check is simply not run for those
-# two, per the contract.
+# version (OD49). golangci-lint, staticcheck, gosec, gotestsum and jq resolve through the
+# aqua backend, which records a per-platform digest; goimports and govulncheck resolve
+# through the go backend, which records none (F67) — the digest check is simply not run
+# for those two, per the contract. jq serves the security step's exit-code guard (SC41)
+# rather than a check of its own; the pin is the same one ci-shell.yml already installs,
+# so a second install adds no binary to the fleet total (K10).
 #
 # Inputs:
 #   runs_on                          (string,  default "ubuntu-24.04")
@@ -185,11 +187,12 @@ jobs:
       - name: Resolved Go toolchain version
         run: go version
 
-      # SC7: golangci-lint, staticcheck and gosec resolve through the aqua backend
+      # SC7: golangci-lint, staticcheck, gosec and jq resolve through the aqua backend
       # (per-platform digest recorded); goimports and govulncheck resolve through the go
-      # backend (no digest recorded, F67). Installed from a template-owned config so the
-      # caller's own committed mise.toml/mise.lock is never touched.
-      - name: Provision Go check binaries (golangci-lint, goimports, staticcheck, gosec, govulncheck)
+      # backend (no digest recorded, F67). jq serves the security step's exit-code guard
+      # (SC41) below rather than a check of its own. Installed from a template-owned
+      # config so the caller's own committed mise.toml/mise.lock is never touched.
+      - name: Provision Go check binaries (golangci-lint, goimports, staticcheck, gosec, govulncheck, jq)
         env:
           # aqua:/ubi: metadata resolves through api.github.com; the job token buys the
           # authenticated per-repo quota instead of the shared-IP 60/hr anonymous one (F-T12-1).
@@ -204,6 +207,7 @@ jobs:
           "aqua:dominikh/go-tools/staticcheck" = "2026.2.1"
           "aqua:securego/gosec" = "2.29.0"
           "go:golang.org/x/vuln/cmd/govulncheck" = "v1.7.0"
+          "aqua:jqlang/jq" = "1.8.2"
           EOF
           mise trust "${MISE_CONFIG_FILE}"
           mise install
@@ -217,6 +221,7 @@ jobs:
           staticcheck --version
           gosec --version
           govulncheck --version
+          jq --version
 
       - name: Install language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} (verified fetch)
         env:
@@ -263,21 +268,62 @@ jobs:
         if: ${{ !inputs.dry_run }}
         run: language-tools vet --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
 
+      # SC41 and OD72 put the advisory route on this step alone. --allow-warnings
+      # classifies a warning-only run as a success; the result layer promotes that
+      # success to caveats at exit 10. The guard treats 10 as a pass and writes one
+      # ::warning:: per caveats[] entry, and 20 as a fail and writes one ::error::
+      # per errors[] entry — classifyStatus reads the error count before the flag,
+      # so a real fault still fails the job. Every other step in this template still
+      # fails on any non-zero exit, per contract section 10's EXIT contract.
       - name: language-tools security
         if: ${{ !inputs.dry_run }}
-        run: language-tools security --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
+        run: |
+          set -euo pipefail
+          result="${RUNNER_TEMP}/security-result.json"
+          if language-tools security --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log" --allow-warnings > "${result}"
+          then
+            exit_code=0
+          else
+            exit_code=$?
+          fi
+          if [ "${exit_code}" = "10" ]
+          then
+            jq -r '.caveats[] | "::warning::" + .message' "${result}"
+          elif [ "${exit_code}" = "20" ]
+          then
+            jq -r '.errors[] | "::error::" + .message' "${result}"
+            exit 20
+          elif [ "${exit_code}" != "0" ]
+          then
+            echo "::error::language-tools security exited ${exit_code}. See ${result}"
+            exit "${exit_code}"
+          fi
 
-      # Failure-path capture (contract section 10): a failed check writes its raw
-      # tool output to a per-check record under .language-tools/log that the run
-      # otherwise discards, so a gate_negative.toolchain.error can only be triaged
-      # from a local re-probe. Export that directory as an artifact on failure so
-      # the record travels with the run. This changes no check's invocation, target
-      # root, subject set or verdict — it only publishes what a failed check wrote.
-      - name: Capture language-tools logs on failure
-        if: ${{ failure() }}
+      # Contract section 10: derive the artifact-name slug from module_dir once, so the
+      # capture step below can scope its name without a path separator.
+      - name: Derive a log-artifact slug
+        id: log_slug
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          raw="${{ inputs.module_dir }}"
+          slug="$(printf '%s' "${raw}" | tr -c '[:alnum:]_-' '-' | sed -e 's/^-*//' -e 's/-*$//')"
+          printf 'value=%s\n' "${slug:-root}" >> "$GITHUB_OUTPUT"
+
+      # Failure-path capture (contract section 10, SECADV clause (d)): every check
+      # writes its raw tool output to a per-check record under .language-tools/log
+      # that the run otherwise discards. Guarded on !cancelled() rather than
+      # failure() so the security step's own passing-at-exit-10 run also publishes
+      # its capped diagnostics and overflow entry, instead of naming a log_ref no
+      # reader can fetch. Runs no check and changes no invocation, target root,
+      # subject set or verdict — it only exports what a check already wrote. Name
+      # scoped by language + job + the module_dir slug, because a caller calls this
+      # template many times in one run and upload-artifact rejects a duplicate name.
+      - name: Capture language-tools logs
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: language-tools-logs-go-source-checks
+          name: language-tools-logs-go-source-checks-${{ steps.log_slug.outputs.value }}
           path: ${{ github.workspace }}/.language-tools/log/
           if-no-files-found: ignore
 
@@ -527,12 +573,27 @@ jobs:
         if: ${{ !inputs.dry_run && inputs.extra_steps != '' }}
         run: ${{ inputs.extra_steps }}
 
-      # Failure-path capture (contract section 10). Matrix-scoped artifact name so
-      # each platform's record uploads without colliding with the others'.
-      - name: Capture language-tools logs on failure
-        if: ${{ failure() }}
+      # Contract section 10: derive the artifact-name slug from module_dir once, so the
+      # capture step below can scope its name without a path separator.
+      - name: Derive a log-artifact slug
+        id: log_slug
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          raw="${{ inputs.module_dir }}"
+          slug="$(printf '%s' "${raw}" | tr -c '[:alnum:]_-' '-' | sed -e 's/^-*//' -e 's/-*$//')"
+          printf 'value=%s\n' "${slug:-root}" >> "$GITHUB_OUTPUT"
+
+      # Failure-path capture (contract section 10, SECADV clause (d)). Guarded on
+      # !cancelled() rather than failure() for the same reason as source-checks:
+      # runs no check, changes no invocation, target root, subject set or verdict.
+      # Name scoped by language + job + the module_dir slug + matrix.os, because a
+      # caller calls this template many times in one run across every matrix leg
+      # and upload-artifact rejects a duplicate name.
+      - name: Capture language-tools logs
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: language-tools-logs-go-build-test-${{ matrix.os }}
+          name: language-tools-logs-go-build-test-${{ steps.log_slug.outputs.value }}-${{ matrix.os }}
           path: ${{ github.workspace }}/.language-tools/log/
           if-no-files-found: ignore
