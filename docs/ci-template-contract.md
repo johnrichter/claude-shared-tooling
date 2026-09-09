@@ -259,7 +259,7 @@ Defect 10: no template provisions the binaries its checks invoke. F54 measures 2
 
 ### The 22-binary matrix
 
-Digest column: **yes** = backend records a per-platform digest (11, F67); **no** = backend records none (8, F67); **system** = no mise backend, installs via the OS package manager or a pinned from-source build (3, F67/F79).
+Digest column: **yes** = backend records a per-platform digest (11, F67); **no** = backend records none (8, F67); **system** = no mise backend, installs via the OS package manager or a pinned from-source build (3, F67. F79 measures the channels of the two package-manager cases.).
 
 | Binary | Track | Backend | Digest | Version rule | Install step |
 |---|---|---|---|---|---|
