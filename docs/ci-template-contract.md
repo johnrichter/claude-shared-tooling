@@ -101,8 +101,32 @@ jobs:
         run: language-tools lint --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
       - name: language-tools vet
         run: language-tools vet --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
+      # SC41 and OD72 put the advisory route on this step alone. The flag classifies a
+      # warning-only run as a success. The result layer promotes that success to caveats
+      # at exit 10. The guard treats 10 as a pass and writes one ::warning per entry.
+      # Every other step in this template still fails on any non-zero exit (section 10).
       - name: language-tools security
-        run: language-tools security --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
+        run: |
+          set -euo pipefail
+          result="${RUNNER_TEMP}/security-result.json"
+          if language-tools security --language go --dir "${{ inputs.module_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log" --allow-warnings > "${result}"
+          then
+            exit_code=0
+          else
+            exit_code=$?
+          fi
+          if [ "${exit_code}" = "10" ]
+          then
+            jq -r '.caveats[] | "::warning::" + .message' "${result}"
+          elif [ "${exit_code}" = "20" ]
+          then
+            jq -r '.errors[] | "::error::" + .message' "${result}"
+            exit 20
+          elif [ "${exit_code}" != "0" ]
+          then
+            echo "::error::language-tools security exited ${exit_code}. See ${result}"
+            exit "${exit_code}"
+          fi
 
   build-test:
     name: build-test
@@ -312,7 +336,7 @@ A check whose binary reaches the runner by neither stage becomes a named defect 
 
 `actionlint` is the workflow track's own check tool, provisioned by `ci-workflow.yml` alone. It pins at `aqua:rhysd/actionlint` `1.7.12` — the version E8 records locking all seven platform entries with a SHA-256 and a provenance attestation — from a template-owned mise config, never a caller's committed `mise.toml`/`mise.lock` (the same shape as section 5's `mise install --locked`, scoped to one `MISE_CONFIG_FILE`).
 
-The conversion step (section 10) also needs `jq` to read the check's own JSON result record. `jq` is already in the 22-binary matrix above at `aqua:jqlang/jq` `1.8.2` for the shell track; `ci-workflow.yml` installs the same pin a second time from its own config. A second install of an already-counted binary adds no binary to the fleet total (K10).
+`ci-go.yml`, `ci-rust.yml` and `ci-python.yml` install the same `aqua:jqlang/jq` `1.8.2` pin, because SC41's `security` guard reads the same JSON result record with it. So five of the seven templates install `jq`, and the two release templates install none. A second install of an already-counted binary adds no binary to the fleet total under K10, which stays at 23. The conversion step (section 10) also needs `jq` to read the check's own JSON result record. `jq` is already in the 22-binary matrix above at `aqua:jqlang/jq` `1.8.2` for the shell track; `ci-workflow.yml` installs the same pin a second time from its own config. A second install of an already-counted binary adds no binary to the fleet total (K10).
 
 ```yaml
 - name: Provision workflow check binaries (actionlint, jq)
@@ -561,17 +585,30 @@ A step fails the job on any non-zero exit. A template maps no exit code itself a
 
 **Diagnostic surface.** Every check emits one JSON result record (`schema_version: 1`) carrying `command`, `status`, `exit_code`, and an `errors[]` array. Each error carries `code`, `context` (`check`, `dir`, `language`), `message`, and a `triage` object (`instruction`, `kind`). Each diagnostic names a file; each diagnostic whose tool reports a position also names a line (SC2). Every check step passes an absolute `--log-dir` (`${{ github.workspace }}/.language-tools/log`), so per-check logs land in one known location a reader can collect. Templates surface fatal shell-level problems through GitHub `::error::` annotations (the activation and provisioning steps above); the check records themselves are the binary's own JSON.
 
-**Failure-path capture.** A `gate_negative.toolchain.error` reports only `<tool> exited N with no parsed diagnostics; see log_ref for raw output` in the capped result — the raw tool output the reader needs sits in the per-check record under `--log-dir`, which the run otherwise discards, so the error is untriageable from the run alone. Every CI check job (each of the five CI templates: `source-checks` and `build-test` for the three compiled-language templates, the single `checks` job for `ci-shell.yml` and `ci-workflow.yml`) therefore ends with one artifact-upload step, guarded `if: ${{ !cancelled() }}`, that publishes the whole `--log-dir` tree on the failing path and on the passing path. The failing path carries a `gate_negative.toolchain.error`'s raw output. The passing path carries the `security` check's own capped diagnostics and its overflow entry. That entry's caveat text names `log_ref` and nothing else. So a step that passes at exit 10 under SC41 publishes the findings past the 20-diagnostic cap, rather than name a log no reader can fetch. It exports what a failed check already wrote — it runs no check, and changes no invocation, target root, subject set or verdict. The artifact name is scoped by language and job (and by `matrix.os` for the `build-test` matrix) so no two uploads in one self-test run collide (`upload-artifact@v4` rejects a duplicate name). Two limits this capture cannot lift, both language-tools-side and not the template's to fix: a multi-tool check routed in-process (Rust `security`, the `test` kinds) writes no sub-tool stdout/stderr into its record, so the captured log names which tool exited non-zero but not why; and a check whose failure is an infra fault before any record is written leaves nothing to upload (`if-no-files-found: ignore`).
+**Failure-path capture.** A `gate_negative.toolchain.error` reports only `<tool> exited N with no parsed diagnostics; see log_ref for raw output` in the capped result — the raw tool output the reader needs sits in the per-check record under `--log-dir`, which the run otherwise discards, so the error is untriageable from the run alone. Every CI check job (each of the five CI templates: `source-checks` and `build-test` for the three compiled-language templates, the single `checks` job for `ci-shell.yml` and `ci-workflow.yml`) therefore ends with one artifact-upload step, guarded `if: ${{ !cancelled() }}`, that publishes the whole `--log-dir` tree on the failing path and on the passing path. The failing path carries a `gate_negative.toolchain.error`'s raw output. The passing path carries the `security` check's own capped diagnostics and its overflow entry. That entry's caveat text names `log_ref` and nothing else. So a step that passes at exit 10 under SC41 publishes the findings past the 20-diagnostic cap, rather than name a log no reader can fetch. It exports what a check already wrote — it runs no check, and changes no invocation, target root, subject set or verdict. The artifact name carries the language, the job, a target-root slug, and `matrix.os` on the `build-test` matrix. `upload-artifact@v4` rejects a duplicate name, and a caller makes more than one call to one template in a single run. `ai-shared-lib` makes 27 `ci-go.yml` calls and 5 `ci-rust.yml` calls, and `marketplace` makes 8 `ci-python.yml` calls. The language and the job alone stay unique only inside the self-test, which makes one call per template. So a slug step derives the third component, because an artifact name carries no path separator. Two limits this capture cannot lift, both language-tools-side and not the template's to fix: a multi-tool check routed in-process (Rust `security`, the `test` kinds) writes no sub-tool stdout/stderr into its record, so the captured log names which tool exited non-zero but not why; and a check whose failure is an infra fault before any record is written leaves nothing to upload (`if-no-files-found: ignore`).
 
 ```yaml
-# Last step of every CI check job. Publishes the --log-dir tree on the failure path so a
-# gate_negative.toolchain.error is triageable from the run. Name scoped by language + job (+
-# matrix.os on build-test) for run-wide uniqueness. Runs no check; exports what one wrote.
-- name: Capture language-tools logs on failure
+- name: Derive a log-artifact slug
+  id: log_slug
+  if: ${{ !cancelled() }}
+  run: |
+    set -euo pipefail
+    raw="${{ inputs.module_dir }}"
+    slug="$(printf '%s' "${raw}" | tr -c '[:alnum:]._-' '-' | sed -e 's/^-*//' -e 's/-*$//')"
+    printf 'value=%s\n' "${slug:-root}" >> "$GITHUB_OUTPUT"
+
+# Last step of every CI check job. Publishes the --log-dir tree on the failing path and on
+# the passing path. The failing path carries a gate_negative.toolchain.error's raw output.
+# The passing path carries the security check's capped diagnostics and its overflow entry,
+# whose caveat text names log_ref and nothing else. Name scoped by language + job + a
+# target-root slug (+ matrix.os on build-test), because a caller calls one template many
+# times in one run and upload-artifact rejects a duplicate name. Runs no check; exports
+# what one wrote.
+- name: Capture language-tools logs
   if: ${{ !cancelled() }}
   uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
   with:
-    name: language-tools-logs-go-source-checks
+    name: language-tools-logs-go-source-checks-${{ steps.log_slug.outputs.value }}
     path: ${{ github.workspace }}/.language-tools/log/
     if-no-files-found: ignore
 ```
