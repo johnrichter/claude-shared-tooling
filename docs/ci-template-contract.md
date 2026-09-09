@@ -282,7 +282,7 @@ Digest column: **yes** = backend records a per-platform digest (11, F67); **no**
 | `bats-core` | Shell | `aqua:bats-core/bats-core` | yes (6 entries) | OD49 latest stable | `mise install --locked` |
 | `semgrep` | Shell | `pipx:semgrep` | no | OD49 latest stable | `mise install --locked` |
 | `kcov` | Shell | none (system) | system | OD49 latest stable | apt build-deps + pinned from-source build — section 6 |
-| `jq` | Shell | `aqua:jqlang/jq` | yes | OD49 latest stable | `mise install --locked` |
+| `jq` | Shell, and five templates' guard steps | `aqua:jqlang/jq` | yes | OD49 latest stable | `mise install --locked`. Caller pin for the shell check, template-owned config for the guard steps |
 | `playwright` | Python (`test e2e`) | `pipx:` (1.62.0) or `npm:` (1.62.1) | no | OD49 latest stable | `mise install --locked`; ships its own Chromium (OD61) |
 | Google Chrome | Go (`test e2e`) | none (system) | system | OD56 latest Chrome | apt (Google repo) / brew — section 6 |
 
@@ -336,7 +336,7 @@ A check whose binary reaches the runner by neither stage becomes a named defect 
 
 `actionlint` is the workflow track's own check tool, provisioned by `ci-workflow.yml` alone. It pins at `aqua:rhysd/actionlint` `1.7.12` — the version E8 records locking all seven platform entries with a SHA-256 and a provenance attestation — from a template-owned mise config, never a caller's committed `mise.toml`/`mise.lock` (the same shape as section 5's `mise install --locked`, scoped to one `MISE_CONFIG_FILE`).
 
-`ci-go.yml`, `ci-rust.yml` and `ci-python.yml` install the same `aqua:jqlang/jq` `1.8.2` pin, because SC41's `security` guard reads the same JSON result record with it. So five of the seven templates install `jq`, and the two release templates install none. A second install of an already-counted binary adds no binary to the fleet total under K10, which stays at 23. The conversion step (section 10) also needs `jq` to read the check's own JSON result record. `jq` is already in the 22-binary matrix above at `aqua:jqlang/jq` `1.8.2` for the shell track; `ci-workflow.yml` installs the same pin a second time from its own config. A second install of an already-counted binary adds no binary to the fleet total (K10).
+`ci-go.yml`, `ci-rust.yml` and `ci-python.yml` install the same `aqua:jqlang/jq` `1.8.2` pin, because SC41's `security` guard reads the same JSON result record with it. Each installs it from a template-owned `MISE_CONFIG_FILE`, in the shape the SC39 block below shows. None reads the caller's committed `mise.toml` for it. `jq` serves a template-side guard rather than a caller's own check, so no caller pin file gains a row for it. So five of the seven templates install `jq`, and the two release templates install none. A second install of an already-counted binary adds no binary to the fleet total under K10, which stays at 23. The conversion step (section 10) also needs `jq` to read the check's own JSON result record. `jq` is already in the 22-binary matrix above at `aqua:jqlang/jq` `1.8.2` for the shell track; `ci-workflow.yml` installs the same pin a second time from its own config. A second install of an already-counted binary adds no binary to the fleet total (K10).
 
 ```yaml
 - name: Provision workflow check binaries (actionlint, jq)
@@ -364,7 +364,7 @@ A check whose binary reaches the runner by neither stage becomes a named defect 
 
 ## 6. System-package tools
 
-Three of the 22 reach no mise backend and install through the system package manager or a pinned from-source build (OD57, F79 measured 2026-08-26): `checkbashisms`, Google Chrome, and `kcov`.
+Three of the 22 reach no mise backend and install through the system package manager or a pinned from-source build (OD57 for the two package-manager cases, and F67, re-measured 2026-09-06, for `kcov`): `checkbashisms`, Google Chrome, and `kcov`.
 
 | Tool | OS | Channel | Source / package | Serves |
 |---|---|---|---|---|
@@ -588,6 +588,8 @@ A step fails the job on any non-zero exit. A template maps no exit code itself a
 **Failure-path capture.** A `gate_negative.toolchain.error` reports only `<tool> exited N with no parsed diagnostics; see log_ref for raw output` in the capped result — the raw tool output the reader needs sits in the per-check record under `--log-dir`, which the run otherwise discards, so the error is untriageable from the run alone. Every CI check job (each of the five CI templates: `source-checks` and `build-test` for the three compiled-language templates, the single `checks` job for `ci-shell.yml` and `ci-workflow.yml`) therefore ends with one artifact-upload step, guarded `if: ${{ !cancelled() }}`, that publishes the whole `--log-dir` tree on the failing path and on the passing path. The failing path carries a `gate_negative.toolchain.error`'s raw output. The passing path carries the `security` check's own capped diagnostics and its overflow entry. That entry's caveat text names `log_ref` and nothing else. So a step that passes at exit 10 under SC41 publishes the findings past the 20-diagnostic cap, rather than name a log no reader can fetch. It exports what a check already wrote — it runs no check, and changes no invocation, target root, subject set or verdict. The artifact name carries the language, the job, a target-root slug, and `matrix.os` on the `build-test` matrix. `upload-artifact@v4` rejects a duplicate name, and a caller makes more than one call to one template in a single run. `ai-shared-lib` makes 27 `ci-go.yml` calls and 5 `ci-rust.yml` calls, and `marketplace` makes 8 `ci-python.yml` calls. The language and the job alone stay unique only inside the self-test, which makes one call per template. So a slug step derives the third component, because an artifact name carries no path separator. Two limits this capture cannot lift, both language-tools-side and not the template's to fix: a multi-tool check routed in-process (Rust `security`, the `test` kinds) writes no sub-tool stdout/stderr into its record, so the captured log names which tool exited non-zero but not why; and a check whose failure is an infra fault before any record is written leaves nothing to upload (`if-no-files-found: ignore`).
 
 ```yaml
+# ci-go.yml shown. Each other CI template substitutes its own target-root input name,
+# being crate_dir, project_dir, script_root or target_root (section 8).
 - name: Derive a log-artifact slug
   id: log_slug
   if: ${{ !cancelled() }}
