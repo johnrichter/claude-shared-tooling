@@ -17,13 +17,23 @@ import (
 type PrivacyTier string
 
 // The closed set of privacy tiers, strictest to loosest. Public is a repo
-// shared outside the org; Datadog is shared inside the org; Personal is a
-// single owner's own private repo.
+// shared outside the org; Confidential is shared inside the org; Private is a
+// single repo not shared at all.
 const (
-	TierPublic   PrivacyTier = "public"
-	TierDatadog  PrivacyTier = "datadog"
-	TierPersonal PrivacyTier = "personal"
+	TierPublic       PrivacyTier = "public"
+	TierConfidential PrivacyTier = "confidential"
+	TierPrivate      PrivacyTier = "private"
 )
+
+// employeeEmailLabel is the internal-identifier label used by both the
+// employee-email pattern and its allowlist lookup, named once so the two
+// stay in sync by construction.
+const employeeEmailLabel = "internal employee email"
+
+// internalHostnameLabel is the internal-identifier label used by both the
+// internal-hostname pattern and its reserved-sentinel filter, named once so
+// the two stay in sync by construction.
+const internalHostnameLabel = "internal hostname"
 
 // Known reports whether t is one of the three defined tiers.
 func (t PrivacyTier) Known() bool {
@@ -32,12 +42,14 @@ func (t PrivacyTier) Known() bool {
 }
 
 // privacyTierConfig is one tier's forbidden-marker set, whether the
-// "declares-but-not-tier-public" pair check applies, and which
-// internal-identifier posture it uses.
+// "declares-but-not-tier-public" pair check applies, which internal-
+// identifier posture it uses, and whether that posture is eligible for the
+// caller-configured employee-email check (see PrivacyOptions.EmployeeEmail).
 type privacyTierConfig struct {
-	forbiddenMarkers  []markerPattern
-	requirePublicPair bool
-	internalID        []markerPattern
+	forbiddenMarkers    []markerPattern
+	requirePublicPair   bool
+	internalID          []markerPattern
+	checksEmployeeEmail bool
 }
 
 type markerPattern struct {
@@ -48,21 +60,20 @@ type markerPattern struct {
 var privacyTierConfigs = map[PrivacyTier]privacyTierConfig{
 	TierPublic: {
 		forbiddenMarkers: []markerPattern{
-			{regexp.MustCompile(`(?i)\bprivacy:\s*(internal|confidential)\b`), "forbidden frontmatter marker"},
-			{regexp.MustCompile(`(?i)\bowner:\s*(datadog|personal)\b`), "forbidden frontmatter marker"},
+			{regexp.MustCompile(`(?i)\bprivacy:\s*(internal|confidential|private)\b`), "forbidden frontmatter marker"},
 		},
-		requirePublicPair: true,
-		internalID:        internalIDStrict,
+		requirePublicPair:   true,
+		internalID:          internalIDStrict,
+		checksEmployeeEmail: true,
 	},
-	TierDatadog: {
+	TierConfidential: {
 		forbiddenMarkers: []markerPattern{
-			{regexp.MustCompile(`(?i)\bprivacy:\s*confidential\b`), "forbidden frontmatter marker"},
-			{regexp.MustCompile(`(?i)\bowner:\s*personal\b`), "forbidden frontmatter marker"},
+			{regexp.MustCompile(`(?i)\bprivacy:\s*private\b`), "forbidden frontmatter marker"},
 		},
 		requirePublicPair: false,
 		internalID:        internalIDRelaxed,
 	},
-	TierPersonal: {
+	TierPrivate: {
 		forbiddenMarkers:  nil,
 		requirePublicPair: false,
 		internalID:        nil,
@@ -70,15 +81,14 @@ var privacyTierConfigs = map[PrivacyTier]privacyTierConfig{
 }
 
 // fmPairChecks are the public-tier "declares a tag but not its public value"
-// checks: a file whose frontmatter declares privacy/owner at all but not the
-// public value (catches an unenumerated value, e.g. "privacy: restricted").
+// checks: a file whose frontmatter declares privacy: at all but not
+// privacy:public (catches an unenumerated value, e.g. "privacy: restricted").
 var fmPairChecks = []struct {
 	any    *regexp.Regexp
 	public *regexp.Regexp
 	key    string
 }{
 	{regexp.MustCompile(`(?i)\bprivacy:\s*\w+`), regexp.MustCompile(`(?i)\bprivacy:\s*public\b`), "privacy"},
-	{regexp.MustCompile(`(?i)\bowner:\s*\w+`), regexp.MustCompile(`(?i)\bowner:\s*public\b`), "owner"},
 }
 
 // hostTerminator pins the private-network match to a true end-of-host: an
@@ -94,32 +104,138 @@ var privateNetworkURL = regexp.MustCompile(
 		`|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})` +
 		hostTerminator)
 
+// reservedSentinelSuffix matches an RFC 6761 reserved-TLD label (.invalid,
+// .test, .localhost, or .example - including the RFC 2606 example.{com,net,
+// org} second-level domains) anchored at the start of whatever immediately
+// follows an internal-hostname match, itself followed by hostTerminator: a
+// genuine end of host, never another "." introducing more host content. Go's
+// RE2 engine has no lookahead, so unlike the negative-lookahead this filter
+// mirrors, it is applied by the caller against the text right after a match
+// rather than embedded in the hostname pattern itself - the same exclusion,
+// expressed as a post-match check instead of a zero-width assertion.
+var reservedSentinelSuffix = regexp.MustCompile(
+	`(?i)^\.(?:invalid|test|example(?:\.(?:com|net|org))?|localhost)` + hostTerminator)
+
 // internalIDStrict is the public-tier internal-identifier posture: internal
-// hostnames, private-network URLs, issue-tracker links and employee emails -
-// none of which match a bare company-name mention in prose.
+// hostnames, private-network URLs, and issue-tracker links - none of which
+// match a bare company-name mention in prose. The employee-email check is a
+// fourth member of this posture (see PrivacyOptions.EmployeeEmail); it is
+// appended per call, not baked in here, since it also carries a
+// caller-configurable allow-list on top of its one hardcoded default domain.
+//
+// The internal-hostname pattern's match ends right at the word boundary
+// after corp/internal/intranet/lan, so it matches equally whether that
+// label is the true end of the host (a real internal address) or is
+// immediately followed by an RFC 6761 reserved sentinel TLD (e.g.
+// "host.corp.test", a documentation/fixture hostname, not a real one). The
+// caller in ScanPrivacy filters out the latter via reservedSentinelSuffix,
+// keyed off internalHostnameLabel.
 var internalIDStrict = []markerPattern{
-	{regexp.MustCompile(`(?i)\b[a-z0-9][a-z0-9-]*\.(?:corp|internal|intranet|lan)\b`), "internal hostname"},
+	{regexp.MustCompile(`(?i)\b[a-z0-9][a-z0-9-]*\.(?:corp|internal|intranet|lan)\b`), internalHostnameLabel},
 	{privateNetworkURL, "private/loopback network URL"},
 	{regexp.MustCompile(`(?i)\b(?:jira|atlassian|confluence)\.[\w.-]+/(?:browse|wiki)/[A-Za-z][\w-]*`), "internal issue-tracker/wiki link"},
-	{regexp.MustCompile(`(?i)\b[\w.+-]+@(?:datadoghq\.com|datadoghq\.internal)\b`), "internal employee email"},
 }
 
-// internalIDRelaxed is the datadog-tier posture: internal hostnames/emails/
-// wiki links are expected inside an org-shared repo, so only network-private
-// addresses stay flagged.
+// internalIDRelaxed is the confidential-tier posture: internal hostnames/
+// emails/wiki links are expected inside an org-shared repo, so only
+// network-private addresses stay flagged. The employee-email check never
+// applies at this tier, configured or not (see privacyTierConfig.
+// checksEmployeeEmail).
 var internalIDRelaxed = []markerPattern{
 	{privateNetworkURL, "private/loopback network URL"},
 }
 
-// publicEmailAllowlist holds the exact, enumerated public role addresses at
-// datadoghq.com (support, sales, press, ...) that the employee-email pattern
-// must never flag - a function anyone external is meant to reach, never an
-// individual. Exempt by exact address only, never by domain or wildcard.
-var publicEmailAllowlist = map[string]bool{
-	"support@datadoghq.com": true, "sales@datadoghq.com": true,
-	"press@datadoghq.com": true, "info@datadoghq.com": true,
-	"privacy@datadoghq.com": true, "security@datadoghq.com": true,
-	"legal@datadoghq.com": true, "careers@datadoghq.com": true,
+// defaultAllowedEmailDomain is the one domain the employee-email check
+// allows unconditionally, regardless of any caller configuration: the RFC
+// 2606 reserved documentation-example domain, so a doc or test file's
+// user@example.com never false-positives.
+const defaultAllowedEmailDomain = "example.com"
+
+// employeeEmailPattern matches any email-address-shaped string in scanned
+// text. The check's polarity is allow-list, not deny-list: every real-looking
+// address is a candidate internal identifier, and EmployeeEmailCheck.
+// AllowedDomains (plus defaultAllowedEmailDomain) is what narrows that down,
+// not what the pattern alternates over.
+//
+// The last domain label - the TLD - must be either letters-only and at least
+// two characters, or a punycode-shaped internationalized-domain-name (IDN)
+// label: the literal prefix "xn--" followed by one or more DNS-label
+// characters (letters, digits, hyphens, never ending in a hyphen). The
+// letters-only branch is what keeps a package-version specifier (foo@1.0.0,
+// tool@v0.5.0), an IPv4-shaped host (cache@127.0.0.1), or a single-letter-
+// plus-digit label (bar@a1) out of the match: each is otherwise DNS-label-
+// shaped, and no real non-IDN TLD is short, numeric, or mixed with digits.
+// The punycode branch exists because a real IDN TLD's own label is digits-
+// and-hyphens-shaped past its "xn--" prefix (e.g. xn--80ak6aa92e) and would
+// otherwise be truncated at "xn" by the letters-only branch, leaving
+// emailDomain reporting only the truncated prefix - which meant such a
+// domain could never be allow-listed even though the address was still
+// correctly flagged. A bare "xn--" with nothing after it satisfies neither
+// branch in full, so it never matches as a complete TLD.
+//
+// The punycode branch is listed first, and that order is load-bearing: Go's
+// regexp resolves an alternation leftmost-first, so the letters-only branch
+// would otherwise win at the same start position and re-truncate at "xn".
+// That same "xn" prefix always satisfies the letters-only branch anyway, so
+// the punycode branch only ever lengthens a match that already existed - it
+// cannot make a non-address start matching.
+//
+// Only the last label carries either of these requirements, since every
+// label before it legitimately may start with a digit (user@mail.3m.com) or
+// be punycode (user@sub.xn--80ak6aa92e.com) without needing special-casing.
+// Every label is also capped at 63 characters, matching DNS's own
+// label-length limit - the last label included, whichever branch it takes.
+// The punycode branch's bound is {0,57} rather than the {0,61} its siblings
+// carry because its literal "xn--" prefix already spends 4 of those 63
+// characters (4 + 1 + 57 + 1 = 63).
+var employeeEmailPattern = regexp.MustCompile(
+	`(?i)\b[\w.+-]+@(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+` +
+		`(?:xn--[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,57}[a-zA-Z0-9])?|[a-zA-Z]{2,63})\b`)
+
+// EmployeeEmailCheck configures the public tier's employee-email member of
+// the internal-identifier posture: any email-address-shaped string found in
+// scanned text is flagged as an internal identifier unless its domain,
+// compared case-insensitively, is defaultAllowedEmailDomain or one of
+// AllowedDomains.
+//
+// The zero value still runs the check at full strength: an address is flagged
+// unless it is at defaultAllowedEmailDomain, since this posture has no
+// caller-configured domain to fall back on being "off" - a caller who wants
+// no additional exemptions simply leaves AllowedDomains unset.
+type EmployeeEmailCheck struct {
+	// AllowedDomains are matched as literal text, never as patterns, and
+	// case-insensitively against a detected address's domain: a domain here
+	// is compared, not compiled, so it can never inject regex syntax. A
+	// blank or whitespace-only entry is dropped rather than indexed, since an
+	// empty domain would otherwise match nothing anyway but is worth
+	// rejecting explicitly.
+	AllowedDomains []string
+}
+
+// allowedDomains returns the domains the employee-email check must never
+// flag: defaultAllowedEmailDomain plus every entry of c.AllowedDomains,
+// lowercased, matching how a matched address's domain is looked up. The
+// returned set is never empty - defaultAllowedEmailDomain always applies,
+// even against the zero value.
+func (c EmployeeEmailCheck) allowedDomains() map[string]bool {
+	allowed := map[string]bool{defaultAllowedEmailDomain: true}
+	for _, d := range c.AllowedDomains {
+		if d = strings.TrimSpace(d); d == "" {
+			continue
+		}
+		allowed[strings.ToLower(d)] = true
+	}
+	return allowed
+}
+
+// emailDomain returns the domain portion of an email-shaped match: the text
+// after its last "@". employeeEmailPattern guarantees exactly one "@", so
+// this is never ambiguous.
+func emailDomain(match string) string {
+	if i := strings.LastIndexByte(match, '@'); i >= 0 {
+		return match[i+1:]
+	}
+	return ""
 }
 
 // PrivacyOptions parameterizes ScanPrivacy beyond the tier itself.
@@ -131,7 +247,7 @@ type PrivacyOptions struct {
 	// paths resolving to SkipClass here still get the secret/internal-id
 	// scan, but never the frontmatter-marker checks. Intended for source
 	// code and fixture/corpus directories that legitimately embed literal
-	// marker strings as data, not as a real sensitivity/owner declaration.
+	// marker strings as data, not as a real sensitivity declaration.
 	MarkerExemptRules []fsx.Rule
 	// SecretExemptRules is a third, independent fsx.ClassifyPath ruleset:
 	// paths resolving to SkipClass here still get the frontmatter-marker and
@@ -142,6 +258,12 @@ type PrivacyOptions struct {
 	// path doesn't have to be pulled out of every other check to fix one
 	// false positive.
 	SecretExemptRules []fsx.Rule
+	// EmployeeEmail configures the public tier's employee-email check (see
+	// EmployeeEmailCheck), which runs unconditionally at that tier: its zero
+	// value still flags any email-shaped address not at
+	// defaultAllowedEmailDomain, so a caller who wants additional exempt
+	// domains supplies AllowedDomains.
+	EmployeeEmail EmployeeEmailCheck
 }
 
 // ScanPrivacy applies tier's forbidden-marker and internal-identifier
@@ -159,9 +281,10 @@ type PrivacyOptions struct {
 // resolves to SkipClass (see PrivacyOptions.SecretExemptRules); its other
 // exemptions are by exact matched value (see awsExampleAccessKeyIDs). The
 // internal-identifier check runs whole-file with no path exemption; its only
-// exemption is by exact matched value (see publicEmailAllowlist). Each of
-// the three checks has its own independent exemption mechanism, so
-// exempting a path from one never exempts it from the others.
+// exemption is by matched value's domain (see PrivacyOptions.EmployeeEmail.
+// AllowedDomains). Each of the three checks has its own independent
+// exemption mechanism, so exempting a path from one never exempts it from
+// the others.
 //
 // A pattern in MarkerExemptRules or SecretExemptRules that is not a valid
 // glob returns an error naming the ruleset and the pattern before any file is
@@ -178,6 +301,13 @@ func ScanPrivacy(root string, tier PrivacyTier, opts PrivacyOptions) (failures, 
 	}
 	if err := validateExemptRules(secretExemptRuleset, opts.SecretExemptRules); err != nil {
 		return nil, nil, err
+	}
+
+	internalID := cfg.internalID
+	var allowedEmailDomains map[string]bool
+	if cfg.checksEmployeeEmail {
+		internalID = append(append([]markerPattern{}, cfg.internalID...), markerPattern{employeeEmailPattern, employeeEmailLabel})
+		allowedEmailDomains = opts.EmployeeEmail.allowedDomains()
 	}
 
 	walkErr := walkScannable(root, opts.SkipRules, func(rel, abs string) error {
@@ -208,15 +338,19 @@ func ScanPrivacy(root string, tier PrivacyTier, opts PrivacyOptions) (failures, 
 
 		if fsx.ClassifyPath(rel, opts.SecretExemptRules).Class != SkipClass {
 			for _, p := range secretPatterns {
-				if matchesSecretPattern(p, text) {
+				if matchesSecretPattern(p, text, nil) {
 					failures = append(failures, Finding{Path: rel, Rule: p.label, Detail: "possible " + strings.ReplaceAll(p.label, "_", " ")})
 				}
 			}
 		}
 
-		for _, m := range cfg.internalID {
-			for _, match := range m.re.FindAllString(text, -1) {
-				if m.label == "internal employee email" && publicEmailAllowlist[strings.ToLower(match)] {
+		for _, m := range internalID {
+			for _, span := range m.re.FindAllStringIndex(text, -1) {
+				match := text[span[0]:span[1]]
+				if m.label == employeeEmailLabel && allowedEmailDomains[strings.ToLower(emailDomain(match))] {
+					continue
+				}
+				if m.label == internalHostnameLabel && reservedSentinelSuffix.MatchString(text[span[1]:]) {
 					continue
 				}
 				warnings = append(warnings, Finding{Path: rel, Rule: "internal_identifier", Detail: fmt.Sprintf("internal identifier — %s", m.label)})

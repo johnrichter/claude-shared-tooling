@@ -89,7 +89,7 @@ func TestResign_WithRealKeyChangesHashButNotTree(t *testing.T) {
 
 // TestResign_AllSignedRangeIsNoOp checks that resigning a range whose commits
 // already carry verifying signatures is a no-op: the ref does not move, no new
-// SHAs are minted, no backup tag is created, and the result reports the no-op
+// SHAs are minted, no backup ref is created, and the result reports the no-op
 // with a clean post-condition report.
 func TestResign_AllSignedRangeIsNoOp(t *testing.T) {
 	fingerprint, gnupgHome := genEphemeralGPGKey(t)
@@ -119,8 +119,8 @@ func TestResign_AllSignedRangeIsNoOp(t *testing.T) {
 	if out.NewHead != oldHead {
 		t.Fatalf("NewHead = %s, want unchanged %s (a no-op mints no new SHA)", out.NewHead, oldHead)
 	}
-	if out.BackupTag != "" {
-		t.Fatalf("backup tag %q created on a no-op resign, want none", out.BackupTag)
+	if out.BackupRef != "" {
+		t.Fatalf("backup ref %q created on a no-op resign, want none", out.BackupRef)
 	}
 	if out.Post == nil {
 		t.Fatalf("no-op resign carried no post-condition report")

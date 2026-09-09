@@ -31,4 +31,51 @@
 // Both rules skip a candidate that no longer exists on disk (e.g. a staged
 // deletion) rather than reporting or erroring, and both return an error
 // (never panic) if a qualifying candidate's content cannot be read.
+//
+// ScanCredentials adds a data-sensitivity taxonomy on top of the above
+// (Finding.Category): "credentials", "pii", and "financial". It shells out
+// to a betterleaks binary (an already-resolved, caller-provisioned absolute
+// path - this package never discovers or fetches it) over a compiled-in,
+// vendored base config (data/betterleaks-base.toml) that a caller's own
+// additive rules/allowlist entries can only ever extend, never weaken (see
+// betterleaks.go's doc comments for the full implicit-config bypass surfaces
+// this closes and how they were verified). betterleaks is the single
+// scanning engine for every category, including SSN ("pii") and credit
+// card/IBAN ("financial"): this package's own additional rules for those,
+// appended to the pristine upstream betterleaks catalog at the end of
+// data/betterleaks-base.toml, gate a structural regex match on a real
+// checksum (Luhn mod-10 for a credit card, ISO 7064 mod-97 for an IBAN) or a
+// real issued-range check (SSN area/group/serial) via each rule's own Expr
+// `filter`, exactly like every hand-reviewed heuristic already in that file.
+// Category is recovered purely from the firing rule's id (see
+// categoryForRuleID); every other scanner in this package leaves
+// Finding.Category empty.
+//
+// ScanCredentials optionally caches its per-file verdicts (BetterleaksCache,
+// wired via BetterleaksOptions.CacheDir - empty by default, so caching never
+// changes any existing caller's behavior). A cache entry's key is
+// sha256(pathHash || fileContentHash || mergedConfigHash ||
+// betterleaksBinaryHash): a file's scan result is only ever reused while its
+// own path and bytes, the effective merged config, and the betterleaks
+// binary itself all still match a prior scan. The path belongs in the key
+// because some betterleaks rules fire on it (see cacheKey). Each entry
+// stores only a rule id and description per finding - never the matched
+// secret value - exactly the same, already-non-sensitive fields a returned
+// Finding carries today.
+//
+// Two limits are deliberate in this first version, not oversights. The cache
+// never evicts: a superseded entry is left in place rather than deleted, so
+// the directory grows with every distinct version of every file ever
+// scanned, and pruning it is the caller's job. And the cache is trusted, not
+// verified: an entry is believed on read, so whoever can write to CacheDir
+// can plant a zero-findings verdict and suppress a real finding. Treat
+// CacheDir as being inside the same trust boundary as the scan itself.
+//
+// ScanOutcome.WarnOnCategorizedSecrets is BuildHookResult's rollout lever for
+// the categorized (betterleaks-sourced) half of Secrets: the scan itself
+// always runs, unconditionally, no matter this flag's value - it only ever
+// changes a categorized finding's severity, failing (the default, false,
+// unchanged from before this flag existed) or caveats (true). A finding with
+// no Category (ScanSecrets' pre-existing hand-rolled patterns) always stays a
+// hard failure, regardless of this flag.
 package githooks

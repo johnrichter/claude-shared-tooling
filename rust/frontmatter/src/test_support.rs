@@ -48,6 +48,7 @@ pub(crate) const SYNTHETIC_PACK_JSON: &str = r#"{
     { "name": "privacy", "cardinality": "singleton", "source": "test fixture" },
     { "name": "owner", "cardinality": "singleton", "source": "test fixture" },
     { "name": "topic", "cardinality": "at_least_one", "source": "test fixture" },
+    { "name": "lead", "cardinality": "at_most_one", "source": "test fixture" },
     { "name": "feature", "cardinality": "optional", "parents": ["product", "suite"], "source": "test fixture" },
     { "name": "product", "cardinality": "optional", "parents": ["suite"], "source": "test fixture" },
     { "name": "suite", "cardinality": "optional", "source": "test fixture" },

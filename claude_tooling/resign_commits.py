@@ -17,17 +17,19 @@ preserved verbatim, and the commit message is reproduced byte-for-byte.
 
 Safety model
 ------------
-Default is a DRY RUN. The tool detects unsigned commits, tags a backup of the current tip,
-rebuilds the signed history into a PARKED ref (``refs/rewrite/<ref>-signed``), verifies it
-exhaustively, and prints a report -- the target ref is NOT moved and nothing is pushed.
-Moving the branch requires ``--apply`` (and only if verification passed). The branch move is a
-compare-and-swap against the tip observed at detection, so a branch that advanced meanwhile is
-refused rather than clobbered. Pushing is left to the operator: force-push is guardrailed by
-design, so ``--print-push-cmd`` merely emits the exact ``--force-with-lease`` command to run.
+Default is a DRY RUN. The tool detects unsigned commits, writes a backup ref pointing at the
+current tip (a plain ``refs/backup/...`` ref via ``git update-ref`` -- never a tag object, so it
+never needs a GPG signature even when ``tag.gpgSign`` is on), rebuilds the signed history into a
+PARKED ref (``refs/rewrite/<ref>-signed``), verifies it exhaustively, and prints a report -- the
+target ref is NOT moved and nothing is pushed. Moving the branch requires ``--apply`` (and only
+if verification passed). The branch move is a compare-and-swap against the tip observed at
+detection, so a branch that advanced meanwhile is refused rather than clobbered. Pushing is left
+to the operator: force-push is guardrailed by design, so ``--print-push-cmd`` merely emits the
+exact ``--force-with-lease`` command to run.
 
 Verification (all must pass before --apply moves anything):
   * tip tree byte-identical to the original (``git diff`` empty)     -- content unchanged
-  * commit count and merge count preserved                           -- topology intact
+  * every rewritten commit still reachable from the new tip          -- topology intact
   * zero unsigned (``N``) and zero bad (``B``) signatures remain      -- the actual goal
   * every rebuilt commit's tree + author/committer/date/message match -- per-commit fidelity
   * the boundary commit is still an ancestor of the new tip           -- nothing below moved
@@ -37,11 +39,10 @@ Usage:
     python3 resign_commits.py --ref some-branch     # dry run over another ref
     python3 resign_commits.py --apply               # move the local ref after verify passes
     python3 resign_commits.py --apply --print-push-cmd
-    python3 resign_commits.py --no-backup           # skip the backup tag (not advised)
+    python3 resign_commits.py --no-backup           # skip the backup ref (not advised)
 
 Stdlib-only; shells out to `git`. Requires a working commit-signing config (`git commit -S`).
 """
-
 from __future__ import annotations
 
 import argparse
@@ -57,13 +58,17 @@ _IDENT_FMT = "%an%x00%ae%x00%ad%x00%cn%x00%ce%x00%cd"
 
 def git(args: list[str], *, cwd: str, check: bool = True) -> str:
     """Run git and return stdout as a stripped str."""
-    r = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=check)
+    r = subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, check=check
+    )
     return r.stdout.strip()
 
 
 def git_ok(args: list[str], *, cwd: str) -> bool:
     """Run git for its exit status only (0 -> True)."""
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True).returncode == 0
+    return subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True
+    ).returncode == 0
 
 
 def parents(sha: str, *, cwd: str) -> list[str]:
@@ -83,7 +88,7 @@ def raw_message(sha: str, *, cwd: str) -> bytes:
     raw = subprocess.run(
         ["git", "cat-file", "commit", sha], cwd=cwd, capture_output=True, check=True
     ).stdout
-    return raw[raw.index(b"\n\n") + 2 :]
+    return raw[raw.index(b"\n\n") + 2:]
 
 
 def find_unsigned(ref: str, *, cwd: str) -> list[str]:
@@ -129,11 +134,9 @@ def compute_base(unsigned: list[str], *, cwd: str) -> str | None:
 
 
 def rebuild(base: str | None, tip: str, *, cwd: str, sign: bool = True):
-    """Rebuild every commit in ``base..tip`` (or all of ``tip`` if base is None).
-
-    Rebuilds via ``git commit-tree``, reusing each original tree and remapping parents.
-    Returns ``(new_tip, mapping)`` where mapping is ``{old_sha: new_sha}``. Does NOT move any
-    ref.
+    """Rebuild every commit in ``base..tip`` (or all of ``tip`` if base is None) via
+    ``git commit-tree``, reusing each original tree and remapping parents. Returns
+    ``(new_tip, mapping)`` where mapping is ``{old_sha: new_sha}``. Does NOT move any ref.
     """
     rev_args = ["rev-list", "--topo-order", "--reverse"]
     rev_args.append(tip if base is None else f"{base}..{tip}")
@@ -150,12 +153,8 @@ def rebuild(base: str | None, tip: str, *, cwd: str, sign: bool = True):
             ["log", "-1", f"--format={_IDENT_FMT}", "--date=raw", old], cwd=cwd
         ).split(NUL)
         env_overrides = {
-            "GIT_AUTHOR_NAME": an,
-            "GIT_AUTHOR_EMAIL": ae,
-            "GIT_AUTHOR_DATE": ad,
-            "GIT_COMMITTER_NAME": cn,
-            "GIT_COMMITTER_EMAIL": ce,
-            "GIT_COMMITTER_DATE": cd,
+            "GIT_AUTHOR_NAME": an, "GIT_AUTHOR_EMAIL": ae, "GIT_AUTHOR_DATE": ad,
+            "GIT_COMMITTER_NAME": cn, "GIT_COMMITTER_EMAIL": ce, "GIT_COMMITTER_DATE": cd,
         }
         env = {**os.environ, **env_overrides}
 
@@ -165,10 +164,27 @@ def rebuild(base: str | None, tip: str, *, cwd: str, sign: bool = True):
         if sign:
             ct_args.append("-S")
         ct_args += p_args + [tree]
-        r = subprocess.run(ct_args, cwd=cwd, input=msg, capture_output=True, check=True, env=env)
+        r = subprocess.run(
+            ct_args, cwd=cwd, input=msg, capture_output=True, check=True, env=env
+        )
         mapping[old] = r.stdout.decode().strip()
 
     return mapping.get(tip, tip), mapping
+
+
+def _lost_commits(new_tip: str, mapping: dict[str, str], *, cwd: str) -> list[str]:
+    """Old SHAs whose rebuilt counterpart is not reachable from new_tip.
+
+    Reachability (`merge-base --is-ancestor`), not a raw commit/merge count, is what
+    actually proves no commit was dropped. The rebuild is NOT a shape-preserving remap:
+    `commit-tree` rebuilds each commit from scratch and does not carry over headers it
+    did not generate, so two commits that differed only in being signed collapse into a
+    single rebuilt commit, and a merge's two parent edges to them then dedup into one
+    (`commit-tree` drops duplicate parents). Total commit and merge counts drop while
+    every commit's content and metadata survive -- a bare count comparison reads that
+    legitimate simplification as data loss (LED-033), reachability does not.
+    """
+    return [old for old, new in mapping.items() if not git_ok(["merge-base", "--is-ancestor", new, new_tip], cwd=cwd)]
 
 
 def verify(old_tip: str, new_tip: str, base: str | None, mapping: dict[str, str], *, cwd: str):
@@ -184,14 +200,15 @@ def verify(old_tip: str, new_tip: str, base: str | None, mapping: dict[str, str]
     diff = git(["diff", "--stat", old_tip, new_tip], cwd=cwd)
     check("tip content diff empty", diff == "", diff.splitlines()[-1] if diff else "")
 
-    oc, nc = (
-        git(["rev-list", "--count", old_tip], cwd=cwd),
-        git(["rev-list", "--count", new_tip], cwd=cwd),
+    # A refusal reports both numbers and names the offending commits, so an operator never
+    # has to re-derive either by hand (the reason LED-033 cost a manual tree-hash audit).
+    lost = _lost_commits(new_tip, mapping, cwd=cwd)
+    shown = ", ".join(s[:12] for s in lost[:10]) + (", ..." if len(lost) > 10 else "")
+    check(
+        "every rewritten commit remains reachable from the new tip",
+        not lost,
+        f"{len(lost)} of {len(mapping)} rebuilt commits unreachable: {shown}" if lost else "",
     )
-    check("commit count preserved", oc == nc, f"old={oc} new={nc}")
-    om = git(["rev-list", "--merges", "--count", old_tip], cwd=cwd)
-    nm = git(["rev-list", "--merges", "--count", new_tip], cwd=cwd)
-    check("merge count preserved", om == nm, f"old={om} new={nm}")
 
     tally = git(["log", "--format=%G?", new_tip], cwd=cwd).splitlines()
     n_unsigned = sum(1 for f in tally if f == "N")
@@ -201,9 +218,7 @@ def verify(old_tip: str, new_tip: str, base: str | None, mapping: dict[str, str]
 
     tree_ok, meta_ok = True, True
     for old, new in mapping.items():
-        if git(["rev-parse", f"{old}^{{tree}}"], cwd=cwd) != git(
-            ["rev-parse", f"{new}^{{tree}}"], cwd=cwd
-        ):
+        if git(["rev-parse", f"{old}^{{tree}}"], cwd=cwd) != git(["rev-parse", f"{new}^{{tree}}"], cwd=cwd):
             tree_ok = False
         o_ident = git(["log", "-1", f"--format={_IDENT_FMT}", "--date=raw", old], cwd=cwd)
         n_ident = git(["log", "-1", f"--format={_IDENT_FMT}", "--date=raw", new], cwd=cwd)
@@ -216,10 +231,7 @@ def verify(old_tip: str, new_tip: str, base: str | None, mapping: dict[str, str]
     check("all author/committer/date/message preserved", meta_ok)
 
     if base is not None:
-        check(
-            "boundary is ancestor of new tip",
-            git_ok(["merge-base", "--is-ancestor", base, new_tip], cwd=cwd),
-        )
+        check("boundary is ancestor of new tip", git_ok(["merge-base", "--is-ancestor", base, new_tip], cwd=cwd))
 
     return results
 
@@ -229,25 +241,12 @@ def _sanitize(ref: str) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Main."""
-    ap = argparse.ArgumentParser(
-        description="Re-sign unsigned commits on a git ref (conflict-proof)."
-    )
+    ap = argparse.ArgumentParser(description="Re-sign unsigned commits on a git ref (conflict-proof).")
     ap.add_argument("--ref", default="main", help="Ref to repair (default: main).")
     ap.add_argument("--repo", default=None, help="Repo path (default: enclosing work tree).")
-    ap.add_argument(
-        "--apply",
-        action="store_true",
-        help="Move the local branch to the re-signed tip after verification passes.",
-    )
-    ap.add_argument(
-        "--print-push-cmd",
-        action="store_true",
-        help="Print the exact --force-with-lease push command (does not push).",
-    )
-    ap.add_argument(
-        "--no-backup", action="store_true", help="Skip creating the backup tag (not advised)."
-    )
+    ap.add_argument("--apply", action="store_true", help="Move the local branch to the re-signed tip after verification passes.")
+    ap.add_argument("--print-push-cmd", action="store_true", help="Print the exact --force-with-lease push command (does not push).")
+    ap.add_argument("--no-backup", action="store_true", help="Skip creating the backup ref (not advised).")
     args = ap.parse_args(argv)
 
     cwd = args.repo or git(["rev-parse", "--show-toplevel"], cwd=".")
@@ -263,9 +262,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.no_backup:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        backup = f"backup/{_sanitize(args.ref)}-pre-resign-{stamp}"
-        git(["tag", "-f", backup, tip], cwd=cwd)
-        print(f"Backup tag: {backup} -> {tip[:12]}")
+        # A plain ref under refs/backup/, written via update-ref -- not `git tag`. A tag
+        # object would (a) require a real GPG signature for this disposable marker whenever
+        # tag.gpgSign is on, and (b) live in refs/tags/, a namespace this tool has no business
+        # writing to for a throwaway recovery point.
+        backup = f"refs/backup/{_sanitize(args.ref)}-pre-resign-{stamp}"
+        git(["update-ref", backup, tip], cwd=cwd)
+        print(f"Backup ref: {backup} -> {tip[:12]}")
 
     new_tip, mapping = rebuild(base, tip, cwd=cwd)
     parked = f"refs/rewrite/{_sanitize(args.ref)}-signed"
@@ -277,34 +280,21 @@ def main(argv: list[str] | None = None) -> int:
         suffix = f"  ({detail})" if detail and not passed else ""
         print(f"  [{'PASS' if passed else 'FAIL'}] {name}{suffix}")
     if not all(ok for _, ok, _ in results):
-        print(
-            "VERIFICATION FAILED — target ref NOT moved. Investigate before applying.",
-            file=sys.stderr,
-        )
+        print("VERIFICATION FAILED — target ref NOT moved. Investigate before applying.", file=sys.stderr)
         return 1
     print("VERIFICATION PASSED.")
 
     if args.apply:
         if not git_ok(["show-ref", "--verify", "--quiet", f"refs/heads/{args.ref}"], cwd=cwd):
-            print(
-                f"--apply skipped: {args.ref} is not a local branch (parked ref left at {parked}).",
-                file=sys.stderr,
-            )
+            print(f"--apply skipped: {args.ref} is not a local branch (parked ref left at {parked}).", file=sys.stderr)
             return 1
         # Compare-and-swap: refuse the move if the branch advanced since detection (the
         # rebuild was computed from `tip`; moving to new_tip would otherwise drop any commit
         # added in between). git update-ref with an expected old value is atomic.
         if not git_ok(["update-ref", f"refs/heads/{args.ref}", new_tip, tip], cwd=cwd):
-            print(
-                f"--apply aborted: {args.ref} moved since detection (expected {tip[:12]}); nothing "
-                f"changed. Re-run.",
-                file=sys.stderr,
-            )
+            print(f"--apply aborted: {args.ref} moved since detection (expected {tip[:12]}); nothing changed. Re-run.", file=sys.stderr)
             return 1
-        print(
-            f"Applied: refs/heads/{args.ref} -> {new_tip[:12]}  (working tree unchanged; trees "
-            f"identical)"
-        )
+        print(f"Applied: refs/heads/{args.ref} -> {new_tip[:12]}  (working tree unchanged; trees identical)")
     else:
         print(f"Dry run — ref not moved. To apply:  git update-ref refs/heads/{args.ref} {new_tip}")
 

@@ -71,14 +71,14 @@ func (r *Repo) Rebase(ctx context.Context, upstream string, opts RebaseOptions) 
 			commits = strings.Split(out, "\n")
 		}
 		return &RebaseResult{
-			RewriteOutcome: &RewriteOutcome{Ref: ref, OldHead: oldHead, BackupTag: backupTagName(ref, oldHead), DryRun: true},
+			RewriteOutcome: &RewriteOutcome{Ref: ref, OldHead: oldHead, BackupRef: backupRefName(ref, oldHead), DryRun: true},
 			Commits:        commits,
 		}, nil
 	}
 
-	tag := backupTagName(ref, oldHead)
-	if _, err := r.git(ctx, "tag", tag, oldHead); err != nil {
-		return nil, fmt.Errorf("git: backup-tag %s before rebasing %s: %w", tag, ref, err)
+	backupRef := backupRefName(ref, oldHead)
+	if _, err := r.git(ctx, "update-ref", backupRef, oldHead); err != nil {
+		return nil, fmt.Errorf("git: backup-ref %s before rebasing %s: %w", backupRef, ref, err)
 	}
 
 	args := []string{"rebase"}
@@ -104,7 +104,7 @@ func (r *Repo) Rebase(ctx context.Context, upstream string, opts RebaseOptions) 
 		return nil, err
 	}
 
-	out := &RewriteOutcome{Ref: ref, OldHead: oldHead, NewHead: newHead, BackupTag: tag}
+	out := &RewriteOutcome{Ref: ref, OldHead: oldHead, NewHead: newHead, BackupRef: backupRef}
 	if opts.Sync == SyncEmitForceWithLease {
 		remote := opts.Remote
 		if remote == "" {

@@ -31,6 +31,13 @@
       "meaning": "namespace may appear zero or more times; still subject to parent-dependency and conditional rule-set rules",
       "codes": {},
       "source": "CLAUDE.md Tagging Strategy — namespaces marked optional/❌"
+    },
+    "at_most_one": {
+      "min": 0,
+      "max": 1,
+      "meaning": "namespace may be absent, or appear exactly once; never required, but never allowed to conflict with itself",
+      "codes": { "excess": "MULTIPLE_SINGLE_VALUE_TAGS" },
+      "source": "distinct from both singleton (absence is a violation) and optional (two or more values would be silently accepted); absence is fine, more than one emits MULTIPLE_SINGLE_VALUE_TAGS"
     }
   },
   "authorship": {
@@ -88,6 +95,14 @@
       "source": "the at_least_one_cardinality mechanism above"
     },
     {
+      "step": "at_most_one_cardinality",
+      "iterate": "namespaces where cardinality == 'at_most_one', in pack-declared array order",
+      "emit": [
+        { "when": "count > 1", "code": "MULTIPLE_SINGLE_VALUE_TAGS", "field": "{namespace}", "message": "'{namespace}:' must appear at most once, found {count}: {tags}" }
+      ],
+      "source": "the at_most_one_cardinality mechanism above"
+    },
+    {
       "step": "parent_dependency",
       "iterate": "namespaces that declare a non-empty `parents`, in pack-declared array order; for each, iterate its `parents` in listed order",
       "emit": [
@@ -136,7 +151,7 @@
   },
   "codes": [
     { "code": "MISSING_REQUIRED_TAG", "meaning": "a required tag namespace (singleton, at_least_one, or a rule-set's require_namespaces) is absent", "source": "cardinality + rule_set_required phases" },
-    { "code": "MULTIPLE_SINGLE_VALUE_TAGS", "meaning": "a singleton namespace appears more than once", "source": "singleton_cardinality phase" },
+    { "code": "MULTIPLE_SINGLE_VALUE_TAGS", "meaning": "a singleton or at_most_one namespace appears more than once", "source": "singleton_cardinality or at_most_one_cardinality phase" },
     { "code": "ORPHAN_NAMESPACE_TAG", "meaning": "a child namespace is used without a required parent namespace", "source": "parent_dependency phase" },
     { "code": "REPORT_ONLY_TAG_MISUSED", "meaning": "a namespace a rule-set forbids outside its match (forbidden_unless_matched) appears on a non-matching file", "source": "rule_set_forbidden phase" },
     { "code": "INVALID_PERIOD_FORMAT", "meaning": "a rule-set value_format check failed for a tag on a matching file", "source": "rule_set_value_format phase" },

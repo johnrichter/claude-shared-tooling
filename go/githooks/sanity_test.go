@@ -19,10 +19,17 @@ import (
 // otherwise refuse the merge that ships the allowlist. The concatenation
 // changes nothing about the value under test.
 var (
-	fixtureAWSKey      = "AKIA" + "ABCDEFGHIJKLMNOP" // AKIA + 16 chars -> matches the AWS key pattern
-	fixtureAWSDocKey   = "AKIAIOSFODNN7" + "EXAMPLE" // AWS's reserved doc placeholder -> allowlisted
-	fixtureAWSNearMiss = "AKIAIOSFODNN7EXAMPL" + "F" // one char off the placeholder -> not allowlisted
-	fixturePEMKey      = "-----BEGIN " + "RSA PRIVATE " + "KEY-----"
+	fixtureAWSKey          = "AKIA" + "ABCDEFGHIJKLMNOP"    // AKIA + 16 chars -> matches the AWS key pattern
+	fixtureAWSDocKey       = "AKIAIOSFODNN7" + "EXAMPLE"    // AWS's reserved doc placeholder -> allowlisted
+	fixtureAWSNearMiss     = "AKIAIOSFODNN7EXAMPL" + "F"    // one char off the placeholder -> not allowlisted
+	fixtureSlackDocToken   = "xoxb-ab59" + "EXAMPLETOKEN"   // a scanner tool's own documented Slack-token example -> allowlisted
+	fixtureSlackRealShaped = "xoxb-ab59" + "REALLOOKINGABC" // same prefix and length class, not the placeholder -> not allowlisted
+	// fixturePEMKeyBody is a fabricated, structurally-real-shaped (never a
+	// real key) base64 run over 40 characters, matching a real PEM's first
+	// wrapped line - the body content the private_key_block pattern now
+	// requires immediately after the header.
+	fixturePEMKeyBody = "MIIEpAIBAAKCAQEA1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJ"
+	fixturePEMKey     = "-----BEGIN " + "RSA PRIVATE " + "KEY-----" + "\n" + fixturePEMKeyBody
 )
 
 func writeFile(t *testing.T, dir, rel, content string) string {
@@ -44,7 +51,7 @@ func TestScanSecretsDetectsPlantedSecret(t *testing.T) {
 	writeFile(t, dir, "src/leak.txt", "aws_key = "+fixtureAWSKey+"\n")
 	writeFile(t, dir, "src/clean.txt", "nothing to see here\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -61,7 +68,7 @@ func TestScanSecretsExemptsAWSDocPlaceholder(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "docs/example.md", "aws_access_key_id = "+fixtureAWSDocKey+"\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -78,12 +85,64 @@ func TestScanSecretsStillFlagsRealShapedKey(t *testing.T) {
 	fixtureOtherKey := "AKIA" + "JXNH2K3LQZABCDEF" // AKIA + 16 chars, not the placeholder
 	writeFile(t, dir, "src/leak.txt", "aws_key = "+fixtureOtherKey+"\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
 	if len(got) != 1 || got[0].Path != "src/leak.txt" || got[0].Rule != "aws_access_key_id" {
 		t.Fatalf("got %+v, want one aws_access_key_id finding at src/leak.txt", got)
+	}
+}
+
+// TestScanSecretsExemptsSlackDocPlaceholder confirms a third-party scanner
+// tool's own documented Slack-token example format never triggers a finding,
+// so it stops false-positiving in a corpus that ingests that tool's own
+// rule-definition file.
+func TestScanSecretsExemptsSlackDocPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "docs/example.md", "Example of matching format: `"+fixtureSlackDocToken+"`\n")
+
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
+	if err != nil {
+		t.Fatalf("ScanSecrets: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %+v, want no findings for the Slack doc placeholder token", got)
+	}
+}
+
+// TestScanSecretsStillFlagsRealShapedSlackToken confirms the placeholder
+// exemption is exact, not a weakening of the general Slack-token-shape
+// detection: a different token of the same prefix and length class still
+// triggers.
+func TestScanSecretsStillFlagsRealShapedSlackToken(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "src/leak.txt", "slack_token = "+fixtureSlackRealShaped+"\n")
+
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
+	if err != nil {
+		t.Fatalf("ScanSecrets: %v", err)
+	}
+	if len(got) != 1 || got[0].Path != "src/leak.txt" || got[0].Rule != "slack_token" {
+		t.Fatalf("got %+v, want one slack_token finding at src/leak.txt", got)
+	}
+}
+
+// TestScanSecretsStillFlagsSlackPlaceholderWithAppendedChars pins a boundary
+// case specific to the Slack pattern, which the AWS tests cannot cover: the
+// Slack regex has no trailing \b, so a longer token that merely starts with
+// the placeholder must still be flagged. Greedy matching consumes the whole
+// token-character run, so the compared match is not the exempt string.
+func TestScanSecretsStillFlagsSlackPlaceholderWithAppendedChars(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "src/leak.txt", "slack_token = "+fixtureSlackDocToken+"DEADBEEF\n")
+
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
+	if err != nil {
+		t.Fatalf("ScanSecrets: %v", err)
+	}
+	if len(got) != 1 || got[0].Path != "src/leak.txt" || got[0].Rule != "slack_token" {
+		t.Fatalf("got %+v, want one slack_token finding at src/leak.txt", got)
 	}
 }
 
@@ -94,7 +153,7 @@ func TestScanSecretsStillFlagsNearMissOfPlaceholder(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "src/leak.txt", "aws_key = "+fixtureAWSNearMiss+"\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -113,7 +172,7 @@ func TestScanSecretsRealKeyAlongsidePlaceholderStillFlagged(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "docs/mixed.md", "example: "+fixtureAWSDocKey+"\nreal: "+fixtureAWSKey+"\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -138,7 +197,7 @@ func TestScanSecretsPlaceholderWithoutWordBoundaryIsNotExempted(t *testing.T) {
 	writeFile(t, dir, "src/a.txt", "x"+fixtureAWSDocKey+"x\n")
 	writeFile(t, dir, "src/b.txt", fixtureAWSDocKey+"123\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -154,7 +213,7 @@ func TestScanSecretsCleanFixturePasses(t *testing.T) {
 	writeFile(t, dir, "README.md", "# Project\n\nNo secrets here.\n")
 	writeFile(t, dir, "src/main.go", "package main\n\nfunc main() {}\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -169,7 +228,7 @@ func TestScanSecretsSkipsExcludedDirs(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "node_modules/pkg/secret.txt", fixturePEMKey+"\n")
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -213,35 +272,75 @@ func TestScanRawBinaryCleanFixturePasses(t *testing.T) {
 	}
 }
 
-// TestScanPrivacyTierIsParameterized confirms the same file fails under the
-// stricter public tier and passes under the looser datadog and personal
-// tiers - the tier is a caller-supplied parameter, not a hardcoded value.
+// TestScanPrivacyTierIsParameterized confirms the same privacy:private file
+// fails under both the public and confidential tiers - private is more
+// sensitive than either - and passes only under the private tier itself: the
+// tier is a caller-supplied parameter, not a hardcoded value.
 func TestScanPrivacyTierIsParameterized(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "doc.md", "---\nprivacy: confidential\n---\n\nbody\n")
+	writeFile(t, dir, "doc.md", "---\nprivacy: private\n---\n\nbody\n")
 
 	pubFail, _, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
 	if err != nil {
 		t.Fatalf("ScanPrivacy(public): %v", err)
 	}
 	if len(pubFail) == 0 {
-		t.Fatalf("want a public-tier failure for privacy:confidential")
+		t.Fatalf("want a public-tier failure for privacy:private")
 	}
 
-	ddFail, _, err := ScanPrivacy(dir, TierDatadog, PrivacyOptions{SkipRules: DefaultSkipRules})
+	confFail, _, err := ScanPrivacy(dir, TierConfidential, PrivacyOptions{SkipRules: DefaultSkipRules})
 	if err != nil {
-		t.Fatalf("ScanPrivacy(datadog): %v", err)
+		t.Fatalf("ScanPrivacy(confidential): %v", err)
 	}
-	if len(ddFail) == 0 {
-		t.Fatalf("want a datadog-tier failure for privacy:confidential")
+	if len(confFail) == 0 {
+		t.Fatalf("want a confidential-tier failure for privacy:private")
 	}
 
-	personalFail, _, err := ScanPrivacy(dir, TierPersonal, PrivacyOptions{SkipRules: DefaultSkipRules})
+	privateFail, _, err := ScanPrivacy(dir, TierPrivate, PrivacyOptions{SkipRules: DefaultSkipRules})
 	if err != nil {
-		t.Fatalf("ScanPrivacy(personal): %v", err)
+		t.Fatalf("ScanPrivacy(private): %v", err)
 	}
-	if len(personalFail) != 0 {
-		t.Fatalf("got %+v, want personal tier to allow any privacy value", personalFail)
+	if len(privateFail) != 0 {
+		t.Fatalf("got %+v, want private tier to allow any privacy value", privateFail)
+	}
+}
+
+// TestScanPrivacyConfidentialTierAllowsOwnConfidentialMarker confirms a
+// confidential-tier repo's own privacy:confidential frontmatter tag is not a
+// violation - it matches the repo's own declared posture, not a more
+// sensitive one.
+func TestScanPrivacyConfidentialTierAllowsOwnConfidentialMarker(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "---\nprivacy: confidential\n---\n\nbody\n")
+
+	failures, _, err := ScanPrivacy(dir, TierConfidential, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(failures) != 0 {
+		t.Fatalf("got %+v, want no failure for privacy:confidential at the confidential tier", failures)
+	}
+}
+
+// TestScanPrivacyPublicTierForbidsPrivateMarker confirms the public tier
+// catches the most sensitive value even when it appears alone, without also
+// needing an intervening confidential tag - the gap this fix closes.
+func TestScanPrivacyPublicTierForbidsPrivateMarker(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "---\nprivacy: private\n---\n\nbody\n")
+
+	failures, _, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	var sawMarker bool
+	for _, f := range failures {
+		if f.Rule == "forbidden_marker" {
+			sawMarker = true
+		}
+	}
+	if !sawMarker {
+		t.Fatalf("got %+v, want a forbidden_marker failure for privacy:private at the public tier", failures)
 	}
 }
 
@@ -297,7 +396,7 @@ func TestScanPrivacyMarkerExemptDirSkipsMarkerCheckOnly(t *testing.T) {
 func TestScanPrivacySecretExemptDirSkipsSecretCheckOnly(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "corpus/case.md", "---\nprivacy: confidential\n---\n\n"+
-		fixtureAWSKey+"\ncontact: eng@datadoghq.com\n")
+		fixtureAWSKey+"\nsee host.corp for details\n")
 	exempt := []fsx.Rule{{Pattern: "corpus/**", Class: SkipClass}}
 
 	failures, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules, SecretExemptRules: exempt})
@@ -384,7 +483,7 @@ func TestScanSecretsHonorsSecretExemptRules(t *testing.T) {
 	writeFile(t, dir, "src/leak.md", fixtureAWSKey+"\n")
 	exempt := []fsx.Rule{{Pattern: "corpus/**", Class: SkipClass}}
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, exempt)
+	got, err := ScanSecrets(dir, DefaultSkipRules, exempt, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -397,7 +496,7 @@ func TestScanSecretsHonorsSecretExemptRules(t *testing.T) {
 // file yields no failures and no warnings.
 func TestScanPrivacyCleanFixturePasses(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "doc.md", "---\nprivacy: public\nowner: public\n---\n\nNothing sensitive.\n")
+	writeFile(t, dir, "doc.md", "---\nprivacy: public\n---\n\nNothing sensitive.\n")
 
 	failures, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
 	if err != nil {
@@ -445,6 +544,69 @@ func TestBuildHookResultFailureIsWellFormed(t *testing.T) {
 	assertCanonicalJSON(t, result)
 }
 
+// TestBuildHookResultErrorContextCarriesCategory confirms a finding's
+// Category reaches its governing error's Context under the same "category"
+// key a downstream consumer already reads "path" and "rule" from - and that
+// a finding kind which never sets Category (forbidden_marker, here) still
+// yields the key with an empty value rather than a differently-shaped
+// Context, matching path/rule's own always-present convention.
+func TestBuildHookResultErrorContextCarriesCategory(t *testing.T) {
+	outcome := ScanOutcome{
+		Secrets: []Finding{{Path: "a.txt", Rule: "widget_pattern", Detail: "possible widget leak", Category: "widgets"}},
+		PrivacyFailures: []Finding{
+			{Path: "c.md", Rule: "forbidden_marker", Detail: `forbidden frontmatter marker "privacy: confidential"`},
+		},
+	}
+	result, err := BuildHookResult([]string{"githooks", "scan"}, outcome)
+	if err != nil {
+		t.Fatalf("BuildHookResult: %v", err)
+	}
+	if len(result.Errors) != 2 {
+		t.Fatalf("got %d errors, want one per finding (2)", len(result.Errors))
+	}
+	var sawWidget, sawMarker bool
+	for _, e := range result.Errors {
+		switch e.Context["path"] {
+		case "a.txt":
+			sawWidget = true
+			if e.Context["category"] != "widgets" {
+				t.Fatalf("Context[category] = %v, want %q", e.Context["category"], "widgets")
+			}
+		case "c.md":
+			sawMarker = true
+			if e.Context["category"] != "" {
+				t.Fatalf("Context[category] = %v, want empty for a finding with no Category", e.Context["category"])
+			}
+		}
+	}
+	if !sawWidget || !sawMarker {
+		t.Fatalf("got %+v, want both findings represented", result.Errors)
+	}
+	assertCanonicalJSON(t, result)
+}
+
+// TestBuildHookResultCaveatContextCarriesCategory mirrors
+// TestBuildHookResultErrorContextCarriesCategory for the caveats path built
+// from PrivacyWarnings: internal_identifier findings leave Category empty
+// today, and that must keep producing an empty (not absent, not error)
+// "category" entry alongside "path" and "rule".
+func TestBuildHookResultCaveatContextCarriesCategory(t *testing.T) {
+	outcome := ScanOutcome{
+		PrivacyWarnings: []Finding{{Path: "a.md", Rule: "internal_identifier", Detail: "internal identifier — internal hostname"}},
+	}
+	result, err := BuildHookResult([]string{"githooks", "scan"}, outcome)
+	if err != nil {
+		t.Fatalf("BuildHookResult: %v", err)
+	}
+	if len(result.Caveats) != 1 {
+		t.Fatalf("got %d caveats, want 1", len(result.Caveats))
+	}
+	if got := result.Caveats[0].Context["category"]; got != "" {
+		t.Fatalf("Context[category] = %v, want empty for an internal_identifier finding", got)
+	}
+	assertCanonicalJSON(t, result)
+}
+
 // TestBuildHookResultWarningsOnlyIsCaveats confirms privacy warnings alone
 // (no failures, non-strict) build a caveats record, not success or failure.
 func TestBuildHookResultWarningsOnlyIsCaveats(t *testing.T) {
@@ -475,6 +637,128 @@ func TestBuildHookResultStrictEscalatesWarnings(t *testing.T) {
 	if result.ExitCode != 30 {
 		t.Fatalf("ExitCode = %d, want 30 (precondition_unmet) once Strict escalates the warning", result.ExitCode)
 	}
+}
+
+// mixedSecretsOutcome builds a ScanOutcome carrying one uncategorized (old-
+// style ScanSecrets) finding and one categorized (betterleaks-sourced)
+// finding, shared by the WarnOnCategorizedSecrets tests below.
+func mixedSecretsOutcome() ScanOutcome {
+	return ScanOutcome{
+		Secrets: []Finding{
+			{Path: "a.txt", Rule: "fixture-widget-rule", Detail: "possible widget leak"},
+			{Path: "b.txt", Rule: "fixture-widget-rule", Detail: "possible widget leak, categorized", Category: "credentials"},
+		},
+	}
+}
+
+// TestBuildHookResultWarnOnCategorizedSecretsDefaultUnchanged confirms the
+// unset (false) default produces a byte-identical result, categorized and
+// uncategorized findings both failing, to a call that never mentions the new
+// field at all - the compatibility guarantee this flag exists to protect.
+func TestBuildHookResultWarnOnCategorizedSecretsDefaultUnchanged(t *testing.T) {
+	command := []string{"githooks", "scan"}
+	outcome := mixedSecretsOutcome()
+
+	withoutField := outcome
+	withField := outcome
+	withField.WarnOnCategorizedSecrets = false
+
+	got, err := BuildHookResult(command, withoutField)
+	if err != nil {
+		t.Fatalf("BuildHookResult(false): %v", err)
+	}
+	want, err := BuildHookResult(command, withField)
+	if err != nil {
+		t.Fatalf("BuildHookResult(unset): %v", err)
+	}
+
+	gotJSON, err := got.MarshalCanonical()
+	if err != nil {
+		t.Fatalf("MarshalCanonical(got): %v", err)
+	}
+	wantJSON, err := want.MarshalCanonical()
+	if err != nil {
+		t.Fatalf("MarshalCanonical(want): %v", err)
+	}
+	if !bytes.Equal(gotJSON, wantJSON) {
+		t.Fatalf("unset default diverges from explicit false:\ngot:  %s\nwant: %s", gotJSON, wantJSON)
+	}
+	if got.ExitCode != 30 || len(got.Errors) != 2 || len(got.Caveats) != 0 {
+		t.Fatalf("got ExitCode=%d Errors=%d Caveats=%d, want a hard failure covering both findings",
+			got.ExitCode, len(got.Errors), len(got.Caveats))
+	}
+}
+
+// TestBuildHookResultWarnOnCategorizedSecretsSplitsByCategory confirms true
+// moves only the categorized finding to caveats, leaving the uncategorized
+// one failing, in a single mixed call.
+func TestBuildHookResultWarnOnCategorizedSecretsSplitsByCategory(t *testing.T) {
+	outcome := mixedSecretsOutcome()
+	outcome.WarnOnCategorizedSecrets = true
+
+	result, err := BuildHookResult([]string{"githooks", "scan"}, outcome)
+	if err != nil {
+		t.Fatalf("BuildHookResult: %v", err)
+	}
+	if result.ExitCode != 30 {
+		t.Fatalf("ExitCode = %d, want 30 (precondition_unmet, the uncategorized finding still fails)", result.ExitCode)
+	}
+	if len(result.Errors) != 1 || result.Errors[0].Context["path"] != "a.txt" {
+		t.Fatalf("got %+v, want exactly one error, at a.txt (the uncategorized finding)", result.Errors)
+	}
+	if len(result.Caveats) != 1 || result.Caveats[0].Context["path"] != "b.txt" {
+		t.Fatalf("got %+v, want exactly one caveat, at b.txt (the categorized finding)", result.Caveats)
+	}
+	if result.Caveats[0].Context["category"] != "credentials" {
+		t.Fatalf("Caveats[0].Context[category] = %v, want %q", result.Caveats[0].Context["category"], "credentials")
+	}
+	assertCanonicalJSON(t, result)
+}
+
+// TestBuildHookResultWarnOnCategorizedSecretsOnlyIsCaveats confirms an
+// outcome with only categorized findings, under WarnOnCategorizedSecrets, is
+// no longer a hard failure - it funnels through the same warnings-only
+// caveats path as PrivacyWarnings, not a bespoke status computation.
+func TestBuildHookResultWarnOnCategorizedSecretsOnlyIsCaveats(t *testing.T) {
+	outcome := ScanOutcome{
+		Secrets:                  []Finding{{Path: "b.txt", Rule: "fixture-widget-rule", Detail: "abstract-fixture-value", Category: "pii"}},
+		WarnOnCategorizedSecrets: true,
+	}
+	result, err := BuildHookResult([]string{"githooks", "scan"}, outcome)
+	if err != nil {
+		t.Fatalf("BuildHookResult: %v", err)
+	}
+	if result.ExitCode != 10 {
+		t.Fatalf("ExitCode = %d, want 10 (caveats), not a hard failure", result.ExitCode)
+	}
+	if len(result.Errors) != 0 || len(result.Caveats) != 1 {
+		t.Fatalf("got Errors=%d Caveats=%d, want zero errors and one caveat", len(result.Errors), len(result.Caveats))
+	}
+	assertCanonicalJSON(t, result)
+}
+
+// TestBuildHookResultStrictDoesNotReescalateCategorizedSecretWarning confirms
+// the documented no-interaction claim: Strict and WarnOnCategorizedSecrets
+// each govern their own finding class independently, so a categorized secret
+// demoted to a caveat is not re-escalated to failing merely because Strict is
+// also set (Strict only ever touches PrivacyWarnings).
+func TestBuildHookResultStrictDoesNotReescalateCategorizedSecretWarning(t *testing.T) {
+	outcome := ScanOutcome{
+		Secrets:                  []Finding{{Path: "b.txt", Rule: "fixture-widget-rule", Detail: "abstract-fixture-value", Category: "financial"}},
+		Strict:                   true,
+		WarnOnCategorizedSecrets: true,
+	}
+	result, err := BuildHookResult([]string{"githooks", "scan"}, outcome)
+	if err != nil {
+		t.Fatalf("BuildHookResult: %v", err)
+	}
+	if result.ExitCode != 10 {
+		t.Fatalf("ExitCode = %d, want 10 (caveats): Strict must not re-escalate a categorized secret warning", result.ExitCode)
+	}
+	if len(result.Errors) != 0 || len(result.Caveats) != 1 {
+		t.Fatalf("got Errors=%d Caveats=%d, want zero errors and one caveat", len(result.Errors), len(result.Caveats))
+	}
+	assertCanonicalJSON(t, result)
 }
 
 // TestEmitHookResultWritesCanonicalJSONLine confirms EmitHookResult writes

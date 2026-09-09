@@ -52,7 +52,7 @@ func TestScanSecretsDetectsAllSignatureShapes(t *testing.T) {
 	writeFile(t, dir, "pem.txt", fixturePEMKey+"\n-----END RSA PRIVATE KEY-----\n")
 	writeFile(t, dir, "near-miss.txt", "ghp_tooshort\nAKIA123\n") // too short for either signature
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestScanSecretsSkipsNonUTF8Binary(t *testing.T) {
 	invalid := append([]byte(fixtureAWSKey), 0xff, 0xfe, 0x00)
 	writeFile(t, dir, "blob.dat", string(invalid))
 
-	got, err := ScanSecrets(dir, DefaultSkipRules, nil)
+	got, err := ScanSecrets(dir, DefaultSkipRules, nil, nil)
 	if err != nil {
 		t.Fatalf("ScanSecrets: %v", err)
 	}
@@ -153,52 +153,455 @@ func TestScanPrivacyUnknownTierErrors(t *testing.T) {
 	}
 }
 
-// TestScanPrivacyPersonalTierAllowsInternalMarkers confirms the loosest tier
+// TestScanPrivacyPrivateTierAllowsInternalMarkers confirms the loosest tier
 // raises neither a forbidden-marker failure nor an internal-identifier
-// warning for content the public/datadog tiers would flag.
-func TestScanPrivacyPersonalTierAllowsInternalMarkers(t *testing.T) {
+// warning for content the public/confidential tiers would flag.
+func TestScanPrivacyPrivateTierAllowsInternalMarkers(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "doc.md", "---\nprivacy: confidential\nowner: personal\n---\n\nsee host.corp and jane@datadoghq.com\n")
+	writeFile(t, dir, "doc.md", "---\nprivacy: confidential\n---\n\nsee host.corp and jane@example.com\n")
 
-	failures, warnings, err := ScanPrivacy(dir, TierPersonal, PrivacyOptions{SkipRules: DefaultSkipRules})
+	failures, warnings, err := ScanPrivacy(dir, TierPrivate, PrivacyOptions{SkipRules: DefaultSkipRules})
 	if err != nil {
 		t.Fatalf("ScanPrivacy: %v", err)
 	}
 	if len(failures) != 0 || len(warnings) != 0 {
-		t.Fatalf("got failures=%+v warnings=%+v, want personal tier fully permissive", failures, warnings)
+		t.Fatalf("got failures=%+v warnings=%+v, want private tier fully permissive", failures, warnings)
 	}
 }
 
-// TestScanPrivacyDatadogTierAllowsInternalHostnameButFlagsPrivateNetwork
-// confirms the relaxed datadog-tier internal-id posture: an internal
-// hostname/email is expected in an org-shared repo (no warning), but a
-// private-network URL is still flagged.
-func TestScanPrivacyDatadogTierAllowsInternalHostnameButFlagsPrivateNetwork(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "doc.md", "see host.corp and jane@datadoghq.com and http://10.0.0.5/admin\n")
+// TestScanPrivacyForbiddenMarkerTierMatrix pins the whole forbidden-marker
+// rule in one place: a tier forbids exactly those privacy values naming a
+// tier MORE sensitive than its own, and nothing else. It covers the clauses
+// no single-case test reaches - that the public tier still catches the legacy
+// "internal" value, that the confidential tier forbids "private" alone (not
+// "internal", and not its own "confidential"), and that every alternative is
+// word-boundary-anchored, so a value merely prefixed by a forbidden one
+// ("privateish", "internally") is never a marker match.
+//
+// Only forbidden_marker findings are inspected: the public tier's separate
+// not_public_pair check fails most of these files for an unrelated reason,
+// and would otherwise mask a lost marker alternative.
+func TestScanPrivacyForbiddenMarkerTierMatrix(t *testing.T) {
+	// forbiddenAt is the set of tiers each value is a forbidden marker for.
+	cases := []struct {
+		value       string
+		forbiddenAt []PrivacyTier
+	}{
+		{"public", nil},
+		{"internal", []PrivacyTier{TierPublic}},
+		{"confidential", []PrivacyTier{TierPublic}},
+		{"private", []PrivacyTier{TierPublic, TierConfidential}},
+		{"PRIVATE", []PrivacyTier{TierPublic, TierConfidential}},
+		{"restricted", nil},
+		{"privateish", nil},
+		{"internally", nil},
+		{"confidentially", nil},
+	}
+	for _, tc := range cases {
+		for _, tier := range []PrivacyTier{TierPublic, TierConfidential, TierPrivate} {
+			t.Run(string(tier)+"/"+tc.value, func(t *testing.T) {
+				dir := t.TempDir()
+				writeFile(t, dir, "doc.md", "---\nprivacy: "+tc.value+"\n---\n\nbody\n")
 
-	_, warnings, err := ScanPrivacy(dir, TierDatadog, PrivacyOptions{SkipRules: DefaultSkipRules})
+				failures, _, err := ScanPrivacy(dir, tier, PrivacyOptions{SkipRules: DefaultSkipRules})
+				if err != nil {
+					t.Fatalf("ScanPrivacy: %v", err)
+				}
+				var markers int
+				for _, f := range failures {
+					if f.Rule == "forbidden_marker" {
+						markers++
+					}
+				}
+				want := 0
+				for _, forbidden := range tc.forbiddenAt {
+					if forbidden == tier {
+						want = 1
+					}
+				}
+				if markers != want {
+					t.Fatalf("privacy: %s at tier %s: got %d forbidden_marker findings (%+v), want %d", tc.value, tier, markers, failures, want)
+				}
+			})
+		}
+	}
+}
+
+// TestScanPrivacyConfidentialTierAllowsInternalHostnameButFlagsPrivateNetwork
+// confirms the relaxed confidential-tier internal-id posture: an internal
+// hostname is expected in an org-shared repo (no warning), but a
+// private-network URL is still flagged.
+func TestScanPrivacyConfidentialTierAllowsInternalHostnameButFlagsPrivateNetwork(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "see host.corp and http://10.0.0.5/admin\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierConfidential, PrivacyOptions{SkipRules: DefaultSkipRules})
 	if err != nil {
 		t.Fatalf("ScanPrivacy: %v", err)
 	}
 	if len(warnings) != 1 || warnings[0].Rule != "internal_identifier" {
-		t.Fatalf("got %+v, want exactly one private-network warning under datadog tier", warnings)
+		t.Fatalf("got %+v, want exactly one private-network warning under confidential tier", warnings)
 	}
 }
 
-// TestScanPrivacyPublicEmailAllowlistExemptByExactAddressOnly confirms an
-// enumerated public role address at the org domain is never flagged, while a
-// different address at the same domain still is.
-func TestScanPrivacyPublicEmailAllowlistExemptByExactAddressOnly(t *testing.T) {
+// TestScanPrivacyEmployeeEmailFlagsAnyDomainByDefault confirms that with no
+// caller-supplied PrivacyOptions.EmployeeEmail, a real, non-example.com
+// address is flagged: the check's polarity is allow-list, so an unconfigured
+// domain is suspicious by default rather than exempt by default.
+func TestScanPrivacyEmployeeEmailFlagsAnyDomainByDefault(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "doc.md", "contact support@datadoghq.com or jane@datadoghq.com\n")
+	writeFile(t, dir, "doc.md", "contact jane@acme-corp.com\n")
 
 	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
 	if err != nil {
 		t.Fatalf("ScanPrivacy: %v", err)
 	}
 	if len(warnings) != 1 {
-		t.Fatalf("got %+v, want exactly one warning (jane@), support@ allowlisted", warnings)
+		t.Fatalf("got %+v, want one warning for an address at an unallowed domain", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailExampleDomainNeverFlags confirms
+// user@example.com never flags, even with an empty or nil EmployeeEmail
+// config: the RFC 2606 reserved documentation-example domain is always
+// allowed, unconditionally.
+func TestScanPrivacyEmployeeEmailExampleDomainNeverFlags(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact jane@example.com or Jane@Example.Com\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("got %+v, want no warnings - example.com is always allowed, at any casing", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailAllowedDomainConfigDoesNotFlag confirms a
+// caller-configured AllowedDomains entry exempts an address at that domain,
+// while an address at a different, unconfigured domain still flags.
+func TestScanPrivacyEmployeeEmailAllowedDomainConfigDoesNotFlag(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact jane@acme-corp.com or root@other.com\n")
+
+	opts := PrivacyOptions{
+		SkipRules:     DefaultSkipRules,
+		EmployeeEmail: EmployeeEmailCheck{AllowedDomains: []string{"acme-corp.com"}},
+	}
+	_, warnings, err := ScanPrivacy(dir, TierPublic, opts)
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("got %+v, want exactly one warning (root@other.com); jane@acme-corp.com is allowlisted", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailAllowedDomainIsCaseInsensitive confirms a
+// caller's AllowedDomains entry exempts a domain regardless of casing on
+// either side, so casing never silently defeats the caller's own exemption.
+func TestScanPrivacyEmployeeEmailAllowedDomainIsCaseInsensitive(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact jane@Acme-Corp.COM or root@other.com\n")
+
+	opts := PrivacyOptions{
+		SkipRules:     DefaultSkipRules,
+		EmployeeEmail: EmployeeEmailCheck{AllowedDomains: []string{"acme-corp.com"}},
+	}
+	_, warnings, err := ScanPrivacy(dir, TierPublic, opts)
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("got %+v, want exactly one warning (root@other.com); jane@Acme-Corp.COM is allowlisted regardless of casing", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailNoDomainMatchFlags confirms an address whose
+// domain matches neither defaultAllowedEmailDomain nor any caller-configured
+// AllowedDomains entry is flagged.
+func TestScanPrivacyEmployeeEmailNoDomainMatchFlags(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact root@unrelated.example\n")
+
+	opts := PrivacyOptions{
+		SkipRules:     DefaultSkipRules,
+		EmployeeEmail: EmployeeEmailCheck{AllowedDomains: []string{"acme-corp.com"}},
+	}
+	_, warnings, err := ScanPrivacy(dir, TierPublic, opts)
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("got %+v, want exactly one warning: the address's domain matches no allowed entry", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailCheckNeverAppliesAtConfidentialTier confirms the
+// employee-email check stays public-tier-only: the confidential tier's
+// relaxed posture never grows this check, configured or not.
+func TestScanPrivacyEmployeeEmailCheckNeverAppliesAtConfidentialTier(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact jane@acme-corp.com\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierConfidential, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("got %+v, want no warnings: employee-email check never applies at the confidential tier", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailBlankAllowedDomainEntryIgnored confirms a blank
+// or whitespace-only AllowedDomains entry - the shape a caller gets from
+// splitting a trailing-comma config string - is dropped rather than indexed,
+// so it never accidentally exempts anything.
+func TestScanPrivacyEmployeeEmailBlankAllowedDomainEntryIgnored(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact jane@acme-corp.com\n")
+
+	for _, domains := range [][]string{{"acme-corp.com", ""}, {"", "acme-corp.com"}, {"acme-corp.com", "   "}} {
+		opts := PrivacyOptions{
+			SkipRules:     DefaultSkipRules,
+			EmployeeEmail: EmployeeEmailCheck{AllowedDomains: domains},
+		}
+		_, warnings, err := ScanPrivacy(dir, TierPublic, opts)
+		if err != nil {
+			t.Fatalf("ScanPrivacy(domains=%q): %v", domains, err)
+		}
+		if len(warnings) != 0 {
+			t.Fatalf("domains=%q: got %+v, want no warnings - acme-corp.com is allowlisted regardless of a blank sibling entry", domains, warnings)
+		}
+	}
+}
+
+// TestScanPrivacyEmployeeEmailNumericTLDIsNotAnAddress confirms the shapes an
+// allow-list-polarity check most easily over-flags - a package-version
+// specifier and an IPv4-shaped host - are not treated as addresses. Both are
+// DNS-label-shaped on the right of the "@", so only the TLD's leading-letter
+// requirement excludes them, and both are pervasive in ordinary source and
+// documentation: matching them would swamp the real signal.
+func TestScanPrivacyEmployeeEmailNumericTLDIsNotAnAddress(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "install foo@1.0.0, pin git-tools@v0.5.0, probe cache@127.0.0.1\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("got %+v, want no warnings - an all-numeric TLD is never a real address", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailDigitLeadingHostLabelStillFlags confirms the
+// TLD's leading-letter requirement constrains only the last label: a real
+// address at a digit-leading host label is still detected.
+func TestScanPrivacyEmployeeEmailDigitLeadingHostLabelStillFlags(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact jane@mail.3m.com\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("got %+v, want one warning - a digit-leading label before the TLD is a real host label", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailShortAlphanumericTLDIsNotAnAddress confirms a
+// TLD that starts with a letter but mixes in a digit (bar@a1) is not treated
+// as an address: the TLD must be letters-only, not merely letter-led.
+func TestScanPrivacyEmployeeEmailShortAlphanumericTLDIsNotAnAddress(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "resolve foo@bar.a1\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("got %+v, want no warnings - a letter-plus-digit TLD is never a real address", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailOverlongLabelIsNotAnAddress confirms a domain
+// label past DNS's 63-character limit is not treated as an address, in the
+// last label position as well as before it. The two positions are matched by
+// different halves of the pattern, so the last label needs its own case: an
+// unbounded TLD would otherwise let an arbitrarily long all-letter label
+// through while every earlier label stayed capped.
+func TestScanPrivacyEmployeeEmailOverlongLabelIsNotAnAddress(t *testing.T) {
+	overlong := strings.Repeat("a", 64)
+
+	for _, domain := range []string{overlong + ".com", "sub." + overlong} {
+		dir := t.TempDir()
+		writeFile(t, dir, "doc.md", "contact jane@"+domain+"\n")
+
+		_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+		if err != nil {
+			t.Fatalf("ScanPrivacy(jane@%s): %v", domain, err)
+		}
+		if len(warnings) != 0 {
+			t.Fatalf("jane@%s: got %+v, want no warnings - a 64-character label exceeds DNS's 63-character limit", domain, warnings)
+		}
+	}
+}
+
+// TestScanPrivacyEmployeeEmailMaximumLengthLabelStillFlags is the accepting
+// half of the label-length boundary: 63 characters is legal DNS, so an
+// address there is still flagged - again in both label positions. Paired with
+// the 64-character rejection above, this is what proves the cap sits exactly
+// on DNS's limit rather than near it, and that both positions agree on it.
+func TestScanPrivacyEmployeeEmailMaximumLengthLabelStillFlags(t *testing.T) {
+	maxLabel := strings.Repeat("a", 63)
+
+	for _, domain := range []string{maxLabel + ".com", "sub." + maxLabel} {
+		dir := t.TempDir()
+		writeFile(t, dir, "doc.md", "contact jane@"+domain+"\n")
+
+		_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+		if err != nil {
+			t.Fatalf("ScanPrivacy(jane@%s): %v", domain, err)
+		}
+		if len(warnings) != 1 {
+			t.Fatalf("jane@%s: got %+v, want one warning - a 63-character label is within DNS's limit", domain, warnings)
+		}
+	}
+}
+
+// TestScanPrivacyEmployeeEmailIDNAndHyphenatedDomainsStillFlag confirms a
+// punycode IDN domain and a hyphenated domain still match as real addresses,
+// guarding against a future tightening of the pattern that narrows too far.
+func TestScanPrivacyEmployeeEmailIDNAndHyphenatedDomainsStillFlag(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact jane@sub.xn--80ak6aa92e.com or root@my-company.co\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 2 {
+		t.Fatalf("got %+v, want two warnings - both a punycode IDN domain and a hyphenated domain are real addresses", warnings)
+	}
+}
+
+// TestEmployeeEmailPatternPunycodeTLDMatchesInFull confirms a punycode IDN
+// TLD (e.g. xn--80ak6aa92e) is captured in full rather than truncated at its
+// "xn" prefix: the regression this guards is emailDomain reporting only the
+// truncated "acme.xn" instead of the real domain, which is what makes an
+// operator's AllowedDomains entry for the real domain silently not apply.
+func TestEmployeeEmailPatternPunycodeTLDMatchesInFull(t *testing.T) {
+	match := employeeEmailPattern.FindString("contact jane@acme.xn--80ak6aa92e today")
+	if match != "jane@acme.xn--80ak6aa92e" {
+		t.Fatalf("got match %q, want the full address, not truncated at the punycode TLD's \"xn\" prefix", match)
+	}
+	if got := emailDomain(match); got != "acme.xn--80ak6aa92e" {
+		t.Fatalf("got domain %q, want the full punycode TLD, not truncated", got)
+	}
+}
+
+// TestEmployeeEmailPatternBareXNPrefixDoesNotMatchAsTLD confirms a bare
+// "xn--" with nothing after it is not accepted as a complete punycode TLD:
+// the punycode branch requires at least one DNS-label character following
+// the prefix, so an incomplete/malformed label falls back to at most the
+// pre-existing letters-only match ("xn"), never a match that swallows the
+// trailing hyphens as if they were a valid label.
+func TestEmployeeEmailPatternBareXNPrefixDoesNotMatchAsTLD(t *testing.T) {
+	match := employeeEmailPattern.FindString("resolve foo@bar.xn-- please")
+	if strings.Contains(match, "xn--") {
+		t.Fatalf("got match %q, want no match containing the bare, suffix-less \"xn--\" as a TLD", match)
+	}
+}
+
+// TestEmployeeEmailPatternPunycodeLabelLengthCap is the punycode branch's own
+// half of the label-length boundary the letters-only positions already pair
+// (see TestScanPrivacyEmployeeEmailMaximumLengthLabelStillFlags and
+// TestScanPrivacyEmployeeEmailOverlongLabelIsNotAnAddress). That branch's
+// bound is {0,57} rather than the {0,61} its siblings carry, because the
+// literal "xn--" prefix already spends 4 of DNS's 63 characters - a derived
+// figure, so it needs a case that fails if it is ever "made consistent" with
+// the others and quietly lets a label run past the limit. Asserted on the
+// match extent rather than on warning count: an overlong punycode label
+// still falls back to the letters-only "xn" match, so it is still flagged
+// either way and only the extent distinguishes the two.
+func TestEmployeeEmailPatternPunycodeLabelLengthCap(t *testing.T) {
+	maxLabel := "xn--" + strings.Repeat("a", 59)
+	if len(maxLabel) != 63 {
+		t.Fatalf("test setup: got a %d-character label, want 63", len(maxLabel))
+	}
+	if got := employeeEmailPattern.FindString("contact jane@acme." + maxLabel); got != "jane@acme."+maxLabel {
+		t.Fatalf("got match %q, want the full address - a 63-character punycode label is within DNS's limit", got)
+	}
+
+	overlong := "xn--" + strings.Repeat("a", 60)
+	if len(overlong) != 64 {
+		t.Fatalf("test setup: got a %d-character label, want 64", len(overlong))
+	}
+	if got := employeeEmailPattern.FindString("contact jane@acme." + overlong); strings.Contains(got, overlong) {
+		t.Fatalf("got match %q, want a match stopping short of the label - 64 characters exceeds DNS's 63-character limit", got)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailAllowedIDNDomainConfigDoesNotFlag is the
+// production-level regression: a caller-configured AllowedDomains entry for
+// a real punycode IDN domain must exempt an address at that domain end to
+// end through ScanPrivacy, not just at the regex level - this is the actual
+// bug the truncation caused (the allow-list comparison ran against the
+// truncated "acme.xn", which never equals the operator's real configured
+// domain, so the exemption silently never applied).
+func TestScanPrivacyEmployeeEmailAllowedIDNDomainConfigDoesNotFlag(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "contact jane@acme.xn--80ak6aa92e or root@other.com\n")
+
+	opts := PrivacyOptions{
+		SkipRules:     DefaultSkipRules,
+		EmployeeEmail: EmployeeEmailCheck{AllowedDomains: []string{"acme.xn--80ak6aa92e"}},
+	}
+	_, warnings, err := ScanPrivacy(dir, TierPublic, opts)
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("got %+v, want exactly one warning (root@other.com) - jane@acme.xn--80ak6aa92e is allowlisted", warnings)
+	}
+}
+
+// TestScanPrivacyEmployeeEmailFalsePositiveExclusionsStillHold confirms the
+// punycode allowance did not loosen any of the shapes the letters-only TLD
+// rule was tightened to exclude: a package-version specifier, an IPv4-shaped
+// host, and a letter-plus-digit label still do not match as addresses.
+func TestScanPrivacyEmployeeEmailFalsePositiveExclusionsStillHold(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "install foo@1.0.0, pin tool@v0.5.0, probe cache@127.0.0.1, resolve bar@a1\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("got %+v, want no warnings - none of these are real addresses", warnings)
+	}
+}
+
+// TestScanPrivacyNoOwnerConceptReachable confirms an "owner:" frontmatter tag
+// - forbidden, or declared-but-not-public - is never flagged at any tier:
+// this module's privacy-tier checks no longer key on any owner concept.
+func TestScanPrivacyNoOwnerConceptReachable(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "---\nprivacy: public\nowner: confidential\n---\n\nbody\n")
+
+	for _, tier := range []PrivacyTier{TierPublic, TierConfidential, TierPrivate} {
+		failures, _, err := ScanPrivacy(dir, tier, PrivacyOptions{SkipRules: DefaultSkipRules})
+		if err != nil {
+			t.Fatalf("ScanPrivacy(%s): %v", tier, err)
+		}
+		if len(failures) != 0 {
+			t.Fatalf("tier %s: got %+v, want no owner-keyed failures", tier, failures)
+		}
 	}
 }
 
@@ -215,6 +618,80 @@ func TestScanPrivacyReservedSentinelHostNotFlaggedAsPrivateNetwork(t *testing.T)
 	}
 	if len(warnings) != 1 {
 		t.Fatalf("got %d warnings %+v, want exactly one (the genuine private IP, not the .example.com host)", len(warnings), warnings)
+	}
+}
+
+// TestScanPrivacyReservedSentinelHostnameNotFlaggedAsInternal confirms an
+// internal-hostname-shaped label immediately followed by an RFC 6761
+// reserved sentinel TLD is a documentation/fixture hostname, not a real
+// internal address, and so raises no warning. One case per reserved TLD, so
+// dropping any single one from the filter's alternation fails a subtest.
+func TestScanPrivacyReservedSentinelHostnameNotFlaggedAsInternal(t *testing.T) {
+	for _, sentinel := range []string{"foo.internal.test", "bar.internal.example", "baz.internal.localhost", "qux.internal.invalid"} {
+		t.Run(sentinel, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, dir, "doc.md", "Deploy target: "+sentinel+"\n")
+
+			_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+			if err != nil {
+				t.Fatalf("ScanPrivacy: %v", err)
+			}
+			if len(warnings) != 0 {
+				t.Fatalf("got %+v, want no warnings for reserved-sentinel hostname %q", warnings, sentinel)
+			}
+		})
+	}
+}
+
+// TestScanPrivacyRealInternalHostnameStillFlaggedAlongsideSentinel confirms
+// the reserved-sentinel filter is adjacency-scoped: a genuine internal
+// hostname with no reserved TLD immediately after it still flags, even in
+// the same file as a sentinel hostname that must not.
+func TestScanPrivacyRealInternalHostnameStillFlaggedAlongsideSentinel(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "Fixture: foo.internal.test\nReal deploy target: jenkins-01.internal\n")
+
+	_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+	if err != nil {
+		t.Fatalf("ScanPrivacy: %v", err)
+	}
+	if len(warnings) != 1 || warnings[0].Rule != "internal_identifier" {
+		t.Fatalf("got %+v, want exactly one internal-identifier warning (the real host, not the sentinel)", warnings)
+	}
+}
+
+// TestScanPrivacyDisguisedSentinelHostnameStillFlagged confirms the sentinel
+// filter fires only when the reserved label is the true end of the host: a
+// reserved label with more host content after it - whether disguised as a
+// further domain label or behind a bogus port - is not a real sentinel and
+// must still warn. The reserved example.{com,net,org} second-level domains
+// are the inverse case: they are genuine end-of-host sentinels and must not.
+func TestScanPrivacyDisguisedSentinelHostnameStillFlagged(t *testing.T) {
+	for _, tc := range []struct {
+		host string
+		want int
+	}{
+		{"host.corp.test.attacker.io", 1},      // further host label after the sentinel
+		{"host.corp.test:8080.attacker.io", 1}, // bogus port, then more host
+		{"host.corp.testing", 1},               // reserved label is only a prefix
+		{"host.corp.test:8080", 0},             // real port, true end of host
+		{"host.corp.example.com", 0},           // reserved second-level domain
+		{"host.corp.example.net", 0},
+		{"host.corp.example.org", 0},
+		{"host.corp.example.co", 1}, // not a reserved second-level domain
+	} {
+		t.Run(tc.host, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, dir, "doc.md", "Deploy target: "+tc.host+"\n")
+
+			_, warnings, err := ScanPrivacy(dir, TierPublic, PrivacyOptions{SkipRules: DefaultSkipRules})
+			if err != nil {
+				t.Fatalf("ScanPrivacy: %v", err)
+			}
+			if len(warnings) != tc.want {
+				t.Fatalf("got %d warnings %+v for %q, want %d", len(warnings), warnings, tc.host, tc.want)
+			}
+		})
 	}
 }
 
@@ -236,6 +713,40 @@ func TestBuildHookResultCapsAtFiftyDiagnosticsWithOverflowCaveat(t *testing.T) {
 	}
 	if len(result.Caveats) != 1 {
 		t.Fatalf("got %d caveats, want exactly one overflow caveat", len(result.Caveats))
+	}
+	assertCanonicalJSON(t, result)
+}
+
+// TestBuildHookResultWarningsOnlyCapsAtFiftyDiagnosticsWithOverflowCaveat
+// confirms the warnings-only (non-strict, no failing findings) branch has
+// the same overflow protection as the failing/errors branch above: more
+// privacy warnings than clikit's 50-entry diagnostic cap must still build a
+// valid caveats-status record, truncated to 49 per-warning caveats plus
+// exactly one overflow-summarizing caveat (50 total), never the internal
+// "clikit: caveats has N members, max 50" build failure a naive per-warning
+// caveat with no cap at all would produce once a real tree crossed 50
+// privacy warnings.
+func TestBuildHookResultWarningsOnlyCapsAtFiftyDiagnosticsWithOverflowCaveat(t *testing.T) {
+	var warnings []Finding
+	for i := 0; i < 220; i++ {
+		warnings = append(warnings, Finding{Path: fmt.Sprintf("f%d.txt", i), Rule: "internal_identifier", Detail: "internal identifier - internal hostname"})
+	}
+	result, err := BuildHookResult([]string{"githooks", "scan"}, ScanOutcome{PrivacyWarnings: warnings})
+	if err != nil {
+		t.Fatalf("BuildHookResult: %v", err)
+	}
+	if result.ExitCode != 10 {
+		t.Fatalf("ExitCode = %d, want 10 (caveats)", result.ExitCode)
+	}
+	if len(result.Errors) != 0 {
+		t.Fatalf("got %d errors, want zero for a warnings-only, non-strict run", len(result.Errors))
+	}
+	if len(result.Caveats) != 50 {
+		t.Fatalf("got %d caveats, want exactly 50 (49 findings + one overflow summary)", len(result.Caveats))
+	}
+	first := result.Caveats[0]
+	if first.Code != "caveats.githooks.findings_truncated" {
+		t.Fatalf("got first caveat code %q, want the overflow-summary caveat first", first.Code)
 	}
 	assertCanonicalJSON(t, result)
 }
@@ -338,7 +849,7 @@ func TestScanSecretsMalformedSecretExemptRuleErrors(t *testing.T) {
 	writeFile(t, dir, "leak.txt", fixtureAWSKey+"\n")
 	exempt := []fsx.Rule{{Pattern: malformedGlob, Class: SkipClass}}
 
-	_, err := ScanSecrets(dir, DefaultSkipRules, exempt)
+	_, err := ScanSecrets(dir, DefaultSkipRules, exempt, nil)
 	if err == nil {
 		t.Fatal("want an error for a malformed SecretExemptRules pattern, got nil")
 	}
@@ -372,7 +883,7 @@ func TestScanSecretsMalformedSkipRuleDoesNotError(t *testing.T) {
 	writeFile(t, dir, "leak.txt", fixtureAWSKey+"\n")
 	skip := []fsx.Rule{{Pattern: malformedGlob, Class: SkipClass}}
 
-	if _, err := ScanSecrets(dir, skip, nil); err != nil {
+	if _, err := ScanSecrets(dir, skip, nil, nil); err != nil {
 		t.Fatalf("ScanSecrets: want no error for a malformed SkipRules pattern (fail-closed-as-skip is accepted here), got %v", err)
 	}
 }

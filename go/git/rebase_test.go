@@ -8,7 +8,7 @@ import (
 )
 
 // TestRebase_ReplaysCommitsCleanly checks a feature branch rebased onto an
-// advanced main ends up with both histories' content and a fresh backup tag
+// advanced main ends up with both histories' content and a fresh backup ref
 // pointing at its pre-rebase tip.
 func TestRebase_ReplaysCommitsCleanly(t *testing.T) {
 	ctx := context.Background()
@@ -34,8 +34,8 @@ func TestRebase_ReplaysCommitsCleanly(t *testing.T) {
 	if res.NewHead == "" || res.NewHead == oldFeatureHead {
 		t.Fatalf("NewHead = %s, want a new commit distinct from the pre-rebase tip", res.NewHead)
 	}
-	if resolved := runGit(t, dir, "rev-parse", res.BackupTag); resolved != oldFeatureHead {
-		t.Fatalf("backup tag %s = %s, want %s", res.BackupTag, resolved, oldFeatureHead)
+	if resolved := runGit(t, dir, "rev-parse", res.BackupRef); resolved != oldFeatureHead {
+		t.Fatalf("backup ref %s = %s, want %s", res.BackupRef, resolved, oldFeatureHead)
 	}
 	for _, f := range []string{"base.txt", "main.txt", "feature.txt"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {

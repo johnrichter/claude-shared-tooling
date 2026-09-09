@@ -34,9 +34,9 @@ func (r *Repo) CreateBranch(ctx context.Context, name, startPoint string, opts B
 }
 
 // DeleteBranch deletes name as a compare-and-swap against expectedHead: it
-// tags expectedHead for recovery, then removes the ref only if it still
-// points there, refusing (StaleRefError) if something moved it first. name
-// may be a short branch name or a full refs/heads/... ref.
+// writes a backup ref for expectedHead for recovery, then removes the ref
+// only if it still points there, refusing (StaleRefError) if something moved
+// it first. name may be a short branch name or a full refs/heads/... ref.
 func (r *Repo) DeleteBranch(ctx context.Context, name, expectedHead string, dryRun bool) (*RewriteOutcome, error) {
 	ref := name
 	if !strings.HasPrefix(ref, "refs/") {
@@ -50,13 +50,13 @@ func (r *Repo) DeleteBranch(ctx context.Context, name, expectedHead string, dryR
 		return nil, &StaleRefError{Ref: ref, ExpectedOld: expectedHead, ActualOld: current}
 	}
 
-	tag := backupTagName(ref, current)
-	out := &RewriteOutcome{Ref: ref, OldHead: current, BackupTag: tag, DryRun: dryRun}
+	backupRef := backupRefName(ref, current)
+	out := &RewriteOutcome{Ref: ref, OldHead: current, BackupRef: backupRef, DryRun: dryRun}
 	if dryRun {
 		return out, nil
 	}
-	if _, err := r.git(ctx, "tag", tag, current); err != nil {
-		return nil, fmt.Errorf("git: backup-tag %s before deleting %s: %w", tag, ref, err)
+	if _, err := r.git(ctx, "update-ref", backupRef, current); err != nil {
+		return nil, fmt.Errorf("git: backup-ref %s before deleting %s: %w", backupRef, ref, err)
 	}
 	if _, err := r.git(ctx, "update-ref", "-d", ref, current); err != nil {
 		return nil, fmt.Errorf("git: CAS delete %s: %w", ref, err)

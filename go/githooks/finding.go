@@ -8,6 +8,15 @@ type Finding struct {
 	Path   string // slash-separated, relative to the scanned root
 	Rule   string // stable rule id, e.g. "aws_access_key_id", "raw_binary"
 	Detail string // one-line, human-readable description of the hit
+	// Category is this finding's data-sensitivity bucket, entirely derived
+	// from the betterleaks rule id that produced it (see categoryForRuleID):
+	// "credentials" for the pristine upstream betterleaks catalog, "pii" or
+	// "financial" for this package's own additional SSN/credit-card/IBAN
+	// rules. Findings outside this taxonomy - ScanSecrets' own hand-rolled
+	// patterns, and ScanPrivacy's forbidden_marker/internal_identifier/
+	// not_public_pair findings - leave this empty; ScanPrivacy's own logic
+	// is otherwise unchanged by this field's addition.
+	Category string
 }
 
 // DefaultSkipRules is a reasonable starting ruleset for the skipRules
@@ -30,6 +39,14 @@ var DefaultSkipRules = []fsx.Rule{
 	{Pattern: "**/build/**", Class: SkipClass},
 	{Pattern: "**/target/**", Class: SkipClass},
 	{Pattern: "**/*.egg-info/**", Class: SkipClass},
+	// This package's own vendored betterleaks rule catalog. Every entry in
+	// it is a detection pattern for some credential shape, so scanning the
+	// catalog with the very ruleset it defines finds a hit in the catalog
+	// itself for rule after rule - there is no way to allowlist one value
+	// at a time out of a file whose entire job is to hold those values.
+	// Never a real secret: this file's content is fully vendored, reviewed
+	// upstream config, not user code or example data.
+	{Pattern: "**/go/githooks/data/betterleaks-base.toml", Class: SkipClass},
 }
 
 // binarySuffixes are asset extensions never text-scanned by ScanSecrets or

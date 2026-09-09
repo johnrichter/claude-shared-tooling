@@ -617,6 +617,25 @@ pub(crate) struct NamespaceSpec {
     #[allow(dead_code)]
     #[serde(rename = "type", default)]
     pub(crate) facet_type: FacetType,
+    /// Optional unconditional allowed-value list for this namespace: when
+    /// present, [`crate::validate::validate`] checks EVERY file carrying a
+    /// tag in this namespace against it, regardless of any other tag or
+    /// rule-set match -- unlike a rule-set's `apply.value_formats` (only
+    /// checked for a file matching that rule-set's OWN `match` criterion).
+    /// `None` for a namespace that declares no such list -- every
+    /// pre-existing namespace, unaffected (`#[serde(default)]`).
+    #[serde(default)]
+    pub(crate) allowed_values: Option<AllowedValues>,
+}
+
+/// A namespace's `allowed_values` entry: the closed set of values a tag in
+/// that namespace may carry, plus the `message` template to render on a
+/// mismatch (`{value}` = the whole offending tag, `{namespace}` = this
+/// namespace's name).
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub(crate) struct AllowedValues {
+    pub(crate) values: Vec<String>,
+    pub(crate) message: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -625,6 +644,10 @@ pub(crate) enum Cardinality {
     Singleton,
     AtLeastOne,
     Optional,
+    /// Zero or exactly one -- distinct from `Optional` (which tolerates two
+    /// or more with nothing to catch it) and from `Singleton` (which treats
+    /// absence itself as a violation).
+    AtMostOne,
 }
 
 /// A namespace's value type, per the pack's optional per-namespace `type`
@@ -2157,6 +2180,107 @@ mod tests {
             enum_values,
             vec!["string", "date", "numeric", "date_interval"],
             "meta-schema's type enum must match FacetType's String/Date/Numeric/DateInterval variants"
+        );
+    }
+
+    #[test]
+    fn meta_schema_namespaces_cardinality_enum_matches_the_cardinality_variants() {
+        // Pin the meta-schema's `namespaces[].cardinality` enum against the
+        // hardcoded list of `Cardinality` variants' serde
+        // `rename_all = "snake_case"` spellings, and against the bundled
+        // core profile's own `cardinality_types` keys -- three independent
+        // holders of the same vocabulary (Rust enum, meta-schema enum, core
+        // schema's mechanism table) that must never drift from each other.
+        // Same LIMITATION as the sibling `type`-enum pin above: literal
+        // expectations, not reflection, so a new `Cardinality` variant
+        // added without updating both lists below would slip through.
+        let schema = meta_schema();
+        let enum_values: Vec<&str> = schema["$defs"]["extensionPack"]["properties"]["namespaces"]
+            ["items"]["properties"]["cardinality"]["enum"]
+            .as_array()
+            .expect("meta-schema must declare namespaces[].cardinality.enum")
+            .iter()
+            .map(|v| v.as_str().expect("enum entries must be strings"))
+            .collect();
+        assert_eq!(
+            enum_values,
+            vec!["singleton", "at_least_one", "optional", "at_most_one"],
+            "meta-schema's cardinality enum must match Cardinality's Singleton/AtLeastOne/Optional/AtMostOne variants"
+        );
+
+        let core: serde_json::Value = serde_json::from_str(EMBEDDED_CORE_JSON)
+            .expect("embedded core profile must parse as JSON");
+        let mut core_keys: Vec<&str> = core["cardinality_types"]
+            .as_object()
+            .expect("core profile must declare cardinality_types")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        core_keys.sort_unstable();
+        let mut schema_enum_sorted = enum_values.clone();
+        schema_enum_sorted.sort_unstable();
+        assert_eq!(
+            core_keys, schema_enum_sorted,
+            "the bundled core profile's cardinality_types keys must match the meta-schema's cardinality enum"
+        );
+    }
+
+    #[test]
+    fn meta_schema_namespaces_allowed_values_shape_matches_the_allowed_values_struct() {
+        // Pin the meta-schema's `namespaces[].allowed_values` declaration --
+        // the contract a PACK AUTHOR reads -- against what `AllowedValues`
+        // actually deserializes. Same LIMITATION as the `type` enum pin
+        // above: the expectation is a literal, not reflection, so a new
+        // field on the struct needs this list updated in lockstep. The
+        // round-trip at the end is what makes it more than a string compare:
+        // a pack written to exactly the meta-schema's declared shape must
+        // land in the struct.
+        let schema = meta_schema();
+        let declared = &schema["$defs"]["extensionPack"]["properties"]["namespaces"]["items"]
+            ["properties"]["allowed_values"];
+        let required: Vec<&str> = declared["required"]
+            .as_array()
+            .expect("meta-schema must declare allowed_values.required")
+            .iter()
+            .map(|v| v.as_str().expect("required entries must be strings"))
+            .collect();
+        assert_eq!(
+            required,
+            vec!["values", "message"],
+            "meta-schema's allowed_values.required must match AllowedValues' non-Option fields"
+        );
+        let mut properties: Vec<&str> = declared["properties"]
+            .as_object()
+            .expect("meta-schema must declare allowed_values.properties")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        properties.sort_unstable();
+        assert_eq!(properties, vec!["message", "values"]);
+
+        let mut pack: serde_json::Value = serde_json::from_str(EMBEDDED_DEFAULT_PACK_JSON)
+            .expect("embedded pack JSON must parse");
+        pack["namespaces"][0]["allowed_values"] = serde_json::json!({
+            "values": ["public", "internal"],
+            "message": "'{value}' is not an allowed {namespace} value"
+        });
+        let first = pack["namespaces"][0]["name"]
+            .as_str()
+            .expect("a namespace entry must carry a name")
+            .to_string();
+        let profile = Profile::from_pack_json(&pack.to_string())
+            .expect("a pack written to the meta-schema's allowed_values shape must load");
+        let allowed = profile
+            .pack
+            .namespaces
+            .iter()
+            .find(|ns| ns.name == first)
+            .and_then(|ns| ns.allowed_values.as_ref())
+            .expect("the declared shape must deserialize into AllowedValues");
+        assert_eq!(allowed.values, vec!["public", "internal"]);
+        assert_eq!(
+            allowed.message,
+            "'{value}' is not an allowed {namespace} value"
         );
     }
 

@@ -30,7 +30,7 @@ type RewriteOutcome struct {
 	Ref       string
 	OldHead   string
 	NewHead   string
-	BackupTag string
+	BackupRef string
 	DryRun    bool
 	// PushCmd is the force-with-lease argv the caller may run to publish
 	// the rewrite. Populated only for SyncEmitForceWithLease on a non-dry
@@ -45,18 +45,21 @@ type RewriteOutcome struct {
 	Post *ResignReport
 }
 
-// backupTagName derives a collision-resistant backup tag from ref and the
-// SHA it currently points at: unique per call via a nanosecond timestamp, so
+// backupRefName derives a collision-resistant backup ref from ref and the SHA
+// it currently points at: unique per call via a nanosecond timestamp, so
 // repeated rewrites of the same ref never collide or silently overwrite an
 // earlier recovery point.
 //
-// The returned name is a short tag name (no refs/tags/ prefix): every caller
-// hands it straight to `git tag <name> <sha>`, which places it under
-// refs/tags/ itself. Prefixing it here too would nest the ref under
-// refs/tags/refs/tags/. Callers that need the fully-qualified ref (e.g. to
-// pass to rev-parse) get the same resolution either way, since git searches
-// refs/tags/<name> for an unqualified name.
-func backupTagName(ref, oldSHA string) string {
+// The returned name is a fully-qualified ref under refs/backup/ — a plain
+// ref, deliberately outside refs/tags/ — that every caller hands straight to
+// `git update-ref <name> <sha>`. Living outside refs/tags/ means this can
+// never collide with (or double-prefix into) the tags namespace, and,
+// because update-ref never creates a tag object, writing it never requires a
+// GPG signature the way an annotated `git tag` write does whenever
+// tag.gpgSign is on (tag.forceSignAnnotated alone does not trigger that;
+// only tag.gpgSign does) — a real signature is the wrong thing to require
+// for a disposable recovery marker anyway.
+func backupRefName(ref, oldSHA string) string {
 	base := ref
 	if i := strings.LastIndexByte(ref, '/'); i >= 0 {
 		base = ref[i+1:]
@@ -65,7 +68,7 @@ func backupTagName(ref, oldSHA string) string {
 	if len(short) > 12 {
 		short = short[:12]
 	}
-	return fmt.Sprintf("backup/%s/%d-%s", base, time.Now().UTC().UnixNano(), short)
+	return fmt.Sprintf("refs/backup/%s/%d-%s", base, time.Now().UTC().UnixNano(), short)
 }
 
 // MoveRef lands newSHA onto ref as a compare-and-swap against oldSHA,
@@ -78,8 +81,8 @@ func backupTagName(ref, oldSHA string) string {
 // `git update-ref ref newSHA oldSHA` — update-ref's own atomic
 // compare-and-swap — closing the race between that read and the write.
 //
-// dryRun performs the read and computes the backup tag name it WOULD use,
-// but performs neither write (no tag, no ref move).
+// dryRun performs the read and computes the backup ref name it WOULD use,
+// but performs neither write (no backup ref, no ref move).
 func (r *Repo) MoveRef(ctx context.Context, ref, oldSHA, newSHA string, mode SyncMode, remote string, dryRun bool) (*RewriteOutcome, error) {
 	current, err := r.resolveRef(ctx, ref)
 	if err != nil {
@@ -89,14 +92,14 @@ func (r *Repo) MoveRef(ctx context.Context, ref, oldSHA, newSHA string, mode Syn
 		return nil, &StaleRefError{Ref: ref, ExpectedOld: oldSHA, ActualOld: current}
 	}
 
-	tag := backupTagName(ref, oldSHA)
-	out := &RewriteOutcome{Ref: ref, OldHead: oldSHA, NewHead: newSHA, BackupTag: tag, DryRun: dryRun}
+	backupRef := backupRefName(ref, oldSHA)
+	out := &RewriteOutcome{Ref: ref, OldHead: oldSHA, NewHead: newSHA, BackupRef: backupRef, DryRun: dryRun}
 	if dryRun {
 		return out, nil
 	}
 
-	if _, err := r.git(ctx, "tag", tag, oldSHA); err != nil {
-		return nil, fmt.Errorf("git: backup-tag %s before rewriting %s: %w", tag, ref, err)
+	if _, err := r.git(ctx, "update-ref", backupRef, oldSHA); err != nil {
+		return nil, fmt.Errorf("git: backup-ref %s before rewriting %s: %w", backupRef, ref, err)
 	}
 	if _, err := r.git(ctx, "update-ref", ref, newSHA, oldSHA); err != nil {
 		return nil, fmt.Errorf("git: CAS move %s -> %s on %s: %w", oldSHA, newSHA, ref, err)
