@@ -25,15 +25,17 @@
 # nor XDG_CONFIG_HOME suppresses that setting on mise 2026.8.10 — only the env var does,
 # so it's set on this one step rather than assumed away by config isolation.
 #
-# Check-tool provisioning (contract section 5): ruff, mypy, bandit and (build-test's test e2e
-# leg) playwright — the Python share of F54's 23-binary matrix — install from a
+# Check-tool provisioning (contract section 5): ruff, mypy, bandit, jq and (build-test's
+# test e2e leg) playwright — the Python share of F54's 23-binary matrix — install from a
 # template-owned mise config written to RUNNER_TEMP and pointed at via MISE_CONFIG_FILE,
 # never the caller's own committed mise.toml/mise.lock. Each is pinned at its latest stable
-# version (OD49). ruff resolves through the aqua backend, which records a per-platform
+# version (OD49). ruff and jq resolve through the aqua backend, which records a per-platform
 # digest; mypy, bandit and playwright resolve through the pipx backend, which records none
 # (F67 measures 0 entries on that backend) — the digest check is simply not run for those
-# three. playwright ships its own Chromium (OD61, F77 measures the runner images' own Chrome
-# going unused), so the test e2e leg installs no browser.
+# three. jq serves the security step's exit-code guard (SC41) rather than a check of its
+# own; the pin is the same one ci-shell.yml already installs, so a second install adds no
+# binary to the fleet total (K10). playwright ships its own Chromium (OD61, F77 measures the
+# runner images' own Chrome going unused), so the test e2e leg installs no browser.
 #
 # Inputs:
 #   runs_on                          (string,  default "ubuntu-24.04")
@@ -205,12 +207,13 @@ jobs:
       - name: Resolved Python toolchain version
         run: python3 --version
 
-      # SC7: ruff resolves through the aqua backend (per-platform digest recorded); mypy and
-      # bandit resolve through the pipx backend (no digest, F67 measures 0 entries on that
-      # backend) — the digest check is simply not run for those two. Installed from a
-      # template-owned config so the caller's own committed mise.toml/mise.lock is never
-      # touched.
-      - name: Provision Python check binaries (ruff, mypy, bandit)
+      # SC7: ruff and jq resolve through the aqua backend (per-platform digest recorded);
+      # mypy and bandit resolve through the pipx backend (no digest, F67 measures 0 entries
+      # on that backend) — the digest check is simply not run for those two. jq serves the
+      # security step's exit-code guard (SC41) below rather than a check of its own.
+      # Installed from a template-owned config so the caller's own committed
+      # mise.toml/mise.lock is never touched.
+      - name: Provision Python check binaries (ruff, mypy, bandit, jq)
         env:
           # aqua:/ubi: metadata resolves through api.github.com; the job token buys the
           # authenticated per-repo quota instead of the shared-IP 60/hr anonymous one (F-T12-1).
@@ -223,6 +226,7 @@ jobs:
           "aqua:astral-sh/ruff" = "0.14.3"
           "pipx:mypy" = "1.18.2"
           "pipx:bandit" = "1.9.1"
+          "aqua:jqlang/jq" = "1.8.2"
           EOF
           mise trust "${MISE_CONFIG_FILE}"
           mise install
@@ -234,6 +238,7 @@ jobs:
           ruff --version
           mypy --version
           bandit --version
+          jq --version
 
       - name: Install language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} (verified fetch)
         env:
@@ -280,19 +285,62 @@ jobs:
         if: ${{ !inputs.dry_run }}
         run: language-tools vet --language python --dir "${{ inputs.project_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
 
+      # SC41 and OD72 put the advisory route on this step alone. --allow-warnings
+      # classifies a warning-only run as a success; the result layer promotes that
+      # success to caveats at exit 10. The guard treats 10 as a pass and writes one
+      # ::warning:: per caveats[] entry, and 20 as a fail and writes one ::error::
+      # per errors[] entry — classifyStatus reads the error count before the flag,
+      # so a real fault still fails the job. Every other step in this template still
+      # fails on any non-zero exit, per contract section 10's EXIT contract.
       - name: language-tools security
         if: ${{ !inputs.dry_run }}
-        run: language-tools security --language python --dir "${{ inputs.project_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log"
+        run: |
+          set -euo pipefail
+          result="${RUNNER_TEMP}/security-result.json"
+          if language-tools security --language python --dir "${{ inputs.project_dir }}" --log-dir "${{ github.workspace }}/.language-tools/log" --allow-warnings > "${result}"
+          then
+            exit_code=0
+          else
+            exit_code=$?
+          fi
+          if [ "${exit_code}" = "10" ]
+          then
+            jq -r '.caveats[] | "::warning::" + .message' "${result}"
+          elif [ "${exit_code}" = "20" ]
+          then
+            jq -r '.errors[] | "::error::" + .message' "${result}"
+            exit 20
+          elif [ "${exit_code}" != "0" ]
+          then
+            echo "::error::language-tools security exited ${exit_code}. See ${result}"
+            exit "${exit_code}"
+          fi
 
-      # Failure-path capture (contract section 10): export the per-check records a
-      # failed check wrote under .language-tools/log so a gate_negative.toolchain.error
-      # travels with the run instead of needing a local re-probe. Changes no check's
-      # invocation, target root, subject set or verdict.
-      - name: Capture language-tools logs on failure
-        if: ${{ failure() }}
+      # Contract section 10: derive the artifact-name slug from project_dir once, so the
+      # capture step below can scope its name without a path separator.
+      - name: Derive a log-artifact slug
+        id: log_slug
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          raw="${{ inputs.project_dir }}"
+          slug="$(printf '%s' "${raw}" | tr -c '[:alnum:]_-' '-' | sed -e 's/^-*//' -e 's/-*$//')"
+          printf 'value=%s\n' "${slug:-root}" >> "$GITHUB_OUTPUT"
+
+      # Failure-path capture (contract section 10, SECADV clause (d)): every check
+      # writes its raw tool output to a per-check record under .language-tools/log
+      # that the run otherwise discards. Guarded on !cancelled() rather than
+      # failure() so the security step's own passing-at-exit-10 run also publishes
+      # its capped diagnostics and overflow entry, instead of naming a log_ref no
+      # reader can fetch. Runs no check and changes no invocation, target root,
+      # subject set or verdict — it only exports what a check already wrote. Name
+      # scoped by language + job + the project_dir slug, because a caller calls this
+      # template many times in one run and upload-artifact rejects a duplicate name.
+      - name: Capture language-tools logs
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: language-tools-logs-python-source-checks
+          name: language-tools-logs-python-source-checks-${{ steps.log_slug.outputs.value }}
           path: ${{ github.workspace }}/.language-tools/log/
           if-no-files-found: ignore
 
@@ -457,11 +505,27 @@ jobs:
         if: ${{ !inputs.dry_run && inputs.extra_steps != '' }}
         run: ${{ inputs.extra_steps }}
 
-      # Failure-path capture (contract section 10). Matrix-scoped artifact name.
-      - name: Capture language-tools logs on failure
-        if: ${{ failure() }}
+      # Contract section 10: derive the artifact-name slug from project_dir once, so the
+      # capture step below can scope its name without a path separator.
+      - name: Derive a log-artifact slug
+        id: log_slug
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          raw="${{ inputs.project_dir }}"
+          slug="$(printf '%s' "${raw}" | tr -c '[:alnum:]_-' '-' | sed -e 's/^-*//' -e 's/-*$//')"
+          printf 'value=%s\n' "${slug:-root}" >> "$GITHUB_OUTPUT"
+
+      # Failure-path capture (contract section 10, SECADV clause (d)). Guarded on
+      # !cancelled() rather than failure() for the same reason as source-checks:
+      # runs no check, changes no invocation, target root, subject set or verdict.
+      # Name scoped by language + job + the project_dir slug + matrix.os, because a
+      # caller calls this template many times in one run across every matrix leg
+      # and upload-artifact rejects a duplicate name.
+      - name: Capture language-tools logs
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: language-tools-logs-python-build-test-${{ matrix.os }}
+          name: language-tools-logs-python-build-test-${{ steps.log_slug.outputs.value }}-${{ matrix.os }}
           path: ${{ github.workspace }}/.language-tools/log/
           if-no-files-found: ignore
