@@ -44,9 +44,15 @@
 #
 # Inputs:
 #   version                          (string,  required)
-#     Tag to cut, e.g. lang/example-cli/v1.2.3 (SC-VERSIONING: tag prefix == module path).
-#     Read by both trigger paths — named on a workflow_dispatch call, or the pushed tag
-#     itself on a push: tags: call.
+#     Tag to cut: a bare vX.Y.Z at tag_form: bare, or <path>/vX.Y.Z at tag_form: prefixed,
+#     per the caller's own language-tools.yaml (SC-VERSIONING). Read by both trigger paths
+#     — named on a workflow_dispatch call, or the pushed tag itself on a push: tags: call.
+#     Validated by the "language-tools tag validate" step below (SC42) when tag_module
+#     is set.
+#   tag_module                       (string,  default "")
+#     Module version's tag is validated against (language-tools' --module, matched
+#     against the caller's own language-tools.yaml). Empty skips the check and the job
+#     emits one ::notice naming the skip (SC42/TAGFMT).
 #   module_dir                       (string,  required)
 #     Project root every binary's package/crate/project directory is resolved against,
 #     relative to the checked-out repo (language-tools' `--module-dir`).
@@ -87,9 +93,14 @@ on:
   workflow_call:
     inputs:
       version:
-        description: "Tag to cut, e.g. lang/example-cli/v1.2.3 (SC-VERSIONING: tag prefix == module path)."
+        description: "Tag to cut: a bare vX.Y.Z at tag_form: bare, or <path>/vX.Y.Z at tag_form: prefixed, per the caller's own language-tools.yaml (SC-VERSIONING). Validated by the language-tools tag validate step below (SC42) when tag_module is set."
         required: true
         type: string
+      tag_module:
+        description: "Module version's tag is validated against (language-tools' --module, matched against the caller's own language-tools.yaml). Empty skips the check; the job emits one ::notice naming the skip (SC42/TAGFMT)."
+        required: false
+        type: string
+        default: ""
       module_dir:
         description: "Project root every binary's package/crate/project directory is resolved against, relative to the checked-out repo (language-tools' --module-dir): a Go module directory, a Rust workspace directory, or a Python directory tree, depending on language."
         required: true
@@ -255,6 +266,25 @@ jobs:
           tar -xzf "${tmp}/${archive}" -C "${tmp}"
           install -m 0755 "${tmp}/language-tools" "${RUNNER_TEMP}/bin/language-tools"
           rm -rf "${tmp}"
+
+      # SC42/TAGFMT: validates version's tag format before any build work runs, so a
+      # malformed tag never reaches the archive/wheel work below. tag_module empty (the
+      # default) skips the check and emits one ::notice naming the skip, so a caller not
+      # yet holding a language-tools.yaml runs no check rather than failing closed on one
+      # it never declared. Runs unconditionally, including on a dry run: it validates the
+      # version input, not the tag push. Both inputs pass through env, matching the next
+      # step's own rule against interpolating an input into the shell.
+      - name: language-tools tag validate
+        env:
+          TAG: ${{ inputs.version }}
+          TAG_MODULE: ${{ inputs.tag_module }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAG_MODULE}" ]; then
+            echo "::notice::tag_module is empty, skipping language-tools tag validate for ${TAG}"
+          else
+            language-tools tag validate "${TAG}" --module "${TAG_MODULE}"
+          fi
 
       # Cross-compiles every binary (and, for go/rust, every default GOOS/GOARCH cell) in one
       # call and writes checksums.txt plus, for go/rust, binary-checksums.txt alongside the
