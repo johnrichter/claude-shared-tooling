@@ -86,6 +86,43 @@ func TestFreeMemoryBytes_UnparsablePageSize_ReturnsError(t *testing.T) {
 	}
 }
 
+// TestFreeMemoryBytes_ZeroPageSize_ReturnsError covers a page-size header
+// that parses cleanly but reports 0. Multiplying it out would return
+// (0, nil) -- indistinguishable to a caller from a genuinely exhausted
+// host -- so the parser must reject it the way it rejects a missing
+// "Pages free:" line.
+func TestFreeMemoryBytes_ZeroPageSize_ReturnsError(t *testing.T) {
+	withFakeVMStat(t, "Mach Virtual Memory Statistics: (page size of 0 bytes)\nPages free: 100.")
+	free, err := freeMemoryBytes()
+	if err == nil {
+		t.Fatalf("freeMemoryBytes: got (%d, nil), want an error for a zero page size", free)
+	}
+}
+
+// TestFreeMemoryBytes_PageSizeHeaderWithNoCount_ReturnsError covers a
+// header ending at the "page size of" marker with no number after it.
+func TestFreeMemoryBytes_PageSizeHeaderWithNoCount_ReturnsError(t *testing.T) {
+	withFakeVMStat(t, "Mach Virtual Memory Statistics: (page size of\nPages free: 100.")
+	if _, err := freeMemoryBytes(); err == nil {
+		t.Fatal("freeMemoryBytes: got nil error, want error for a page-size header with no count")
+	}
+}
+
+// TestFreeMemoryBytes_PageSizeHeaderWithEarlierOfToken_Parses pins the
+// parser to the "page size of" phrase. A header carrying an unrelated
+// "of" ahead of the marker must still yield the real page size, not an
+// error from parsing the word that follows the first "of".
+func TestFreeMemoryBytes_PageSizeHeaderWithEarlierOfToken_Parses(t *testing.T) {
+	withFakeVMStat(t, "Mach Virtual Memory Statistics of host 0: (page size of 16384 bytes)\nPages free: 3.")
+	free, err := freeMemoryBytes()
+	if err != nil {
+		t.Fatalf("freeMemoryBytes: %v", err)
+	}
+	if want := uint64(3 * 16384); free != want {
+		t.Fatalf("free = %d, want %d", free, want)
+	}
+}
+
 // TestFreeMemoryBytes_VmStatNotFound_ReturnsError covers the vm_stat
 // binary being unavailable on PATH.
 func TestFreeMemoryBytes_VmStatNotFound_ReturnsError(t *testing.T) {

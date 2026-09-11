@@ -30,18 +30,28 @@ func freeMemoryBytes() (uint64, error) {
 		line := scanner.Text()
 		switch {
 		case strings.Contains(line, "page size of"):
-			fields := strings.Fields(line)
-			for i, f := range fields {
-				if f != "of" || i+1 >= len(fields) {
-					continue
-				}
-				n, err := strconv.ParseUint(fields[i+1], 10, 64)
-				if err != nil {
-					return 0, fmt.Errorf("parse vm_stat page size %q: %w", line, err)
-				}
-				pageSize = n
-				sawPageSize = true
+			// Anchor on the full phrase rather than scanning for a bare "of"
+			// token: any other "of" earlier in the header would otherwise be
+			// parsed as the page-size marker and fail on the word after it.
+			_, after, _ := strings.Cut(line, "page size of")
+			fields := strings.Fields(after)
+			if len(fields) == 0 {
+				return 0, fmt.Errorf("malformed vm_stat page-size header %q", line)
 			}
+			n, err := strconv.ParseUint(fields[0], 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("parse vm_stat page size %q: %w", line, err)
+			}
+			// A zero page size is never a real reading. Accepting one would
+			// make the closing multiplication yield 0 bytes free, which a
+			// caller reads as "host is out of memory" rather than "vm_stat
+			// output was unusable" -- the same silent-failure mode a missing
+			// "Pages free:" line already guards against below.
+			if n == 0 {
+				return 0, fmt.Errorf("vm_stat reported a zero page size in %q", line)
+			}
+			pageSize = n
+			sawPageSize = true
 		case strings.HasPrefix(line, "Pages free:"):
 			fields := strings.Fields(line)
 			if len(fields) < 3 {
