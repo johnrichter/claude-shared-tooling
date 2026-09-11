@@ -2,6 +2,12 @@ name: scratch-sysops-darwin-verify
 
 on:
   workflow_dispatch: {}
+  # workflow_dispatch only fires via the API for a workflow already registered
+  # on the default branch; this scratch file lives on this branch alone, so a
+  # push trigger scoped to it is what actually runs it for real verification.
+  push:
+    branches:
+      - chore/sysops-darwin-guard
 
 jobs:
   test:
