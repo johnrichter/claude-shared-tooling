@@ -24,6 +24,7 @@ func freeMemoryBytes() (uint64, error) {
 
 	var pageSize, pagesFree uint64
 	sawPageSize := false
+	sawPagesFree := false
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -51,6 +52,7 @@ func freeMemoryBytes() (uint64, error) {
 				return 0, fmt.Errorf("parse vm_stat Pages free: %w", err)
 			}
 			pagesFree = n
+			sawPagesFree = true
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -58,6 +60,9 @@ func freeMemoryBytes() (uint64, error) {
 	}
 	if !sawPageSize {
 		return 0, fmt.Errorf("vm_stat output has no page-size header")
+	}
+	if !sawPagesFree {
+		return 0, fmt.Errorf("vm_stat output has no Pages free field")
 	}
 	return pagesFree * pageSize, nil
 }
