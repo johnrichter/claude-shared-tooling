@@ -1,0 +1,14 @@
+name: scratch-sysops-darwin-verify
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/sysops/go.mod
+      - run: cd go/sysops && go test ./...
