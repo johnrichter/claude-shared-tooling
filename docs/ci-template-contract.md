@@ -10,7 +10,7 @@ tags:
   - owner:public
 links:
   - project:fleet-04-adoption:design
-updated: 2026-09-09T10:00:00Z
+updated: 2026-09-10T12:00:00Z
 ---
 
 # CI template contract
@@ -500,12 +500,51 @@ Shared inputs across the seven templates. A common role takes a common name; onl
 | `dry_run` | boolean | `false` | six of seven | `true` installs and verifies mise + language-tools and stops; check steps and `extra_steps` are skipped. `ci-workflow.yml` carries none (below). |
 | `test_timeout` | number | `300` | four CI templates | Seconds; defect 3 (below). |
 | `extra_steps` | string | `""` | all seven | Shell script run after the checks, for a repository-specific check `language-tools` does not cover. Empty runs nothing. |
+| `tag_module` | string | `""` | `release-cli.yml` only | Module `version`'s tag format is validated against (SC42/TAGFMT, below). |
 
 \* `ci-shell.yml` and `ci-workflow.yml` default to `"ubuntu-24.04-arm"` instead (section 1).
 
 **`ci-workflow.yml`'s narrower input set.** It declares only `runs_on`, `target_root` and `extra_steps` — no `mise_version` (mise pins as a step-scoped env var, matching `ci-shell.yml`'s own precedent), no `dry_run`, and no `test_timeout` (defect 3 ties that input to a `test` subcommand, and this track's one pair is `lint`).
 
 **Deleted (SC38, OD39).** `ci-go.yml` and `ci-rust.yml` drop `checkout_ai_shared_lib_sibling`, `set_ai_shared_lib_goprivate` and the `sibling_repo_token` secret — the module repository is public, so a tagged dependency resolves through the public proxy (F78). `ci-python.yml`'s single comment recording its absence stays (OD55).
+
+### SC42/TAGFMT — the release-tag format check
+
+`release-cli.yml` alone (TAGFMT clause (a)): `release-library.yml` declares no module input, because its one caller holds a monorepo where a module derived from the tag under test would validate that tag against itself — that caller runs the check its own shape needs in its own `ci.yml` instead. The five CI templates run on a branch push and on a pull request, where no tag exists, so the check reaches none of them.
+
+| Property | Value |
+|---|---|
+| Input | `tag_module`, type string, `required: false`, default `""` (TAGFMT clause (b)) |
+| Step | `language-tools tag validate "$TAG" --module "$TAG_MODULE"`, both inputs bound through the step's own `env:` block, so its `run:` body holds no `${{ inputs.` sequence (TAGFMT clause (c)) |
+| Position | `build` job, after the language-tools install step and before `language-tools release build` |
+| Skip | empty `tag_module` (the default) skips the check; the job emits one `::notice` naming the skip, so no skip is silent |
+| Dry run | runs unconditionally, including on a dry run — it validates the `version` input, not the tag push |
+| Guard | none: a non-zero exit already fails the job, so the step carries no exit-code guard and provisions no `jq` (TAGFMT clause (d)) |
+
+```yaml
+inputs:
+  tag_module:
+    description: "Module version's tag is validated against (language-tools' --module, matched against the caller's own language-tools.yaml). Empty skips the check; the job emits one ::notice naming the skip (SC42/TAGFMT)."
+    required: false
+    type: string
+    default: ""
+```
+
+```yaml
+- name: language-tools tag validate
+  env:
+    TAG: ${{ inputs.version }}
+    TAG_MODULE: ${{ inputs.tag_module }}
+  run: |
+    set -euo pipefail
+    if [ -z "${TAG_MODULE}" ]; then
+      echo "::notice::tag_module is empty, skipping language-tools tag validate for ${TAG}"
+    else
+      language-tools tag validate "${TAG}" --module "${TAG_MODULE}"
+    fi
+```
+
+**No presence test for `language-tools.yaml` (TAGFMT clause (e)).** `tag validate` exits 2 on a missing config file or an undeclared module and never fails open, so a presence test inside the template would turn that closed failure into a silent pass — the shape this clause exists to remove.
 
 ### Defect 3 — the test timeout
 
