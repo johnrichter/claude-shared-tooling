@@ -241,6 +241,18 @@ var banditExcludeDirs = buildBanditExcludeDirs()
 // fixed exclude list, in the "./"-relative fnmatch shape -x expects, so a
 // change to the shared census-exclusion rule never has to be copied here by
 // hand.
+//
+// Each census prefix ships with its trailing separator kept and a "*" added
+// ("./.dat/*"), which is what makes the entry a glob rather than a bare
+// path. Bandit tests an -x entry two ways (_is_file_included): fnmatch
+// against the scanned path, and raw substring containment. A bare "./.dat"
+// only survives the first way while a ./.dat directory happens to exist —
+// discover_files rewrites an entry that os.path.isdir accepts to
+// "./.dat/*" — and in a repository with no .dat/ the entry falls through to
+// the substring test, which silently drops every top-level path merely
+// beginning ".dat" (./.datadog, ./.database) from the security scan.
+// Carrying the separator makes the entry a glob unconditionally, matching
+// excludedFromTracked's own prefix boundary and never a look-alike sibling.
 func buildBanditExcludeDirs() string {
 	entries := []string{
 		"./.venv", "./venv", "./.git", "./build", "./dist",
@@ -248,7 +260,7 @@ func buildBanditExcludeDirs() string {
 		"./tests", "./test", "*/test_*.py", "*/*_test.py",
 	}
 	for _, p := range censusExcludedPrefixes {
-		entries = append(entries, "./"+strings.TrimSuffix(p, "/"))
+		entries = append(entries, "./"+p+"*")
 	}
 	return strings.Join(entries, ",")
 }
