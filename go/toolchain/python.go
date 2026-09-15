@@ -214,21 +214,44 @@ func (a pythonAdapter) RunInProcess(ctx context.Context, target Target) ([]Diagn
 // banditExcludeDirs lists the paths and name globs bandit's -x skips: a
 // project's own virtual environment, VCS metadata, build output, the cache
 // directories ruff, mypy and pytest each leave behind, the top-level test
-// tree, and pytest's own two file-naming conventions (test_*.py, *_test.py)
-// wherever they occur. Without the first group, -r's recursion walks
-// straight into .venv and reports every installed third-party package's own
-// findings as if they belonged to the project under test. The directory
-// entries (./tests, ./test) only reach a test tree that sits at the scan
-// root; a project that nests a test module beside the code it exercises, or
-// under a package subdirectory rather than a top-level tests/ folder, leaves
-// bandit's B101 firing on every bare `assert` there — a false positive on
-// the test framework's own idiom, not a finding about the shipped code
-// security is meant to gate. The trailing globs close that gap: bandit
-// matches -x entries against the full scanned path (always "./"-relative
-// here, since runSecurity scans ".") with fnmatch, whose "*" crosses
-// directory separators, so a leading "*/" reaches a matching base name under
-// any number of parent directories, the root included.
-const banditExcludeDirs = "./.venv,./venv,./.git,./build,./dist,./.mypy_cache,./.pytest_cache,./.ruff_cache,./__pycache__,./tests,./test,*/test_*.py,*/*_test.py"
+// tree, pytest's own two file-naming conventions (test_*.py, *_test.py)
+// wherever they occur, and workflow.go's census-exclusion rule. Without the
+// first group, -r's recursion walks straight into .venv and reports every
+// installed third-party package's own findings as if they belonged to the
+// project under test. The directory entries (./tests, ./test) only reach a
+// test tree that sits at the scan root; a project that nests a test module
+// beside the code it exercises, or under a package subdirectory rather than
+// a top-level tests/ folder, leaves bandit's B101 firing on every bare
+// `assert` there — a false positive on the test framework's own idiom, not a
+// finding about the shipped code security is meant to gate. The trailing
+// test-name globs close that gap: bandit matches -x entries against the full
+// scanned path (always "./"-relative here, since runSecurity scans ".") with
+// fnmatch, whose "*" crosses directory separators, so a leading "*/" reaches
+// a matching base name under any number of parent directories, the root
+// included. The census entries close a third gap the directory list above
+// cannot: a target.Dir at the repository root has bandit's -r walk the
+// filesystem directly, which ignores .gitignore, so a linked worktree or a
+// tracked project directory would otherwise be scanned as if it belonged to
+// the project under test, exactly the tree workflow.go's own
+// census-exclusion rule (censusExcludedPrefixes) already keeps out of its
+// own population.
+var banditExcludeDirs = buildBanditExcludeDirs()
+
+// buildBanditExcludeDirs appends censusExcludedPrefixes to bandit's own
+// fixed exclude list, in the "./"-relative fnmatch shape -x expects, so a
+// change to the shared census-exclusion rule never has to be copied here by
+// hand.
+func buildBanditExcludeDirs() string {
+	entries := []string{
+		"./.venv", "./venv", "./.git", "./build", "./dist",
+		"./.mypy_cache", "./.pytest_cache", "./.ruff_cache", "./__pycache__",
+		"./tests", "./test", "*/test_*.py", "*/*_test.py",
+	}
+	for _, p := range censusExcludedPrefixes {
+		entries = append(entries, "./"+strings.TrimSuffix(p, "/"))
+	}
+	return strings.Join(entries, ",")
+}
 
 // runSecurity runs bandit against target.Dir and turns its JSON report into
 // diagnostics. -r recurses the project tree (skipping banditExcludeDirs);

@@ -161,19 +161,33 @@ func isShellShebang(path string) bool {
 // directory-walk convention. F49 measured this rule against the fleet on
 // 2026-08-25 at 117 in-scope files — 109 outside .githooks/ and 8 inside it,
 // one per repository across 8 repositories — nine of the 117 extensionless.
-// Only .git is skipped (its own hook-sample and internal plumbing scripts
-// are not the fleet's own shell files); every other directory, .githooks/
-// included, is walked.
+// .git is skipped outright (its own hook-sample and internal plumbing
+// scripts are not the fleet's own shell files); every other directory,
+// .githooks/ included, is walked, less workflow.go's census-exclusion rule
+// (excludedFromTracked): a linked worktree or a project directory is a
+// separate tree this repository does not lint as its own, and a target.Dir
+// at the repository root must not recurse into either.
 func discoverShellFiles(root string) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		rel = filepath.ToSlash(rel)
 		if d.IsDir() {
 			if d.Name() == ".git" {
 				return fs.SkipDir
 			}
+			if rel != "." && excludedFromTracked(rel+"/") {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if excludedFromTracked(rel) {
 			return nil
 		}
 		switch ext := filepath.Ext(d.Name()); {

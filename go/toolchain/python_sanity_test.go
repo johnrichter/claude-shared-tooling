@@ -427,6 +427,21 @@ func TestSanityPythonSecurityExcludesVenvAndTestDirs(t *testing.T) {
 	}
 }
 
+// TestSanityPythonSecurityExcludesCensusPrefixes checks banditExcludeDirs
+// carries every entry of workflow.go's censusExcludedPrefixes, in the
+// "./"-relative fnmatch shape -x expects, so bandit's own recursive walk —
+// unlike ruff's and mypy's, which respect .gitignore — never scans a linked
+// worktree or a project directory at the repository root as if it belonged
+// to the project under test.
+func TestSanityPythonSecurityExcludesCensusPrefixes(t *testing.T) {
+	for _, p := range censusExcludedPrefixes {
+		want := "./" + strings.TrimSuffix(p, "/")
+		if !strings.Contains(banditExcludeDirs, want) {
+			t.Errorf("banditExcludeDirs = %q, want it to contain %q (from censusExcludedPrefixes)", banditExcludeDirs, want)
+		}
+	}
+}
+
 const unformattedPy = "x=1\n"
 
 // TestSanityPythonFormatCheckFailsWithoutWritingFile checks the acceptance
