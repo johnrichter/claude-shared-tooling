@@ -245,6 +245,31 @@ func resolveCargoLock(dir string) string {
 	}
 }
 
+// resolveCargoDenyConfig returns the absolute path to the nearest deny.toml
+// at or above dir, or "" when none is found up to the filesystem root.
+// cargo-deny resolves its config the same way cargo resolves a workspace —
+// from the crate's directory upward — so a workspace member with no
+// deny.toml of its own still picks up one declared at the workspace root;
+// runSecurity uses the search only to decide whether a policy exists to
+// honor, never to name the file to cargo-deny itself, which finds it the
+// same way on its own.
+func resolveCargoDenyConfig(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	for {
+		if info, err := os.Stat(filepath.Join(abs, "deny.toml")); err == nil && !info.IsDir() {
+			return filepath.Join(abs, "deny.toml")
+		}
+		parent := filepath.Dir(abs)
+		if parent == abs {
+			return ""
+		}
+		abs = parent
+	}
+}
+
 // runSecurity runs cargo-audit and cargo-deny against target.Dir and merges
 // their findings (OD46): cargo-audit checks the resolved lockfile against
 // RustSec's advisory database, cargo-deny checks license, ban and
@@ -255,6 +280,17 @@ func resolveCargoLock(dir string) string {
 // at the workspace lockfile resolveCargoLock finds, so a workspace-member
 // target audits its resolved dependency graph rather than failing to load a
 // per-member Cargo.lock cargo does not maintain.
+//
+// cargo-deny's license group is scoped to a crate that supplies its own
+// deny.toml (resolveCargoDenyConfig): cargo-deny's default, unconfigured
+// license policy denies every license and flags any crate with no `license`
+// manifest field, so `check` alone fails the licenses group on every crate
+// that has not opted into a policy — a false positive with no bearing on
+// whether the crate is actually vulnerable, not a real security finding.
+// Restricting an unconfigured run to the bans and sources groups keeps
+// cargo-deny's ban/source-registry policy live while cargo-audit alone
+// answers the advisory question; a crate that ships its own deny.toml still
+// gets the full four-group check, license policy included.
 func (cargoAdapter) runSecurity(ctx context.Context, target Target) ([]Diagnostic, error) {
 	var diags []Diagnostic
 
@@ -272,7 +308,11 @@ func (cargoAdapter) runSecurity(ctx context.Context, target Target) ([]Diagnosti
 	}
 	diags = append(diags, auditDiags...)
 
-	denyRes, err := runTool(ctx, target.Dir, "cargo", []string{"deny", "--format=json", "check"})
+	denyArgs := []string{"deny", "--format=json", "check"}
+	if resolveCargoDenyConfig(target.Dir) == "" {
+		denyArgs = append(denyArgs, "bans", "sources")
+	}
+	denyRes, err := runTool(ctx, target.Dir, "cargo", denyArgs)
 	if err != nil {
 		return nil, err
 	}

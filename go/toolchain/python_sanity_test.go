@@ -358,15 +358,14 @@ func banditFlaggedFiles(t *testing.T, dir, exclude string) map[string]bool {
 	return flagged
 }
 
-// writeBanditExcludeProbeTree lays out one bandit-triggering file (a
-// shell=True subprocess call, B602) at depth 0, depth 1 and depth 3 under a
-// pytest test_*.py name, plus one at the tree root under a plain source
-// name, in a fresh temp directory.
-func writeBanditExcludeProbeTree(t *testing.T) string {
+// writeBanditProbeTree writes one bandit-triggering file (a shell=True
+// subprocess call, B602) at every rel, in a fresh temp directory, and
+// returns that directory.
+func writeBanditProbeTree(t *testing.T, rels ...string) string {
 	t.Helper()
 	dir := t.TempDir()
 	const insecure = "import subprocess\nsubprocess.call(\"echo hi\", shell=True)\n"
-	for _, rel := range []string{"test_depth0.py", "pkg/test_depth1.py", "a/b/c/test_depth3.py", "real_source.py"} {
+	for _, rel := range rels {
 		full := filepath.Join(dir, rel)
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 			t.Fatalf("mkdir for %s: %v", rel, err)
@@ -376,6 +375,14 @@ func writeBanditExcludeProbeTree(t *testing.T) string {
 		}
 	}
 	return dir
+}
+
+// writeBanditExcludeProbeTree lays out one bandit-triggering file at depth 0,
+// depth 1 and depth 3 under a pytest test_*.py name, plus one at the tree
+// root under a plain source name.
+func writeBanditExcludeProbeTree(t *testing.T) string {
+	t.Helper()
+	return writeBanditProbeTree(t, "test_depth0.py", "pkg/test_depth1.py", "a/b/c/test_depth3.py", "real_source.py")
 }
 
 // TestSanityBanditExcludeReachesTestBaseNameAtAnyDepth is the real-bandit
@@ -414,6 +421,53 @@ func TestSanityBanditDirectoryOnlyExcludeIsInsufficientAlone(t *testing.T) {
 	}
 }
 
+// TestSanityBanditExcludeSkipsCensusTreesNotLookAlikes is the real-bandit
+// evidence for banditExcludeDirs' census entries: a linked worktree and a
+// project directory drop out of the scan at any depth, while a top-level
+// directory that merely begins with a census prefix's characters
+// (.datadog/, .claude/worktrees-old/) stays in it. The second case covers a
+// repository carrying no census tree at all, where bandit leaves a bare
+// directory entry to its substring test — the shape that would drop the
+// look-alikes silently.
+func TestSanityBanditExcludeSkipsCensusTreesNotLookAlikes(t *testing.T) {
+	requirePythonTool(t, "bandit")
+	const (
+		lookAlikeDat       = ".datadog/svc.py"
+		lookAlikeWorktrees = ".claude/worktrees-old/svc.py"
+	)
+	wantScanned := []string{"./.datadog/svc.py", "./.claude/worktrees-old/svc.py", "./real_source.py"}
+	cases := []struct {
+		name         string
+		rels         []string
+		wantExcluded []string
+	}{
+		{
+			name:         "census trees present",
+			rels:         []string{".claude/worktrees/wt/pkg/deep.py", ".dat/effort/svc.py", lookAlikeDat, lookAlikeWorktrees, "real_source.py"},
+			wantExcluded: []string{"./.claude/worktrees/wt/pkg/deep.py", "./.dat/effort/svc.py"},
+		},
+		{
+			name: "no census tree present",
+			rels: []string{lookAlikeDat, lookAlikeWorktrees, "real_source.py"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			flagged := banditFlaggedFiles(t, writeBanditProbeTree(t, c.rels...), banditExcludeDirs)
+			for _, rel := range c.wantExcluded {
+				if flagged[rel] {
+					t.Errorf("banditExcludeDirs still flags %s, want the census tree excluded", rel)
+				}
+			}
+			for _, rel := range wantScanned {
+				if !flagged[rel] {
+					t.Errorf("banditExcludeDirs excluded %s, want it still in the scan", rel)
+				}
+			}
+		})
+	}
+}
+
 // TestSanityPythonSecurityExcludesVenvAndTestDirs checks banditExcludeDirs
 // names the project's own virtual environment (so -r's recursion never
 // reports a vendored third-party package's own findings as the project's)
@@ -423,6 +477,31 @@ func TestSanityPythonSecurityExcludesVenvAndTestDirs(t *testing.T) {
 	for _, want := range []string{"./.venv", "./tests"} {
 		if !strings.Contains(banditExcludeDirs, want) {
 			t.Errorf("banditExcludeDirs = %q, want it to contain %q", banditExcludeDirs, want)
+		}
+	}
+}
+
+// TestSanityPythonSecurityExcludesCensusPrefixes checks banditExcludeDirs
+// carries every entry of workflow.go's censusExcludedPrefixes as a discrete
+// "./"-relative glob field, so bandit's own recursive walk — unlike ruff's
+// and mypy's, which respect .gitignore — never scans a linked worktree or a
+// project directory at the repository root as if it belonged to the project
+// under test. It also checks the bare-path shape is absent: bandit falls
+// back to a substring test for an entry that is not a glob, which reaches
+// every look-alike sibling
+// (TestSanityBanditExcludeSkipsCensusTreesNotLookAlikes).
+func TestSanityPythonSecurityExcludesCensusPrefixes(t *testing.T) {
+	fields := make(map[string]bool)
+	for _, f := range strings.Split(banditExcludeDirs, ",") {
+		fields[f] = true
+	}
+	for _, p := range censusExcludedPrefixes {
+		want := "./" + p + "*"
+		if !fields[want] {
+			t.Errorf("banditExcludeDirs = %q, want the field %q (from censusExcludedPrefixes)", banditExcludeDirs, want)
+		}
+		if bare := "./" + strings.TrimSuffix(p, "/"); fields[bare] {
+			t.Errorf("banditExcludeDirs carries the bare field %q, want the glob %q instead", bare, want)
 		}
 	}
 }

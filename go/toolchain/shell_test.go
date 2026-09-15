@@ -337,3 +337,47 @@ func TestDiscoverShellFilesSkipsDotGit(t *testing.T) {
 		t.Errorf("discoverShellFiles = %v, want bin/a.sh and .githooks/pre-commit both in scope", files)
 	}
 }
+
+// TestDiscoverShellFilesAppliesCensusExclusion checks the walk drops a
+// script under a linked worktree or a project directory, and one inside a
+// testdata tree, the same three trees workflow.go's census-exclusion rule
+// keeps out of its own population — while still finding an ordinary script
+// alongside them.
+func TestDiscoverShellFilesAppliesCensusExclusion(t *testing.T) {
+	dir := t.TempDir()
+	write := func(rel, content string) {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", rel, err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	const shebang = "#!/bin/sh\ntrue\n"
+	write("bin/a.sh", shebang)
+	write(".claude/worktrees/wt/bin/nested.sh", shebang)
+	write(".dat/effort/scripts/x.sh", shebang)
+	write("pkg/testdata/fixture.sh", shebang)
+
+	files, err := discoverShellFiles(dir)
+	if err != nil {
+		t.Fatalf("discoverShellFiles: %v", err)
+	}
+	found := map[string]bool{}
+	for _, f := range files {
+		found[filepath.ToSlash(strings.TrimPrefix(f, dir+string(filepath.Separator)))] = true
+	}
+	if !found["bin/a.sh"] {
+		t.Errorf("discoverShellFiles = %v, want bin/a.sh in scope", files)
+	}
+	for _, excluded := range []string{
+		".claude/worktrees/wt/bin/nested.sh",
+		".dat/effort/scripts/x.sh",
+		"pkg/testdata/fixture.sh",
+	} {
+		if found[excluded] {
+			t.Errorf("discoverShellFiles included %s, want it census-excluded", excluded)
+		}
+	}
+}

@@ -214,21 +214,56 @@ func (a pythonAdapter) RunInProcess(ctx context.Context, target Target) ([]Diagn
 // banditExcludeDirs lists the paths and name globs bandit's -x skips: a
 // project's own virtual environment, VCS metadata, build output, the cache
 // directories ruff, mypy and pytest each leave behind, the top-level test
-// tree, and pytest's own two file-naming conventions (test_*.py, *_test.py)
-// wherever they occur. Without the first group, -r's recursion walks
-// straight into .venv and reports every installed third-party package's own
-// findings as if they belonged to the project under test. The directory
-// entries (./tests, ./test) only reach a test tree that sits at the scan
-// root; a project that nests a test module beside the code it exercises, or
-// under a package subdirectory rather than a top-level tests/ folder, leaves
-// bandit's B101 firing on every bare `assert` there — a false positive on
-// the test framework's own idiom, not a finding about the shipped code
-// security is meant to gate. The trailing globs close that gap: bandit
-// matches -x entries against the full scanned path (always "./"-relative
-// here, since runSecurity scans ".") with fnmatch, whose "*" crosses
-// directory separators, so a leading "*/" reaches a matching base name under
-// any number of parent directories, the root included.
-const banditExcludeDirs = "./.venv,./venv,./.git,./build,./dist,./.mypy_cache,./.pytest_cache,./.ruff_cache,./__pycache__,./tests,./test,*/test_*.py,*/*_test.py"
+// tree, pytest's own two file-naming conventions (test_*.py, *_test.py)
+// wherever they occur, and workflow.go's census-exclusion rule. Without the
+// first group, -r's recursion walks straight into .venv and reports every
+// installed third-party package's own findings as if they belonged to the
+// project under test. The directory entries (./tests, ./test) only reach a
+// test tree that sits at the scan root; a project that nests a test module
+// beside the code it exercises, or under a package subdirectory rather than
+// a top-level tests/ folder, leaves bandit's B101 firing on every bare
+// `assert` there — a false positive on the test framework's own idiom, not a
+// finding about the shipped code security is meant to gate. The trailing
+// test-name globs close that gap: bandit matches -x entries against the full
+// scanned path (always "./"-relative here, since runSecurity scans ".") with
+// fnmatch, whose "*" crosses directory separators, so a leading "*/" reaches
+// a matching base name under any number of parent directories, the root
+// included. The census entries close a third gap the directory list above
+// cannot: a target.Dir at the repository root has bandit's -r walk the
+// filesystem directly, which ignores .gitignore, so a linked worktree or a
+// tracked project directory would otherwise be scanned as if it belonged to
+// the project under test, exactly the tree workflow.go's own
+// census-exclusion rule (censusExcludedPrefixes) already keeps out of its
+// own population.
+var banditExcludeDirs = buildBanditExcludeDirs()
+
+// buildBanditExcludeDirs appends censusExcludedPrefixes to bandit's own
+// fixed exclude list, in the "./"-relative fnmatch shape -x expects, so a
+// change to the shared census-exclusion rule never has to be copied here by
+// hand.
+//
+// Each census prefix ships with its trailing separator kept and a "*" added
+// ("./.dat/*"), which is what makes the entry a glob rather than a bare
+// path. Bandit tests an -x entry two ways (_is_file_included): fnmatch
+// against the scanned path, and raw substring containment. A bare "./.dat"
+// only survives the first way while a ./.dat directory happens to exist —
+// discover_files rewrites an entry that os.path.isdir accepts to
+// "./.dat/*" — and in a repository with no .dat/ the entry falls through to
+// the substring test, which silently drops every top-level path merely
+// beginning ".dat" (./.datadog, ./.database) from the security scan.
+// Carrying the separator makes the entry a glob unconditionally, matching
+// excludedFromTracked's own prefix boundary and never a look-alike sibling.
+func buildBanditExcludeDirs() string {
+	entries := []string{
+		"./.venv", "./venv", "./.git", "./build", "./dist",
+		"./.mypy_cache", "./.pytest_cache", "./.ruff_cache", "./__pycache__",
+		"./tests", "./test", "*/test_*.py", "*/*_test.py",
+	}
+	for _, p := range censusExcludedPrefixes {
+		entries = append(entries, "./"+p+"*")
+	}
+	return strings.Join(entries, ",")
+}
 
 // runSecurity runs bandit against target.Dir and turns its JSON report into
 // diagnostics. -r recurses the project tree (skipping banditExcludeDirs);
@@ -310,23 +345,36 @@ const pythonCoverageFile = "coverage.xml"
 
 // pytestNoTestsExitCode is the status pytest returns when a run collects zero
 // tests. Both test pairs treat it as a vacuous pass rather than a failure: a
-// project with no e2e-marked test, or an adopter whose unit suite is empty, has
+// project with no e2e test file, or an adopter whose unit suite is empty, has
 // nothing to fail — the same stance the cargo-nextest pairs take with
 // --no-tests=pass for a crate that ships no tests of the kind being run. It is
-// distinct from pytest's usage-error exit (a missing pytest-cov, say), which is
-// a real failure and still falls through to the exit-code fallback below.
+// distinct from pytest's usage-error exit (an argument pytest itself rejects),
+// which is a real failure and still falls through to the exit-code fallback
+// below.
 const pytestNoTestsExitCode = 5
 
+// pytestE2EKeyword is the `-k` expression that partitions a project's tests
+// between the two test pairs, by path rather than by a custom marker: pytest
+// node IDs carry the collected file's path, so a substring match against
+// "e2e" reaches any test living under a path segment or filename that names
+// it — e.g. tests/test_e2e.py — the same convention Rust's e2e pair reads
+// off `tests/*.rs` and Go's off "*_e2e_test.go", neither of which needs a
+// project to annotate an individual test either. runE2ETest's own `-k` is
+// this expression bare; runUnitTest's is its negation, so the two pairs
+// partition the project's tests with no overlap.
+const pytestE2EKeyword = "e2e"
+
 // runUnitTest runs the unit-test pair through `uv run pytest`, adding
-// coverage in this one invocation rather than a second one (pytest-cov,
-// resolved the same way pytest itself is — a project dev dependency, never a
-// toolchain pin) — mirroring Go's gotestsum wrapper and Rust's cargo-llvm-cov
-// nextest (OD50). `-m "not e2e"` excludes the e2e-marked suite runE2ETest
-// owns, the exact complement of its own `-m e2e`, so the two test pairs
-// partition the project's tests.
+// coverage in this one invocation rather than a second one — mirroring Go's
+// gotestsum wrapper and Rust's cargo-llvm-cov nextest (OD50). pytest-cov is
+// added through `--with`, an ephemeral addition to this one invocation's
+// environment, rather than assumed as a project dev dependency: a project
+// that already depends on it gets the same package from its own resolution,
+// and one that does not still gets a coverage report instead of pytest's own
+// "unrecognized arguments" usage error on an unknown flag.
 func (pythonAdapter) runUnitTest(ctx context.Context, target Target) ([]Diagnostic, error) {
 	res, err := runTool(ctx, target.Dir, "uv", []string{
-		"run", "pytest", "-m", "not e2e",
+		"run", "--with", "pytest-cov", "pytest", "-k", "not " + pytestE2EKeyword,
 		"--cov=.", "--cov-report=xml:" + filepath.Join(target.Dir, pythonCoverageFile),
 	})
 	if err != nil {
@@ -342,15 +390,17 @@ func (pythonAdapter) runUnitTest(ctx context.Context, target Target) ([]Diagnost
 	return diags, nil
 }
 
-// runE2ETest runs the e2e-test pair through `uv run pytest -m e2e`: an
-// e2e-marked test imports pytest-playwright's fixtures, which drive an
-// actual Chromium instance rather than anything this adapter spawns itself.
-// Per OD61, Playwright's Python distribution ships its own Chromium, unlike
-// Go's chromedp (which needs an ambient Chrome the CI template installs
-// separately) — so no browser-install step belongs here or in the caller
-// that invokes this check.
+// runE2ETest runs the e2e-test pair through `uv run pytest -k e2e`: a test
+// under an e2e-named path imports pytest-playwright's fixtures, which drive
+// an actual Chromium instance rather than anything this adapter spawns
+// itself. Per OD61, Playwright's Python distribution ships its own Chromium,
+// unlike Go's chromedp (which needs an ambient Chrome the CI template
+// installs separately) — so no browser-install step belongs here or in the
+// caller that invokes this check. pytest-playwright is added through
+// `--with` for the same reason runUnitTest adds pytest-cov that way: a
+// project need not declare it as its own dev dependency for the check to run.
 func (pythonAdapter) runE2ETest(ctx context.Context, target Target) ([]Diagnostic, error) {
-	res, err := runTool(ctx, target.Dir, "uv", []string{"run", "pytest", "-m", "e2e"})
+	res, err := runTool(ctx, target.Dir, "uv", []string{"run", "--with", "pytest-playwright", "pytest", "-k", pytestE2EKeyword})
 	if err != nil {
 		return nil, err
 	}
