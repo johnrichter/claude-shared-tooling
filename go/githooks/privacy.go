@@ -104,24 +104,99 @@ var privateNetworkURL = regexp.MustCompile(
 		`|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})` +
 		hostTerminator)
 
-// reservedSentinelSuffix matches an RFC 6761 reserved-TLD label (.invalid,
-// .test, .localhost, or .example - including the RFC 2606 example.{com,net,
-// org} second-level domains) anchored at the start of whatever immediately
-// follows an internal-hostname match, itself followed by hostTerminator: a
-// genuine end of host, never another "." introducing more host content. Go's
-// RE2 engine has no lookahead, so unlike the negative-lookahead this filter
-// mirrors, it is applied by the caller against the text right after a match
-// rather than embedded in the hostname pattern itself - the same exclusion,
-// expressed as a post-match check instead of a zero-width assertion.
+// reservedSentinelDomains is the RFC 6761 reserved-TLD (.invalid, .test,
+// .localhost) plus RFC 2606 documentation-domain (.example, and the
+// example.{com,net,org} second-level domains) alternation, named once so the
+// two rules that consume it - the internal-hostname sentinel filter
+// (reservedSentinelSuffix) and the employee-email reserved-domain exemption
+// (reservedEmailDomain) - share one declaration and never drift apart. It
+// carries no anchors or terminators; each consumer adds its own.
+const reservedSentinelDomains = `invalid|test|example(?:\.(?:com|net|org))?|localhost`
+
+// reservedSentinelSuffix matches a reservedSentinelDomains member anchored at
+// the start of whatever immediately follows an internal-hostname match, itself
+// followed by hostTerminator: a genuine end of host, never another "."
+// introducing more host content. Go's RE2 engine has no lookahead, so unlike
+// the negative-lookahead this filter mirrors, it is applied by the caller
+// against the text right after a match rather than embedded in the hostname
+// pattern itself - the same exclusion, expressed as a post-match check instead
+// of a zero-width assertion. It exempts the reserved-hostname false-alarm
+// shape (e.g. host.corp.test).
 var reservedSentinelSuffix = regexp.MustCompile(
-	`(?i)^\.(?:invalid|test|example(?:\.(?:com|net|org))?|localhost)` + hostTerminator)
+	`(?i)^\.(?:` + reservedSentinelDomains + `)` + hostTerminator)
+
+// reservedEmailDomain matches an email domain that falls under
+// reservedSentinelDomains - the same reserved set the internal-hostname rule
+// names. Input is a lowercased email domain (emailDomain's output); output is
+// a match when that domain is, or ends in, a reserved documentation/placeholder
+// domain, e.g. remote.example.com or ci.test. The (?:^|\.) anchor makes the
+// reserved name a whole-label suffix, so a lookalike domain (notexample.com,
+// mytestbed) never matches and the exemption cannot fail open. It exempts the
+// reserved-domain false-alarm shape.
+var reservedEmailDomain = regexp.MustCompile(
+	`(?i)(?:^|\.)(?:` + reservedSentinelDomains + `)$`)
+
+// publishedSharedAliases is the organization's own public role addresses -
+// shared mailboxes published for external contact, never a single employee's
+// identity. Each key is a full address matched case-insensitively as a whole,
+// so exempting one (e.g. support@datadoghq.com) can never exempt a personal
+// address at the same domain (e.g. alex.morgan@datadoghq.com stays a hit).
+// Holding these in the rule's own default set moves the shared-alias
+// false-alarm shape out of per-repository caller configuration, so no fleet
+// repository has to configure it.
+var publishedSharedAliases = map[string]bool{
+	"support@datadoghq.com": true,
+}
+
+// sshRemoteUser is the fixed service account every SSH/git remote string
+// authenticates as - the "git" in git@github.com:org/repo.git and in
+// git+ssh://git@host/org/repo. It is a service identity, never a person, so an
+// email-shaped token whose whole local part is this user is a clone URL rather
+// than an employee address.
+const sshRemoteUser = "git"
+
+// isSSHRemote reports whether an email-shaped match is really an SSH/git remote
+// string rather than an employee address. Input is the raw matched text;
+// output is true only when its local part is exactly sshRemoteUser - the fixed
+// prefix every such remote carries (git@github.com..., git+ssh://git@host...).
+// A personal address, whose local part is a person's name, is never exempted
+// here, so this cannot fail open. It exempts the SSH-remote-string false-alarm
+// shape.
+func isSSHRemote(match string) bool {
+	local, _, ok := strings.Cut(match, "@")
+	return ok && strings.EqualFold(local, sshRemoteUser)
+}
+
+// employeeEmailExempt reports whether an email-shaped match is a known false
+// alarm rather than an internal-identifier hit. Inputs are the raw matched text
+// and the caller's optional allow-list (allowed, keyed by lowercased domain);
+// output is true when the match falls under any exemption. It exempts the three
+// false-alarm shapes in the rule's own default set - a reserved domain
+// (reservedEmailDomain), a published shared alias (publishedSharedAliases) and
+// an SSH remote string (isSSHRemote) - so no repository configures one, plus
+// the caller allow-list, which stays available but is not required. A real
+// employee-shaped address matches none of these and stays a hit.
+func employeeEmailExempt(match string, allowed map[string]bool) bool {
+	domain := strings.ToLower(emailDomain(match))
+	switch {
+	case allowed[domain]:
+		return true
+	case reservedEmailDomain.MatchString(domain):
+		return true
+	case publishedSharedAliases[strings.ToLower(match)]:
+		return true
+	default:
+		return isSSHRemote(match)
+	}
+}
 
 // internalIDStrict is the public-tier internal-identifier posture: internal
 // hostnames, private-network URLs, and issue-tracker links - none of which
 // match a bare company-name mention in prose. The employee-email check is a
 // fourth member of this posture (see PrivacyOptions.EmployeeEmail); it is
-// appended per call, not baked in here, since it also carries a
-// caller-configurable allow-list on top of its one hardcoded default domain.
+// appended per call, not baked in here, since it also carries an optional
+// caller-configurable allow-list on top of its own default exemptions (see
+// employeeEmailExempt).
 //
 // The internal-hostname pattern's match ends right at the word boundary
 // after corp/internal/intranet/lan, so it matches equally whether that
@@ -145,17 +220,11 @@ var internalIDRelaxed = []markerPattern{
 	{privateNetworkURL, "private/loopback network URL"},
 }
 
-// defaultAllowedEmailDomain is the one domain the employee-email check
-// allows unconditionally, regardless of any caller configuration: the RFC
-// 2606 reserved documentation-example domain, so a doc or test file's
-// user@example.com never false-positives.
-const defaultAllowedEmailDomain = "example.com"
-
 // employeeEmailPattern matches any email-address-shaped string in scanned
 // text. The check's polarity is allow-list, not deny-list: every real-looking
-// address is a candidate internal identifier, and EmployeeEmailCheck.
-// AllowedDomains (plus defaultAllowedEmailDomain) is what narrows that down,
-// not what the pattern alternates over.
+// address is a candidate internal identifier, and employeeEmailExempt - the
+// rule's own default exemptions plus EmployeeEmailCheck.AllowedDomains - is
+// what narrows that down, not what the pattern alternates over.
 //
 // The last domain label - the TLD - must be either letters-only and at least
 // two characters, or a punycode-shaped internationalized-domain-name (IDN)
@@ -194,14 +263,14 @@ var employeeEmailPattern = regexp.MustCompile(
 
 // EmployeeEmailCheck configures the public tier's employee-email member of
 // the internal-identifier posture: any email-address-shaped string found in
-// scanned text is flagged as an internal identifier unless its domain,
-// compared case-insensitively, is defaultAllowedEmailDomain or one of
-// AllowedDomains.
+// scanned text is flagged as an internal identifier unless it falls under one
+// of the rule's own default exemptions (see employeeEmailExempt) or its domain,
+// compared case-insensitively, is one of AllowedDomains.
 //
 // The zero value still runs the check at full strength: an address is flagged
-// unless it is at defaultAllowedEmailDomain, since this posture has no
-// caller-configured domain to fall back on being "off" - a caller who wants
-// no additional exemptions simply leaves AllowedDomains unset.
+// unless a default exemption covers it, since the default exemptions already
+// cover every known false-alarm shape - a caller who wants no additional
+// exemptions simply leaves AllowedDomains unset.
 type EmployeeEmailCheck struct {
 	// AllowedDomains are matched as literal text, never as patterns, and
 	// case-insensitively against a detected address's domain: a domain here
@@ -212,13 +281,13 @@ type EmployeeEmailCheck struct {
 	AllowedDomains []string
 }
 
-// allowedDomains returns the domains the employee-email check must never
-// flag: defaultAllowedEmailDomain plus every entry of c.AllowedDomains,
-// lowercased, matching how a matched address's domain is looked up. The
-// returned set is never empty - defaultAllowedEmailDomain always applies,
-// even against the zero value.
+// allowedDomains returns the extra domains the caller marked never-flag: every
+// entry of c.AllowedDomains, lowercased, matching how a matched address's
+// domain is looked up. The set is optional and may be empty - the rule's own
+// default exemptions (see employeeEmailExempt) cover the known false-alarm
+// shapes without it, so a caller who configures nothing gets an empty map.
 func (c EmployeeEmailCheck) allowedDomains() map[string]bool {
-	allowed := map[string]bool{defaultAllowedEmailDomain: true}
+	allowed := make(map[string]bool)
 	for _, d := range c.AllowedDomains {
 		if d = strings.TrimSpace(d); d == "" {
 			continue
@@ -260,9 +329,9 @@ type PrivacyOptions struct {
 	SecretExemptRules []fsx.Rule
 	// EmployeeEmail configures the public tier's employee-email check (see
 	// EmployeeEmailCheck), which runs unconditionally at that tier: its zero
-	// value still flags any email-shaped address not at
-	// defaultAllowedEmailDomain, so a caller who wants additional exempt
-	// domains supplies AllowedDomains.
+	// value still flags any email-shaped address the rule's own default
+	// exemptions do not cover (see employeeEmailExempt), so a caller who wants
+	// additional exempt domains supplies AllowedDomains.
 	EmployeeEmail EmployeeEmailCheck
 }
 
@@ -280,11 +349,13 @@ type PrivacyOptions struct {
 // whole-file and is skipped entirely for a file opts.SecretExemptRules
 // resolves to SkipClass (see PrivacyOptions.SecretExemptRules); its other
 // exemptions are by exact matched value (see awsExampleAccessKeyIDs). The
-// internal-identifier check runs whole-file with no path exemption; its only
-// exemption is by matched value's domain (see PrivacyOptions.EmployeeEmail.
-// AllowedDomains). Each of the three checks has its own independent
-// exemption mechanism, so exempting a path from one never exempts it from
-// the others.
+// internal-identifier check runs whole-file with no path exemption; its
+// exemptions are by matched value - the internal-hostname rule filters a
+// reserved-sentinel suffix (see reservedSentinelSuffix), and the employee-email
+// rule filters the reserved-domain, published-shared-alias and SSH-remote-string
+// false-alarm shapes plus the caller allow-list (see employeeEmailExempt). Each
+// of the three checks has its own independent exemption mechanism, so exempting
+// a path from one never exempts it from the others.
 //
 // A pattern in MarkerExemptRules or SecretExemptRules that is not a valid
 // glob returns an error naming the ruleset and the pattern before any file is
@@ -347,7 +418,7 @@ func ScanPrivacy(root string, tier PrivacyTier, opts PrivacyOptions) (failures, 
 		for _, m := range internalID {
 			for _, span := range m.re.FindAllStringIndex(text, -1) {
 				match := text[span[0]:span[1]]
-				if m.label == employeeEmailLabel && allowedEmailDomains[strings.ToLower(emailDomain(match))] {
+				if m.label == employeeEmailLabel && employeeEmailExempt(match, allowedEmailDomains) {
 					continue
 				}
 				if m.label == internalHostnameLabel && reservedSentinelSuffix.MatchString(text[span[1]:]) {
