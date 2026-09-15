@@ -3,6 +3,7 @@ package toolchain
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/johnrichter/claude-shared-tooling/go/clikit"
+	"github.com/johnrichter/claude-shared-tooling/go/sysops"
 )
 
 // TestSanityPythonAdapterRegistered checks the Python adapter self-registers
@@ -227,13 +229,17 @@ func TestSanityParsePytestFailuresRecognizesFailedLines(t *testing.T) {
 
 // TestSanityParseBanditJSONSeverityMapping checks HIGH and MEDIUM bandit
 // findings classify as errors, LOW classifies as a warning (mirroring
-// parseGosecJSON's own split), and each keeps its test ID as Code.
+// parseGosecJSON's own split), each keeps its test ID as Code, and ok is
+// true for a report that parsed.
 func TestSanityParseBanditJSONSeverityMapping(t *testing.T) {
 	report := `{"results":[
 		{"filename":"a.py","issue_severity":"HIGH","issue_text":"hardcoded password","line_number":4,"test_id":"B105"},
 		{"filename":"b.py","issue_severity":"LOW","issue_text":"assert used","line_number":2,"test_id":"B101"}
 	]}`
-	diags := parseBanditJSON([]byte(report))
+	diags, ok := parseBanditJSON([]byte(report))
+	if !ok {
+		t.Fatalf("parseBanditJSON ok = false, want true for a well-formed report")
+	}
 	if len(diags) != 2 {
 		t.Fatalf("parseBanditJSON = %+v, want 2 diagnostics", diags)
 	}
@@ -242,6 +248,169 @@ func TestSanityParseBanditJSONSeverityMapping(t *testing.T) {
 	}
 	if diags[1].Code != "B101" || diags[1].Severity != SeverityWarning {
 		t.Errorf("LOW finding = %+v, want code B101 and warning severity", diags[1])
+	}
+}
+
+// TestSanityParseBanditJSONUnparseableReturnsNotOK checks malformed or
+// truncated stdout reports ok=false with no diagnostics, leaving
+// banditDiagnostics to decide between a truncation warning and the exit-code
+// fallback.
+func TestSanityParseBanditJSONUnparseableReturnsNotOK(t *testing.T) {
+	diags, ok := parseBanditJSON([]byte(`{"results":[{"filename":"a.py","issue_sever`))
+	if ok {
+		t.Fatalf("parseBanditJSON ok = true, want false for truncated JSON")
+	}
+	if len(diags) != 0 {
+		t.Errorf("parseBanditJSON diags = %+v, want none for unparseable stdout", diags)
+	}
+}
+
+// TestSanityBanditDiagnosticsTruncatedStdoutWarnsWithoutErrorFallback checks
+// SC43 part one: a result whose stdout was cut off by the runner's own
+// capture limit, and does not parse, yields exactly one warning-severity
+// diagnostic naming the capture limit and the log reference — never
+// bandit's ordinary error-severity, exit-code fallback.
+func TestSanityBanditDiagnosticsTruncatedStdoutWarnsWithoutErrorFallback(t *testing.T) {
+	res := &sysops.Result{
+		ExitCode:        1,
+		Stdout:          []byte(`{"results":[{"filename":"a.py"`),
+		StdoutTruncated: true,
+	}
+	diags := banditDiagnostics(res)
+	if len(diags) != 1 {
+		t.Fatalf("banditDiagnostics(truncated) = %+v, want exactly 1 diagnostic", diags)
+	}
+	if diags[0].Severity != SeverityWarning {
+		t.Errorf("banditDiagnostics(truncated) severity = %q, want warning, never the error-severity fallback", diags[0].Severity)
+	}
+	if !strings.Contains(diags[0].Message, fmt.Sprint(sysops.DefaultMaxCaptureBytes)) {
+		t.Errorf("banditDiagnostics(truncated) message = %q, want it to name the capture limit %d", diags[0].Message, sysops.DefaultMaxCaptureBytes)
+	}
+	if !strings.Contains(diags[0].Message, "log_ref") {
+		t.Errorf("banditDiagnostics(truncated) message = %q, want it to name log_ref", diags[0].Message)
+	}
+}
+
+// TestSanityBanditDiagnosticsRealFailureKeepsCurrentBehaviour checks a real
+// non-zero exit with parseable findings is unaffected by the truncation
+// branch: this result also reports StdoutTruncated, and would wrongly
+// collapse to the single truncation warning above if the truncation check
+// ran before the parse-success check.
+func TestSanityBanditDiagnosticsRealFailureKeepsCurrentBehaviour(t *testing.T) {
+	res := &sysops.Result{
+		ExitCode:        1,
+		StdoutTruncated: true,
+		Stdout: []byte(`{"results":[
+			{"filename":"a.py","issue_severity":"HIGH","issue_text":"hardcoded password","line_number":4,"test_id":"B105"}
+		]}`),
+	}
+	diags := banditDiagnostics(res)
+	if len(diags) != 1 || diags[0].Code != "B105" || diags[0].Severity != SeverityError {
+		t.Fatalf("banditDiagnostics(parseable, truncated) = %+v, want the real B105 finding untouched by the truncation branch", diags)
+	}
+}
+
+// TestSanityBanditDiagnosticsUnparseableNonZeroExitFallsBack checks a
+// non-truncated, unparseable result still falls back to the ordinary
+// error-severity, exit-code diagnostic — the behaviour SC43 leaves alone.
+func TestSanityBanditDiagnosticsUnparseableNonZeroExitFallsBack(t *testing.T) {
+	res := &sysops.Result{ExitCode: 2, Stdout: []byte("not json")}
+	diags := banditDiagnostics(res)
+	if len(diags) != 1 || diags[0].Severity != SeverityError {
+		t.Fatalf("banditDiagnostics(unparseable, non-truncated) = %+v, want the error-severity exit-code fallback", diags)
+	}
+}
+
+// TestSanityDefaultMaxCaptureBytesUnchanged pins sysops.DefaultMaxCaptureBytes
+// so a later change to the capture cap is deliberate rather than incidental:
+// banditTruncatedDiagnostic's message, and every other adapter's fallback
+// framing, sizes it for a reading model's own context budget.
+func TestSanityDefaultMaxCaptureBytesUnchanged(t *testing.T) {
+	if sysops.DefaultMaxCaptureBytes != 1<<20 {
+		t.Fatalf("sysops.DefaultMaxCaptureBytes = %d, want %d (1 MiB) — a change here should be deliberate", sysops.DefaultMaxCaptureBytes, 1<<20)
+	}
+}
+
+// banditExcludeDirsOnly is the pre-SC43 exclude list: the same directory and
+// cache entries banditExcludeDirs still carries, minus its two trailing
+// base-name globs. TestSanityBanditDirectoryOnlyExcludeIsInsufficientAlone
+// runs real bandit with this list to show it alone cannot do what SC43 part
+// two requires.
+const banditExcludeDirsOnly = "./.venv,./venv,./.git,./build,./dist,./.mypy_cache,./.pytest_cache,./.ruff_cache,./__pycache__,./tests,./test"
+
+// banditFlaggedFiles runs real bandit against dir with exclude and returns
+// the set of files its JSON report still flags, keyed by their "./"-relative
+// path — the direct evidence of which files a given -x list actually
+// reaches, rather than a hand-modeled guess at bandit's own match rules.
+func banditFlaggedFiles(t *testing.T, dir, exclude string) map[string]bool {
+	t.Helper()
+	cmd := exec.Command("bandit", "-r", "-f", "json", "-x", exclude, ".")
+	cmd.Dir = dir
+	out, _ := cmd.Output() // bandit exits non-zero on any finding; that's expected here. Its own log lines go to stderr, so stdout alone stays valid JSON.
+	diags, ok := parseBanditJSON(out)
+	if !ok {
+		t.Fatalf("bandit -x %q produced unparseable output: %s", exclude, out)
+	}
+	flagged := make(map[string]bool, len(diags))
+	for _, d := range diags {
+		flagged[d.File] = true
+	}
+	return flagged
+}
+
+// writeBanditExcludeProbeTree lays out one bandit-triggering file (a
+// shell=True subprocess call, B602) at depth 0, depth 1 and depth 3 under a
+// pytest test_*.py name, plus one at the tree root under a plain source
+// name, in a fresh temp directory.
+func writeBanditExcludeProbeTree(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	const insecure = "import subprocess\nsubprocess.call(\"echo hi\", shell=True)\n"
+	for _, rel := range []string{"test_depth0.py", "pkg/test_depth1.py", "a/b/c/test_depth3.py", "real_source.py"} {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", rel, err)
+		}
+		if err := os.WriteFile(full, []byte(insecure), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	return dir
+}
+
+// TestSanityBanditExcludeReachesTestBaseNameAtAnyDepth is the real-bandit
+// evidence for SC43 part two: banditExcludeDirs' base-name globs skip a
+// pytest-convention test file at depth 0, 1 and 3, while a genuine non-test
+// source file at the tree root still gets flagged.
+func TestSanityBanditExcludeReachesTestBaseNameAtAnyDepth(t *testing.T) {
+	requirePythonTool(t, "bandit")
+	dir := writeBanditExcludeProbeTree(t)
+
+	flagged := banditFlaggedFiles(t, dir, banditExcludeDirs)
+	for _, rel := range []string{"./test_depth0.py", "./pkg/test_depth1.py", "./a/b/c/test_depth3.py"} {
+		if flagged[rel] {
+			t.Errorf("banditExcludeDirs still flags %s, want it excluded at every depth", rel)
+		}
+	}
+	if !flagged["./real_source.py"] {
+		t.Errorf("banditExcludeDirs excluded ./real_source.py, want the non-test source still flagged")
+	}
+}
+
+// TestSanityBanditDirectoryOnlyExcludeIsInsufficientAlone checks the
+// pre-SC43 directory entries (./tests, ./test) alone leave a nested test
+// file reachable by real bandit — the gap the new base-name globs in
+// banditExcludeDirs close.
+func TestSanityBanditDirectoryOnlyExcludeIsInsufficientAlone(t *testing.T) {
+	requirePythonTool(t, "bandit")
+	dir := writeBanditExcludeProbeTree(t)
+
+	flagged := banditFlaggedFiles(t, dir, banditExcludeDirsOnly)
+	if !flagged["./pkg/test_depth1.py"] {
+		t.Errorf("directory-only exclude reaches ./pkg/test_depth1.py, want it insufficient there")
+	}
+	if !flagged["./a/b/c/test_depth3.py"] {
+		t.Errorf("directory-only exclude reaches ./a/b/c/test_depth3.py, want it insufficient there")
 	}
 }
 
