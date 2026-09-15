@@ -1,7 +1,10 @@
 package toolchain
 
-// Adversarial coverage for resolveCargoLock (T8 criterion 6, K8-R1-AUDIT):
-// the ancestor-walk cargo-audit's --file argument depends on.
+// Adversarial coverage for cargo.go's two ancestor walks (T8 criterion 6,
+// K8-R1-AUDIT): resolveCargoLock, which cargo-audit's --file argument
+// depends on, and resolveCargoDenyConfig, which decides whether
+// runSecurity runs cargo-deny's full four-group check or scopes it to bans
+// and sources.
 
 import (
 	"os"
@@ -76,5 +79,59 @@ func TestResolveCargoLockRejectsDirectoryNamedCargoLock(t *testing.T) {
 	}
 	if got := resolveCargoLock(member); got != "" {
 		t.Fatalf("resolveCargoLock(%q) = %q, want \"\" (Cargo.lock is a directory, not a lockfile)", member, got)
+	}
+}
+
+// TestResolveCargoDenyConfigFindsAncestor: a workspace-member dir with no
+// deny.toml of its own resolves to the one at the workspace root, matching
+// cargo-deny's own config resolution (measured against cargo-deny 0.20.2,
+// which finds an ancestor deny.toml from a member or standalone crate dir
+// several levels down). A mismatch here would run the full four-group check
+// against a crate cargo-deny then judges under its default,
+// deny-every-license policy — the false failure the scoping exists to
+// avoid.
+func TestResolveCargoDenyConfigFindsAncestor(t *testing.T) {
+	root := t.TempDir()
+	cfg := filepath.Join(root, "deny.toml")
+	if err := os.WriteFile(cfg, []byte("[licenses]\nallow = []\n"), 0o644); err != nil {
+		t.Fatalf("write deny.toml: %v", err)
+	}
+	member := filepath.Join(root, "members", "bm25")
+	if err := os.MkdirAll(member, 0o755); err != nil {
+		t.Fatalf("mkdir member: %v", err)
+	}
+	got := resolveCargoDenyConfig(member)
+	want, _ := filepath.Abs(cfg)
+	if got != want {
+		t.Fatalf("resolveCargoDenyConfig(%q) = %q, want %q", member, got, want)
+	}
+}
+
+// TestResolveCargoDenyConfigNoneFoundReturnsEmpty: no deny.toml anywhere up
+// to the filesystem root returns "" rather than looping forever — the
+// runSecurity caller reads "" as "this crate opted into no policy", and
+// scopes cargo-deny to bans and sources.
+func TestResolveCargoDenyConfigNoneFoundReturnsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	if got := resolveCargoDenyConfig(dir); got != "" {
+		t.Fatalf("resolveCargoDenyConfig(%q) = %q, want \"\" (no deny.toml exists under a fresh temp tree)", dir, got)
+	}
+}
+
+// TestResolveCargoDenyConfigRejectsDirectoryNamedDenyToml: a directory
+// literally named deny.toml must not be read as an opted-in policy, or the
+// full four-group check runs against a crate with no license allow-list at
+// all.
+func TestResolveCargoDenyConfigRejectsDirectoryNamedDenyToml(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "deny.toml"), 0o755); err != nil {
+		t.Fatalf("mkdir deny.toml: %v", err)
+	}
+	member := filepath.Join(root, "member")
+	if err := os.MkdirAll(member, 0o755); err != nil {
+		t.Fatalf("mkdir member: %v", err)
+	}
+	if got := resolveCargoDenyConfig(member); got != "" {
+		t.Fatalf("resolveCargoDenyConfig(%q) = %q, want \"\" (deny.toml is a directory, not a config file)", member, got)
 	}
 }

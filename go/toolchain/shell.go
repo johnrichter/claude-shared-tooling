@@ -560,27 +560,46 @@ func discoverBatsFiles(dir string) ([]string, error) {
 	return files, nil
 }
 
-// batsTagRE matches bats-core's own tag-declaration comment, either
-// `# bats file_tags=...` (applies to every test in the file) or
-// `# bats test_tags=...` (applies to the one test that follows it).
-var batsTagRE = regexp.MustCompile(`^#\s*bats\s+(?:file|test)_tags=`)
+// batsE2ETag is the tag OD51's convention puts on an e2e bats test, named
+// once so the tag batsFilesCarryE2ETag searches for and the one
+// batsFilterTagsArgs filters on read the same string.
+const batsE2ETag = "e2e"
 
-// batsFilesCarryTags reports whether any file in files declares a bats tag.
-// --filter-tags only ever excludes or selects a *tagged* test, so it is a
-// sound unit/e2e partition exactly when the suite actually tags its e2e
-// tests (OD51's convention) — and a false one otherwise: an untagged suite
-// matches a negated filter and is skipped outright by a positive one, so
-// the two test kinds would silently diverge into "runs everything" and
-// "runs nothing" rather than partitioning anything.
-func batsFilesCarryTags(files []string) bool {
+// batsTagRE captures the tag list out of bats-core's own tag-declaration
+// comment, either `# bats file_tags=...` (applies to every test in the file)
+// or `# bats test_tags=...` (applies to the one test that follows it).
+// Submatch 1 is the raw list, comma-separated per bats's own syntax.
+var batsTagRE = regexp.MustCompile(`^#\s*bats\s+(?:file|test)_tags=(.*)$`)
+
+// batsFilesCarryE2ETag reports whether any file in files declares
+// batsE2ETag. --filter-tags only ever excludes or selects a *tagged* test,
+// so it is a sound unit/e2e partition exactly when the suite actually tags
+// its e2e tests (OD51's convention) — and a false one otherwise: an
+// untagged test matches a negated filter and is skipped outright by a
+// positive one, so the two test kinds would silently diverge into "runs
+// everything" and "runs nothing" rather than partitioning anything.
+//
+// The predicate reads each declaration's tag *values*, not merely that some
+// declaration exists: a suite that tags something else entirely (`# bats
+// file_tags=slow`, say) carries no e2e tag for a positive filter to select,
+// so `--filter-tags e2e` over it selects zero tests and bats exits 0 — the
+// same vacuous pass an untagged suite gives, reached by adding an unrelated
+// tag anywhere in the suite.
+func batsFilesCarryE2ETag(files []string) bool {
 	for _, f := range files {
 		content, err := os.ReadFile(f)
 		if err != nil {
 			continue
 		}
 		for _, line := range strings.Split(string(content), "\n") {
-			if batsTagRE.MatchString(strings.TrimSpace(line)) {
-				return true
+			match := batsTagRE.FindStringSubmatch(strings.TrimSpace(line))
+			if match == nil {
+				continue
+			}
+			for _, tag := range strings.Split(match[1], ",") {
+				if strings.TrimSpace(tag) == batsE2ETag {
+					return true
+				}
 			}
 		}
 	}
@@ -604,19 +623,19 @@ func (a shellAdapter) runTest(ctx context.Context, target Target) ([]Diagnostic,
 
 // batsFilterTagsArgs returns the --filter-tags argument runUnitTest or
 // runE2ETest should append, given the discovered suite's bats files and
-// which kind is asking. It returns nil when no file in the suite declares a
-// bats tag at all: --filter-tags is only a sound partition over a suite that
-// actually tags its e2e tests (batsFilesCarryTags), so an untagged suite
-// runs in full for whichever kind is asked rather than being silently
+// which kind is asking. It returns nil when no file in the suite declares
+// the e2e tag: --filter-tags is only a sound partition over a suite that
+// actually tags its e2e tests (batsFilesCarryE2ETag), so a suite that tags
+// none runs in full for whichever kind is asked rather than being silently
 // bisected into "everything" and "nothing".
 func batsFilterTagsArgs(files []string, kind TestKind) []string {
-	if !batsFilesCarryTags(files) {
+	if !batsFilesCarryE2ETag(files) {
 		return nil
 	}
 	if kind == TestE2E {
-		return []string{"--filter-tags", "e2e"}
+		return []string{"--filter-tags", batsE2ETag}
 	}
-	return []string{"--filter-tags", "!e2e"}
+	return []string{"--filter-tags", "!" + batsE2ETag}
 }
 
 // runUnitTest runs the unit-test pair through bats wrapped in kcov, which

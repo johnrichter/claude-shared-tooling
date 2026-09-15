@@ -34,14 +34,17 @@ func requirePythonTool(t *testing.T, tool string) {
 	}
 }
 
-// pythonProbeDevDeps names every dev dependency the probe project's own
-// pyproject.toml declares: pytest is the runner both test pairs share,
-// pytest-cov is what runUnitTest's `--cov` flags need present in the
-// project's own dependency group (never a toolchain pin, per python.go's own
-// doc), and pytest-playwright supplies the `page` fixture an e2e-marked test
-// imports — proving the e2e dispatch drives Playwright's own test
-// integration rather than a bespoke browser harness this adapter spawns
-// itself.
+// pythonProbePyprojectTemplate is the probe project's own pyproject.toml,
+// declaring the shape an adopter takes when it has opted into both test
+// pairs' tooling itself: pytest is the runner both pairs share, pytest-cov
+// backs runUnitTest's `--cov` flags, and pytest-playwright supplies the
+// `page` fixture the e2e test imports — proving the e2e dispatch drives
+// Playwright's own test integration rather than a bespoke browser harness
+// this adapter spawns itself. Both plugins are declared here even though
+// runUnitTest and runE2ETest now add their own through `uv run --with`: a
+// project that declares them must keep working, and
+// writeBarePythonProject covers the complementary case of one that declares
+// neither.
 const pythonProbePyprojectTemplate = `[project]
 name = "pyprobe"
 version = "0.1.0"
@@ -60,10 +63,11 @@ build-backend = "hatchling.build"
 
 // writePythonProbeProject lays out a minimal uv project under a fresh
 // t.TempDir(): a src/pyprobe package holding initBody, a unit test
-// (tests/test_unit.py, the complement runUnitTest's `-m "not e2e"` selects),
-// and an e2e test (tests/test_e2e.py, marked e2e and taking pytest-playwright's
-// own `page` fixture, skipping its own body immediately since this sandbox has
-// no network to launch a real browser — the dispatch through `uv run pytest -m
+// (tests/test_unit.py, the complement runUnitTest's `-k "not e2e"` selects),
+// and an e2e test (tests/test_e2e.py, whose file name carries the `e2e` path
+// substring runE2ETest's own `-k e2e` selects, taking pytest-playwright's own
+// `page` fixture and skipping its own body immediately since this sandbox has
+// no network to launch a real browser — the dispatch through `uv run pytest -k
 // e2e` is what this probe exercises, not a live Chromium session). It then
 // runs `ruff format` once to seed every file at a formatter-clean baseline, the
 // same seeding role cargo fmt plays in writeRustProbeCrate, so format's own
