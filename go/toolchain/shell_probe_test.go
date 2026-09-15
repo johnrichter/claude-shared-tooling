@@ -205,6 +205,92 @@ func TestE2EShellAdapterBuildAndVetUnsupported(t *testing.T) {
 	}
 }
 
+// writeBareBatsFile writes a single untagged .bats file directly at dir's
+// root — no test/ subdirectory, no bats file_tags/test_tags annotation —
+// the shape a bats suite takes when a project never adopts OD51's tagging
+// convention. content is the file's full body.
+func writeBareBatsFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+}
+
+const shellBareUnitCleanBats = "#!/usr/bin/env bats\n\n@test \"probe passes\" {\n  [ 1 -eq 1 ]\n}\n"
+const shellBareUnitFaultBats = "#!/usr/bin/env bats\n\n@test \"probe fails\" {\n  [ 1 -eq 2 ]\n}\n"
+
+// TestE2EShellAdapterUnitTestSeparatesUntaggedBareBatsFile is the test-unit
+// pair's counter-probe for a suite with no test/ subdirectory and no bats
+// tag at all: a clean assertion must resolve EXIT 0 and a failing one must
+// resolve EXIT 20 with a positioned diagnostic, even though neither
+// shellTestDir nor a bats tag is present to lean on.
+func TestE2EShellAdapterUnitTestSeparatesUntaggedBareBatsFile(t *testing.T) {
+	requireShellTool(t, "bats")
+	requireShellTool(t, "kcov")
+	logDir := t.TempDir()
+
+	clean := t.TempDir()
+	writeBareBatsFile(t, clean, "probe.bats", shellBareUnitCleanBats)
+	res, err := Run(context.Background(), Target{Language: LanguageShell, Check: CheckTest, Test: TestUnit, Dir: clean}, Options{LogDir: logDir})
+	if err != nil {
+		t.Fatalf("Run(test unit) on a clean bare bats file: unexpected infrastructure error: %v", err)
+	}
+	if res.Status.ExitCode() != ExitSuccess {
+		t.Errorf("Run(test unit) on a clean bare bats file: EXIT %d, want %d", res.Status.ExitCode(), ExitSuccess)
+	}
+
+	fault := t.TempDir()
+	writeBareBatsFile(t, fault, "probe.bats", shellBareUnitFaultBats)
+	res, err = Run(context.Background(), Target{Language: LanguageShell, Check: CheckTest, Test: TestUnit, Dir: fault}, Options{LogDir: logDir})
+	if err != nil {
+		t.Fatalf("Run(test unit) on a fault bare bats file: unexpected infrastructure error: %v", err)
+	}
+	if res.Status.ExitCode() != ExitCheckFailed {
+		t.Errorf("Run(test unit) on a fault bare bats file: EXIT %d, want %d", res.Status.ExitCode(), ExitCheckFailed)
+	}
+	if len(res.Diagnostics) == 0 {
+		t.Errorf("Run(test unit) on a fault bare bats file: no diagnostics, want one naming the failing test")
+	}
+}
+
+const shellBareE2ECliScript = "#!/usr/bin/env bash\necho \"hi, $1\"\n"
+const shellBareE2ECleanBats = "#!/usr/bin/env bats\n\n@test \"cli greets\" {\n  run bash \"$BATS_TEST_DIRNAME/cli.sh\" world\n  [ \"$output\" = \"hi, world\" ]\n}\n"
+const shellBareE2EFaultBats = "#!/usr/bin/env bats\n\n@test \"cli greets\" {\n  run bash \"$BATS_TEST_DIRNAME/cli.sh\" world\n  [ \"$output\" = \"hello, world\" ]\n}\n"
+
+// TestE2EShellAdapterE2ETestSeparatesUntaggedBareBatsFile is the test-e2e
+// pair's counter-probe for the same untagged, test/-free shape: a bats file
+// asserting the wrong CLI output must resolve EXIT 20 with a positioned
+// diagnostic, and the correct assertion must resolve EXIT 0.
+func TestE2EShellAdapterE2ETestSeparatesUntaggedBareBatsFile(t *testing.T) {
+	requireShellTool(t, "bats")
+	logDir := t.TempDir()
+
+	clean := t.TempDir()
+	writeBareBatsFile(t, clean, "cli.sh", shellBareE2ECliScript)
+	writeBareBatsFile(t, clean, "cli.bats", shellBareE2ECleanBats)
+	res, err := Run(context.Background(), Target{Language: LanguageShell, Check: CheckTest, Test: TestE2E, Dir: clean}, Options{LogDir: logDir})
+	if err != nil {
+		t.Fatalf("Run(test e2e) on a clean bare bats file: unexpected infrastructure error: %v", err)
+	}
+	if res.Status.ExitCode() != ExitSuccess {
+		t.Errorf("Run(test e2e) on a clean bare bats file: EXIT %d, want %d", res.Status.ExitCode(), ExitSuccess)
+	}
+
+	fault := t.TempDir()
+	writeBareBatsFile(t, fault, "cli.sh", shellBareE2ECliScript)
+	writeBareBatsFile(t, fault, "cli.bats", shellBareE2EFaultBats)
+	res, err = Run(context.Background(), Target{Language: LanguageShell, Check: CheckTest, Test: TestE2E, Dir: fault}, Options{LogDir: logDir})
+	if err != nil {
+		t.Fatalf("Run(test e2e) on a fault bare bats file: unexpected infrastructure error: %v", err)
+	}
+	if res.Status.ExitCode() != ExitCheckFailed {
+		t.Errorf("Run(test e2e) on a fault bare bats file: EXIT %d, want %d", res.Status.ExitCode(), ExitCheckFailed)
+	}
+	if len(res.Diagnostics) == 0 {
+		t.Errorf("Run(test e2e) on a fault bare bats file: no diagnostics, want one naming the failing test")
+	}
+}
+
 // TestShellDiscoveryMatchesF49Population is the test-strategy's discovery
 // test: discoverShellFiles must find every .sh file and every extensionless
 // shell-shebang file at or below the root, .githooks/ included (OD54), and

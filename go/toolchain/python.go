@@ -310,23 +310,36 @@ const pythonCoverageFile = "coverage.xml"
 
 // pytestNoTestsExitCode is the status pytest returns when a run collects zero
 // tests. Both test pairs treat it as a vacuous pass rather than a failure: a
-// project with no e2e-marked test, or an adopter whose unit suite is empty, has
+// project with no e2e test file, or an adopter whose unit suite is empty, has
 // nothing to fail — the same stance the cargo-nextest pairs take with
 // --no-tests=pass for a crate that ships no tests of the kind being run. It is
-// distinct from pytest's usage-error exit (a missing pytest-cov, say), which is
-// a real failure and still falls through to the exit-code fallback below.
+// distinct from pytest's usage-error exit (an argument pytest itself rejects),
+// which is a real failure and still falls through to the exit-code fallback
+// below.
 const pytestNoTestsExitCode = 5
 
+// pytestE2EKeyword is the `-k` expression that partitions a project's tests
+// between the two test pairs, by path rather than by a custom marker: pytest
+// node IDs carry the collected file's path, so a substring match against
+// "e2e" reaches any test living under a path segment or filename that names
+// it — e.g. tests/test_e2e.py — the same convention Rust's e2e pair reads
+// off `tests/*.rs` and Go's off "*_e2e_test.go", neither of which needs a
+// project to annotate an individual test either. runE2ETest's own `-k` is
+// this expression bare; runUnitTest's is its negation, so the two pairs
+// partition the project's tests with no overlap.
+const pytestE2EKeyword = "e2e"
+
 // runUnitTest runs the unit-test pair through `uv run pytest`, adding
-// coverage in this one invocation rather than a second one (pytest-cov,
-// resolved the same way pytest itself is — a project dev dependency, never a
-// toolchain pin) — mirroring Go's gotestsum wrapper and Rust's cargo-llvm-cov
-// nextest (OD50). `-m "not e2e"` excludes the e2e-marked suite runE2ETest
-// owns, the exact complement of its own `-m e2e`, so the two test pairs
-// partition the project's tests.
+// coverage in this one invocation rather than a second one — mirroring Go's
+// gotestsum wrapper and Rust's cargo-llvm-cov nextest (OD50). pytest-cov is
+// added through `--with`, an ephemeral addition to this one invocation's
+// environment, rather than assumed as a project dev dependency: a project
+// that already depends on it gets the same package from its own resolution,
+// and one that does not still gets a coverage report instead of pytest's own
+// "unrecognized arguments" usage error on an unknown flag.
 func (pythonAdapter) runUnitTest(ctx context.Context, target Target) ([]Diagnostic, error) {
 	res, err := runTool(ctx, target.Dir, "uv", []string{
-		"run", "pytest", "-m", "not e2e",
+		"run", "--with", "pytest-cov", "pytest", "-k", "not " + pytestE2EKeyword,
 		"--cov=.", "--cov-report=xml:" + filepath.Join(target.Dir, pythonCoverageFile),
 	})
 	if err != nil {
@@ -342,15 +355,17 @@ func (pythonAdapter) runUnitTest(ctx context.Context, target Target) ([]Diagnost
 	return diags, nil
 }
 
-// runE2ETest runs the e2e-test pair through `uv run pytest -m e2e`: an
-// e2e-marked test imports pytest-playwright's fixtures, which drive an
-// actual Chromium instance rather than anything this adapter spawns itself.
-// Per OD61, Playwright's Python distribution ships its own Chromium, unlike
-// Go's chromedp (which needs an ambient Chrome the CI template installs
-// separately) — so no browser-install step belongs here or in the caller
-// that invokes this check.
+// runE2ETest runs the e2e-test pair through `uv run pytest -k e2e`: a test
+// under an e2e-named path imports pytest-playwright's fixtures, which drive
+// an actual Chromium instance rather than anything this adapter spawns
+// itself. Per OD61, Playwright's Python distribution ships its own Chromium,
+// unlike Go's chromedp (which needs an ambient Chrome the CI template
+// installs separately) — so no browser-install step belongs here or in the
+// caller that invokes this check. pytest-playwright is added through
+// `--with` for the same reason runUnitTest adds pytest-cov that way: a
+// project need not declare it as its own dev dependency for the check to run.
 func (pythonAdapter) runE2ETest(ctx context.Context, target Target) ([]Diagnostic, error) {
-	res, err := runTool(ctx, target.Dir, "uv", []string{"run", "pytest", "-m", "e2e"})
+	res, err := runTool(ctx, target.Dir, "uv", []string{"run", "--with", "pytest-playwright", "pytest", "-k", pytestE2EKeyword})
 	if err != nil {
 		return nil, err
 	}

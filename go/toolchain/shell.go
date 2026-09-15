@@ -524,18 +524,68 @@ func parseSemgrepJSON(stdout []byte) []Diagnostic {
 	return diags
 }
 
-// shellTestDir is the bats suite root this adapter looks for under
-// target.Dir — the one convention every shell project checked by this
-// adapter is expected to follow, mirroring the role a *_test.go suffix
-// plays for Go or an `e2e` pytest marker plays for Python. A target.Dir with
-// no such directory has nothing to test, and both test kinds report a
-// trivial pass rather than an error.
-const shellTestDir = "test"
-
 // shellUnitCoverageDir is the fixed directory runUnitTest writes kcov's
 // coverage report to, inside target.Dir — the same place a caller running
 // kcov by hand there would leave it.
 const shellUnitCoverageDir = "kcov-coverage"
+
+// discoverBatsFiles walks target.Dir and returns every .bats file at or
+// below it, sorted for a deterministic reading — the same tree-walk
+// discoverShellFiles runs for .sh files, applied to the suite bats itself
+// discovers when pointed at a directory with -r. A shell project names no
+// fixed suite-root convention this adapter can lean on (unlike Go's
+// *_test.go suffix or Python's `-k e2e` path match): a bats file can sit
+// anywhere under target.Dir, test/ included but never required.
+func discoverBatsFiles(dir string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.EqualFold(filepath.Ext(d.Name()), ".bats") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("toolchain: discover bats files under %s: %w", dir, err)
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+// batsTagRE matches bats-core's own tag-declaration comment, either
+// `# bats file_tags=...` (applies to every test in the file) or
+// `# bats test_tags=...` (applies to the one test that follows it).
+var batsTagRE = regexp.MustCompile(`^#\s*bats\s+(?:file|test)_tags=`)
+
+// batsFilesCarryTags reports whether any file in files declares a bats tag.
+// --filter-tags only ever excludes or selects a *tagged* test, so it is a
+// sound unit/e2e partition exactly when the suite actually tags its e2e
+// tests (OD51's convention) — and a false one otherwise: an untagged suite
+// matches a negated filter and is skipped outright by a positive one, so
+// the two test kinds would silently diverge into "runs everything" and
+// "runs nothing" rather than partitioning anything.
+func batsFilesCarryTags(files []string) bool {
+	for _, f := range files {
+		content, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(content), "\n") {
+			if batsTagRE.MatchString(strings.TrimSpace(line)) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // runTest dispatches on target.Test — the one piece of information Command
 // and Tool can never see, since their signature carries only the check —
@@ -552,42 +602,46 @@ func (a shellAdapter) runTest(ctx context.Context, target Target) ([]Diagnostic,
 	}
 }
 
-// shellTestTreeExists reports whether target.Dir has a bats suite root
-// (shellTestDir) at all, so a project with no shell tests reports a trivial
-// pass rather than an error from a tool given a directory that isn't there.
-func shellTestTreeExists(target Target) (bool, error) {
-	_, err := os.Stat(filepath.Join(target.Dir, shellTestDir))
-	if os.IsNotExist(err) {
-		return false, nil
+// batsFilterTagsArgs returns the --filter-tags argument runUnitTest or
+// runE2ETest should append, given the discovered suite's bats files and
+// which kind is asking. It returns nil when no file in the suite declares a
+// bats tag at all: --filter-tags is only a sound partition over a suite that
+// actually tags its e2e tests (batsFilesCarryTags), so an untagged suite
+// runs in full for whichever kind is asked rather than being silently
+// bisected into "everything" and "nothing".
+func batsFilterTagsArgs(files []string, kind TestKind) []string {
+	if !batsFilesCarryTags(files) {
+		return nil
 	}
-	if err != nil {
-		return false, fmt.Errorf("toolchain: stat %s: %w", shellTestDir, err)
+	if kind == TestE2E {
+		return []string{"--filter-tags", "e2e"}
 	}
-	return true, nil
+	return []string{"--filter-tags", "!e2e"}
 }
 
 // runUnitTest runs the unit-test pair through bats wrapped in kcov, which
 // produces a coverage report (shellUnitCoverageDir) in this one run rather
 // than a second invocation (OD51), mirroring Go's gotestsum wrapper and
-// Rust's cargo-llvm-cov nextest (OD50). --filter-tags '!e2e' excludes the
-// e2e-tagged suite runE2ETest owns, the exact complement of its own
-// --filter-tags e2e, so the two test pairs partition the project's bats
-// files the same way Python's `-m "not e2e"`/`-m e2e` partition its pytest
-// suite.
+// Rust's cargo-llvm-cov nextest (OD50). batsFilterTagsArgs excludes the
+// e2e-tagged suite runE2ETest owns wherever the project actually tags one,
+// the same partition Python's `-k "not e2e"`/`-k e2e` draws over its pytest
+// suite; an untagged suite has no such split and runs here in full.
 func (a shellAdapter) runUnitTest(ctx context.Context, target Target) ([]Diagnostic, error) {
-	exists, err := shellTestTreeExists(target)
+	files, err := discoverBatsFiles(target.Dir)
 	if err != nil {
 		return nil, err
 	}
-	if !exists {
+	if len(files) == 0 {
 		return nil, nil
 	}
 	outDir := filepath.Join(target.Dir, shellUnitCoverageDir)
-	res, err := runTool(ctx, target.Dir, kcovTool, []string{
+	args := append([]string{
 		"--include-path=" + target.Dir,
 		outDir,
-		batsTool, "-r", "--filter-tags", "!e2e", shellTestDir,
-	})
+		batsTool, "-r",
+	}, batsFilterTagsArgs(files, TestUnit)...)
+	args = append(args, target.Dir)
+	res, err := runTool(ctx, target.Dir, kcovTool, args)
 	if err != nil {
 		return nil, err
 	}
@@ -602,14 +656,16 @@ func (a shellAdapter) runUnitTest(ctx context.Context, target Target) ([]Diagnos
 // kcov for this pair, unlike unit's, mirroring Go's and Rust's own
 // coverage-on-unit-only convention.
 func (a shellAdapter) runE2ETest(ctx context.Context, target Target) ([]Diagnostic, error) {
-	exists, err := shellTestTreeExists(target)
+	files, err := discoverBatsFiles(target.Dir)
 	if err != nil {
 		return nil, err
 	}
-	if !exists {
+	if len(files) == 0 {
 		return nil, nil
 	}
-	res, err := runTool(ctx, target.Dir, batsTool, []string{"-r", "--filter-tags", "e2e", shellTestDir})
+	args := append([]string{"-r"}, batsFilterTagsArgs(files, TestE2E)...)
+	args = append(args, target.Dir)
+	res, err := runTool(ctx, target.Dir, batsTool, args)
 	if err != nil {
 		return nil, err
 	}

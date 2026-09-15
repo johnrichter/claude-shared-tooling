@@ -3,6 +3,7 @@ package toolchain
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -355,5 +356,148 @@ func TestE2EPythonAdapterE2ETestDispatchesPlaywrightWithoutBrowserInstall(t *tes
 	}
 	if res.Tool != "pytest" {
 		t.Errorf("Run(test e2e).Tool = %q, want %q", res.Tool, "pytest")
+	}
+}
+
+// writeBarePythonProject lays out a uv project declaring only "pytest" as a
+// dev dependency — no pytest-cov, no pytest-playwright, no [tool.pytest]
+// marker registration — the shape a project takes before it has opted into
+// either test pair's own tooling. testFile is written verbatim at its rel
+// path, letting a caller place a clean or a genuinely failing test under a
+// path either test pair's own selection reaches.
+func writeBarePythonProject(t *testing.T, rel, testFile string) string {
+	t.Helper()
+	if _, err := exec.LookPath("uv"); err != nil {
+		t.Skip("uv not on PATH")
+	}
+	dir := t.TempDir()
+	write := func(relPath, content string) {
+		full := filepath.Join(dir, relPath)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", relPath, err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", relPath, err)
+		}
+	}
+	write("pyproject.toml", "[project]\nname = \"bareprobe\"\nversion = \"0.1.0\"\nrequires-python = \">=3.11\"\n\n[dependency-groups]\ndev = [\"pytest\"]\n")
+	write(rel, testFile)
+	return dir
+}
+
+// TestE2EPythonAdapterUnitTestSeparatesWithNoDeclaredCoverageDep is the
+// counter-probe for pytestu (SC53's cause read): a project declaring only
+// "pytest" used to hit pytest's own usage-error exit on `--cov`, an
+// unrecognized argument with pytest-cov absent, on both a clean and a
+// failing test alike. With pytest-cov added through `uv run --with` rather
+// than assumed as a project dependency, the clean test resolves to EXIT 0
+// and a genuinely failing one resolves to EXIT 20 with the failing test
+// named.
+func TestE2EPythonAdapterUnitTestSeparatesWithNoDeclaredCoverageDep(t *testing.T) {
+	requirePythonTool(t, "uv")
+	logDir := t.TempDir()
+
+	cleanDir := writeBarePythonProject(t, "tests/test_fail.py", "def test_fails():\n    assert 1 == 1\n")
+	cleanRes, err := Run(context.Background(), Target{Language: LanguagePython, Check: CheckTest, Test: TestUnit, Dir: cleanDir}, Options{LogDir: logDir})
+	if err != nil {
+		t.Fatalf("Run(test unit) on clean input: unexpected infrastructure error: %v", err)
+	}
+	if cleanRes.Status.ExitCode() != ExitSuccess {
+		t.Fatalf("Run(test unit) on a passing test with no declared pytest-cov = status %s (exit %d), want success (exit %d); diagnostics=%+v",
+			cleanRes.Status, cleanRes.Status.ExitCode(), ExitSuccess, cleanRes.Diagnostics)
+	}
+
+	faultDir := writeBarePythonProject(t, "tests/test_fail.py", "def test_fails():\n    assert 1 == 2\n")
+	faultRes, err := Run(context.Background(), Target{Language: LanguagePython, Check: CheckTest, Test: TestUnit, Dir: faultDir}, Options{LogDir: logDir})
+	if err != nil {
+		t.Fatalf("Run(test unit) on fault input: unexpected infrastructure error: %v", err)
+	}
+	if faultRes.Status.ExitCode() != ExitCheckFailed {
+		t.Fatalf("Run(test unit) on a real failing test = status %s (exit %d), want gate_negative (exit %d); diagnostics=%+v",
+			faultRes.Status, faultRes.Status.ExitCode(), ExitCheckFailed, faultRes.Diagnostics)
+	}
+	foundFailure := false
+	for _, d := range faultRes.Diagnostics {
+		if containsSubstring(d.Message, "test_fails") {
+			foundFailure = true
+		}
+	}
+	if !foundFailure {
+		t.Errorf("Run(test unit) diagnostics = %+v, want a diagnostic naming test_fails", faultRes.Diagnostics)
+	}
+}
+
+// TestE2EPythonAdapterE2ETestSeparatesWithNoMarkerOrDeclaredPlaywrightDep is
+// the counter-probe for pyteste (SC53's cause read): a project with no
+// [tool.pytest] marker registration and no declared pytest-playwright used
+// to select zero tests under `-m e2e` regardless of the test's own outcome,
+// so a genuinely failing assertion never gated. Selecting by the "e2e"
+// path segment in the test's own file name, with pytest-playwright added
+// through `uv run --with`, reaches the same test without requiring either a
+// project-declared dependency or a registered marker: a clean assertion
+// resolves to EXIT 0 and a genuinely wrong one resolves to EXIT 20 with the
+// assertion's own file:line in the diagnostic.
+func TestE2EPythonAdapterE2ETestSeparatesWithNoMarkerOrDeclaredPlaywrightDep(t *testing.T) {
+	requirePythonTool(t, "uv")
+	logDir := t.TempDir()
+
+	const e2eTestTemplate = `import http.server
+import threading
+
+from playwright.sync_api import Page
+
+HTML = b"<html><head><title>hello</title></head><body>hi</body></html>"
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+        self.wfile.write(HTML)
+
+    def log_message(self, *args):
+        pass
+
+
+def test_title(page: Page):
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        page.goto(f"http://127.0.0.1:{port}/")
+        assert page.title() == "%s"
+    finally:
+        server.shutdown()
+`
+
+	cleanDir := writeBarePythonProject(t, "tests/test_e2e.py", fmt.Sprintf(e2eTestTemplate, "hello"))
+	cleanRes, err := Run(context.Background(), Target{Language: LanguagePython, Check: CheckTest, Test: TestE2E, Dir: cleanDir}, Options{LogDir: logDir})
+	if err != nil {
+		t.Fatalf("Run(test e2e) on clean input: unexpected infrastructure error: %v", err)
+	}
+	if cleanRes.Status.ExitCode() != ExitSuccess {
+		t.Fatalf("Run(test e2e) on a correct title assertion = status %s (exit %d), want success (exit %d); diagnostics=%+v",
+			cleanRes.Status, cleanRes.Status.ExitCode(), ExitSuccess, cleanRes.Diagnostics)
+	}
+
+	faultDir := writeBarePythonProject(t, "tests/test_e2e.py", fmt.Sprintf(e2eTestTemplate, "goodbye"))
+	faultRes, err := Run(context.Background(), Target{Language: LanguagePython, Check: CheckTest, Test: TestE2E, Dir: faultDir}, Options{LogDir: logDir})
+	if err != nil {
+		t.Fatalf("Run(test e2e) on fault input: unexpected infrastructure error: %v", err)
+	}
+	if faultRes.Status.ExitCode() != ExitCheckFailed {
+		t.Fatalf("Run(test e2e) on a deliberately wrong title assertion = status %s (exit %d), want gate_negative (exit %d); diagnostics=%+v",
+			faultRes.Status, faultRes.Status.ExitCode(), ExitCheckFailed, faultRes.Diagnostics)
+	}
+	foundFailure := false
+	for _, d := range faultRes.Diagnostics {
+		if containsSubstring(d.Message, "test_title") {
+			foundFailure = true
+		}
+	}
+	if !foundFailure {
+		t.Errorf("Run(test e2e) diagnostics = %+v, want a diagnostic naming test_title", faultRes.Diagnostics)
 	}
 }
