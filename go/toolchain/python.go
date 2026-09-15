@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/johnrichter/claude-shared-tooling/go/sysops"
 )
 
 func init() {
@@ -209,31 +211,81 @@ func (a pythonAdapter) RunInProcess(ctx context.Context, target Target) ([]Diagn
 	}
 }
 
-// banditExcludeDirs lists the paths bandit's -x skips: a project's own
-// virtual environment, VCS metadata, build output, the cache directories
-// ruff, mypy and pytest each leave behind, and the test tree itself. Without
-// the first group, -r's recursion walks straight into .venv and reports
-// every installed third-party package's own findings as if they belonged to
-// the project under test. Without the last, bandit's B101 fires on every
-// bare `assert` a pytest suite uses by convention — a false positive on the
-// test framework's own idiom, not a finding about the shipped code security
-// is meant to gate.
-const banditExcludeDirs = "./.venv,./venv,./.git,./build,./dist,./.mypy_cache,./.pytest_cache,./.ruff_cache,./__pycache__,./tests,./test"
+// banditExcludeDirs lists the paths and name globs bandit's -x skips: a
+// project's own virtual environment, VCS metadata, build output, the cache
+// directories ruff, mypy and pytest each leave behind, the top-level test
+// tree, and pytest's own two file-naming conventions (test_*.py, *_test.py)
+// wherever they occur. Without the first group, -r's recursion walks
+// straight into .venv and reports every installed third-party package's own
+// findings as if they belonged to the project under test. The directory
+// entries (./tests, ./test) only reach a test tree that sits at the scan
+// root; a project that nests a test module beside the code it exercises, or
+// under a package subdirectory rather than a top-level tests/ folder, leaves
+// bandit's B101 firing on every bare `assert` there — a false positive on
+// the test framework's own idiom, not a finding about the shipped code
+// security is meant to gate. The trailing globs close that gap: bandit
+// matches -x entries against the full scanned path (always "./"-relative
+// here, since runSecurity scans ".") with fnmatch, whose "*" crosses
+// directory separators, so a leading "*/" reaches a matching base name under
+// any number of parent directories, the root included.
+const banditExcludeDirs = "./.venv,./venv,./.git,./build,./dist,./.mypy_cache,./.pytest_cache,./.ruff_cache,./__pycache__,./tests,./test,*/test_*.py,*/*_test.py"
 
 // runSecurity runs bandit against target.Dir and turns its JSON report into
 // diagnostics. -r recurses the project tree (skipping banditExcludeDirs);
 // -f json gives Parse-equivalent structure rather than bandit's
-// human-rendered text.
+// human-rendered text. The result classification itself lives in
+// banditDiagnostics, kept separate so it can be exercised against a
+// synthetic *sysops.Result without spawning bandit.
 func (pythonAdapter) runSecurity(ctx context.Context, target Target) ([]Diagnostic, error) {
 	res, err := runTool(ctx, target.Dir, "bandit", []string{"-r", "-f", "json", "-x", banditExcludeDirs, "."})
 	if err != nil {
 		return nil, err
 	}
-	diags := parseBanditJSON(res.Stdout)
+	return banditDiagnostics(res), nil
+}
+
+// banditDiagnostics classifies one bandit invocation's captured result. A
+// stdout that parses as bandit's JSON report always yields its findings (or
+// none, on a clean run), even over a non-zero exit that mixed real findings
+// with bandit's own advisory status. Unparseable stdout splits two ways:
+// when the runner's own capture limit cut it off (res.StdoutTruncated), that
+// is the toolchain discarding bytes, not bandit reporting anything, so it
+// warns naming the limit and the log rather than raising bandit's usual
+// non-zero-exit fallback (SC43); any other unparseable stdout on a non-zero
+// exit keeps that fallback exactly as before.
+func banditDiagnostics(res *sysops.Result) []Diagnostic {
+	diags, ok := parseBanditJSON(res.Stdout)
+	if !ok {
+		if res.StdoutTruncated {
+			return []Diagnostic{banditTruncatedDiagnostic()}
+		}
+		if res.ExitCode != 0 {
+			return []Diagnostic{fallbackDiagnostic("bandit", res.ExitCode)}
+		}
+		return nil
+	}
 	if len(diags) == 0 && res.ExitCode != 0 {
 		diags = append(diags, fallbackDiagnostic("bandit", res.ExitCode))
 	}
-	return diags, nil
+	return diags
+}
+
+// banditTruncatedDiagnostic is what banditDiagnostics reports when bandit's
+// captured stdout hit sysops.DefaultMaxCaptureBytes before its JSON report
+// could close. That cutoff is the runner's own bound on captured bytes, not
+// a finding bandit reported, so treating it as bandit's ordinary
+// non-zero-exit fallback (SeverityError) would misattribute a toolchain
+// limit as a code problem the tool itself flagged. Severity is warning: a
+// capture-limited run still surfaces as something to look at, but never
+// fails a gate on its own the way a real bandit finding or exit would.
+func banditTruncatedDiagnostic() Diagnostic {
+	return Diagnostic{
+		Severity: SeverityWarning,
+		Message: fmt.Sprintf(
+			"bandit output exceeded the %d-byte capture limit before its JSON report could be parsed; see log_ref for raw output",
+			sysops.DefaultMaxCaptureBytes,
+		),
+	}
 }
 
 // runTest dispatches on target.Test — the one piece of information Command
@@ -450,13 +502,17 @@ type banditReport struct {
 
 // parseBanditJSON turns one bandit report into diagnostics tagged with its
 // rule ID (e.g. "B101"). MEDIUM and HIGH severity count as errors; LOW counts
-// as a warning, mirroring gosec's own severity split (parseGosecJSON).
-func parseBanditJSON(stdout []byte) []Diagnostic {
+// as a warning, mirroring gosec's own severity split (parseGosecJSON). ok is
+// false when stdout does not parse as bandit's JSON shape at all — a
+// genuinely malformed report and a report the runner's capture limit cut off
+// mid-document look identical here, so banditDiagnostics is what tells them
+// apart using the caller's own res.StdoutTruncated.
+func parseBanditJSON(stdout []byte) (diags []Diagnostic, ok bool) {
 	var report banditReport
 	if err := json.Unmarshal(bytes.TrimSpace(stdout), &report); err != nil {
-		return nil // the caller's exit-code fallback covers an unparseable report
+		return nil, false
 	}
-	diags := make([]Diagnostic, 0, len(report.Results))
+	diags = make([]Diagnostic, 0, len(report.Results))
 	for _, r := range report.Results {
 		severity := SeverityWarning
 		if strings.EqualFold(r.IssueSeverity, "HIGH") || strings.EqualFold(r.IssueSeverity, "MEDIUM") {
@@ -470,7 +526,7 @@ func parseBanditJSON(stdout []byte) []Diagnostic {
 			Line:     r.LineNumber,
 		})
 	}
-	return diags
+	return diags, true
 }
 
 // atoiOrZero parses a decimal string already validated by the caller's own

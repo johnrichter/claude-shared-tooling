@@ -245,6 +245,23 @@ func TestWorkflowInheritance(t *testing.T) {
 			wantEmit:   false,
 			wantSilent: reasonNotACheckSubject,
 		},
+		{
+			// SC19's sixteenth member: a caller running its own tag-format check
+			// inline is a subject, exactly as any other banned run: line.
+			name:     "subject via the sixteenth member, language-tools tag validate - fails",
+			rel:      ".github/workflows/tagcheck.yml",
+			body:     job("      - run: language-tools tag validate \"$TAG\"\n"),
+			wantEmit: true,
+		},
+		{
+			// A comment naming the command is no hit, exactly as any other
+			// banned command's comment line is no hit.
+			name:       "sixteenth member named only in a run comment line - non-subject",
+			rel:        ".github/workflows/tagcheck-commented.yml",
+			body:       job("      - run: |\n          # language-tools tag validate \"$TAG\"\n          echo done\n"),
+			wantEmit:   false,
+			wantSilent: reasonNotACheckSubject,
+		},
 	}
 
 	dir := t.TempDir()
@@ -272,6 +289,49 @@ func TestWorkflowInheritance(t *testing.T) {
 				t.Errorf("silent reason = %q, want %q", silent, c.wantSilent)
 			}
 		})
+	}
+}
+
+// censusBannedCommands mirrors census.py:BANNED_COMMANDS
+// (marketplace/.dat/fleet-04-adoption/census/census.py) name for member and
+// pattern for pattern, independently of bannedCommandSet's own literal.
+// TestWorkflowBannedCommandCensusParity regenerates a compiled set from this
+// copy and asserts it equals bannedCommandSet, so a member added to one copy
+// and not the other fails here rather than drifting silently.
+var censusBannedCommands = map[string]string{
+	"go build":                    `\bgo build\b`,
+	"go test":                     `\bgo test\b`,
+	"go vet":                      `\bgo vet\b`,
+	"gofmt":                       `\bgofmt\b`,
+	"golangci-lint":               `\bgolangci-lint\b`,
+	"cargo build":                 `\bcargo build\b`,
+	"cargo test":                  `\bcargo test\b`,
+	"cargo clippy":                `\bcargo clippy\b`,
+	"cargo fmt":                   `\bcargo fmt\b`,
+	"cargo check":                 `\bcargo check\b`,
+	"pytest":                      `\bpytest\b`,
+	"ruff":                        `\bruff\b`,
+	"mypy":                        `\bmypy\b`,
+	"unittest":                    `\bpython3?\s+-m\s+unittest\b`,
+	"actionlint":                  `\bactionlint\b`,
+	"language-tools tag validate": `\blanguage-tools tag validate\b`,
+}
+
+func TestWorkflowBannedCommandCensusParity(t *testing.T) {
+	if len(bannedCommandSet) != 16 {
+		t.Fatalf("bannedCommandSet has %d members, want 16", len(bannedCommandSet))
+	}
+	regenerated := compilePatterns(censusBannedCommands)
+	if len(regenerated) != len(bannedCommandSet) {
+		t.Fatalf("census regenerates %d members, adapter holds %d", len(regenerated), len(bannedCommandSet))
+	}
+	for i := range regenerated {
+		if regenerated[i].name != bannedCommandSet[i].name {
+			t.Errorf("member %d name = %q, want %q (census)", i, bannedCommandSet[i].name, regenerated[i].name)
+		}
+		if regenerated[i].re.String() != bannedCommandSet[i].re.String() {
+			t.Errorf("member %q pattern = %q, want %q (census)", regenerated[i].name, bannedCommandSet[i].re.String(), regenerated[i].re.String())
+		}
 	}
 }
 

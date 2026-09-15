@@ -372,29 +372,33 @@ func parseWorkflowBody(path string) (workflowFile, error) {
 	return wf, nil
 }
 
-// bannedCommandSet is census.py:BANNED_COMMANDS, at fifteen members: F37's
-// fourteen language-tool patterns plus actionlint, which SC19 adds because the
-// workflow track now owns that binary exactly as the shell track owns
-// shellcheck. It is deliberately not census.py:CHECK_PATTERNS, the wider
-// twenty-seven-pattern scan population that also matches commands a caller or a
-// template runs by design (language-tools, mise exec, git tag and the rest); a
-// caller step matching none of these fifteen is an addition the rule permits.
+// bannedCommandSet is census.py:BANNED_COMMANDS, at sixteen members: F37's
+// fourteen language-tool patterns, actionlint (which SC19 added earlier
+// because the workflow track owns that binary exactly as the shell track owns
+// shellcheck), and language-tools tag validate, the tag-format command SC19
+// adds here so a caller running its own tag-format check is visible by name
+// rather than left to CHECK_PATTERNS' broader language-tools match. It is
+// deliberately not census.py:CHECK_PATTERNS, the wider twenty-eight-pattern
+// scan population that also matches commands a caller or a template runs by
+// design (language-tools, mise exec, git tag and the rest); a caller step
+// matching none of these sixteen is an addition the rule permits.
 var bannedCommandSet = compilePatterns(map[string]string{
-	"go build":      `\bgo build\b`,
-	"go test":       `\bgo test\b`,
-	"go vet":        `\bgo vet\b`,
-	"gofmt":         `\bgofmt\b`,
-	"golangci-lint": `\bgolangci-lint\b`,
-	"cargo build":   `\bcargo build\b`,
-	"cargo test":    `\bcargo test\b`,
-	"cargo clippy":  `\bcargo clippy\b`,
-	"cargo fmt":     `\bcargo fmt\b`,
-	"cargo check":   `\bcargo check\b`,
-	"pytest":        `\bpytest\b`,
-	"ruff":          `\bruff\b`,
-	"mypy":          `\bmypy\b`,
-	"unittest":      `\bpython3?\s+-m\s+unittest\b`,
-	"actionlint":    `\bactionlint\b`,
+	"go build":                    `\bgo build\b`,
+	"go test":                     `\bgo test\b`,
+	"go vet":                      `\bgo vet\b`,
+	"gofmt":                       `\bgofmt\b`,
+	"golangci-lint":               `\bgolangci-lint\b`,
+	"cargo build":                 `\bcargo build\b`,
+	"cargo test":                  `\bcargo test\b`,
+	"cargo clippy":                `\bcargo clippy\b`,
+	"cargo fmt":                   `\bcargo fmt\b`,
+	"cargo check":                 `\bcargo check\b`,
+	"pytest":                      `\bpytest\b`,
+	"ruff":                        `\bruff\b`,
+	"mypy":                        `\bmypy\b`,
+	"unittest":                    `\bpython3?\s+-m\s+unittest\b`,
+	"actionlint":                  `\bactionlint\b`,
+	"language-tools tag validate": `\blanguage-tools tag validate\b`,
 })
 
 // compiledPattern pairs a banned command's name with its compiled matcher, so
