@@ -501,7 +501,7 @@ Shared inputs across the seven templates. A common role takes a common name; onl
 |---|---|---|---|---|
 | `runs_on` | string | `"ubuntu-24.04"`* | all seven | Fully qualified runner label (section 1); never floating. |
 | `module_dir` / `crate_dir` / `project_dir` / `script_root` / `target_root` | string | `"."` | Go / Rust / Python / shell / workflow | Target root `language-tools` checks, relative to the checked-out repo (`--dir`), except the Go unit pair, which passes it absolute as `${{ github.workspace }}/<input>` (section 1 note). Shell recurses from its root (OD54); workflow's adapter enumerates every tracked body at or below it (WFRULES clause (a)). |
-| `mise_version` | string | measured latest stable patch (section 9) | five of seven | mise release the template installs. `ci-shell.yml` and `ci-workflow.yml` pin a step-scoped env var instead (section 9). |
+| `mise_version` | string | measured latest stable patch (section 9) | all seven | mise release the template installs. `ci-shell.yml` and `ci-workflow.yml` read theirs into a step-scoped `MISE_VERSION` env var and carry no `mise.lock` re-lock clause, because neither track installs against a caller lockfile (section 9). |
 | `dry_run` | boolean | `false` | six of seven | `true` installs and verifies mise + language-tools and stops; check steps and `extra_steps` are skipped. `ci-workflow.yml` carries none (below). |
 | `test_timeout` | number | `300` | four CI templates | Seconds; defect 3 (below). |
 | `extra_steps` | string | `""` | all seven | Shell script run after the checks, for a repository-specific check `language-tools` does not cover. Empty runs nothing. |
@@ -509,7 +509,7 @@ Shared inputs across the seven templates. A common role takes a common name; onl
 
 \* `ci-shell.yml` and `ci-workflow.yml` default to `"ubuntu-24.04-arm"` instead (section 1).
 
-**`ci-workflow.yml`'s narrower input set.** It declares only `runs_on`, `target_root` and `extra_steps` — no `mise_version` (mise pins as a step-scoped env var, matching `ci-shell.yml`'s own precedent), no `dry_run`, and no `test_timeout` (defect 3 ties that input to a `test` subcommand, and this track's one pair is `lint`).
+**`ci-workflow.yml`'s narrower input set.** It declares only `runs_on`, `target_root`, `mise_version` and `extra_steps` — no `dry_run`, and no `test_timeout` (defect 3 ties that input to a `test` subcommand, and this track's one pair is `lint`).
 
 **Deleted (SC38, OD39).** `ci-go.yml` and `ci-rust.yml` drop `checkout_ai_shared_lib_sibling`, `set_ai_shared_lib_goprivate` and the `sibling_repo_token` secret — the module repository is public, so a tagged dependency resolves through the public proxy (F78). `ci-python.yml`'s single comment recording its absence stays (OD55).
 
@@ -584,11 +584,11 @@ inputs:
 
 ## 9. The mise version
 
-Defect 13: every template pins mise below the latest stable patch (K11). Each template pins mise at the **latest stable patch**, measured at write time per K11 and S7, recorded here and **never carried forward** from an earlier revision.
+Defect 13 (closed 2026-09-16): every template pinned mise below the latest stable patch (K11). Each template pins mise at the **latest stable patch**, measured at write time per K11 and S7, recorded here and **never carried forward** from an earlier revision.
 
 | Measurement | Value | Method | Date |
 |---|---|---|---|
-| Latest stable mise patch | `2026.9.1` | mise's own update check (installed `2026.8.10` reports `2026.9.1` available); the GitHub releases API probe returned HTTP 403 (unauthenticated rate limit), so the self-reported value is the instrument. | 2026-09-05 |
+| Latest stable mise patch | `2026.9.9` | GitHub releases API: `GET https://api.github.com/repos/jdx/mise/releases/latest` returned `tag_name` `v2026.9.9` with `prerelease` and `draft` both false; mise's own update check reported the same version available. | 2026-09-16 |
 
 ```yaml
 inputs:
@@ -596,12 +596,12 @@ inputs:
     description: "mise release the template installs. Latest stable patch, measured at write time per K11/S7. Every committed mise.lock must be re-locked with this version."
     required: false
     type: string
-    default: "2026.9.1"
+    default: "2026.9.9"
 ```
 
 **Re-measure on every revision (K11).** A version is never carried forward. Any revision that touches the templates re-measures the latest stable patch and records the new value and date here. Bumping the pin requires re-locking every committed `mise.lock` with the new mise (the fleet's committed locks were written by `2026.8.10`).
 
-**Two templates hardcode `MISE_VERSION` instead of exposing `mise_version`.** `ci-shell.yml` and `ci-workflow.yml` pin it as a step-scoped env var: neither track coordinates a per-repo toolchain pin, so there is no caller-visible dial to expose. Both still carry this section's own measured value. Re-confirmed unchanged for `ci-workflow.yml`'s 2026-09-06 edit date.
+**All seven templates expose `mise_version`.** `ci-shell.yml` and `ci-workflow.yml` hard-coded a step-scoped `MISE_VERSION` env var and declared no input until 2026-09-16; both now declare the same input the other five carry, and each reads it into that env var at its install step. Their input descriptions carry no `mise.lock` re-lock clause, unlike the five pin-reading templates': `ci-shell.yml` installs `--locked` against a template-owned config alone, and `ci-workflow.yml` runs no `mise install --locked` at all, so a bump re-locks nothing on either track. That omission is by construction, not an oversight.
 
 ---
 
