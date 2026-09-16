@@ -66,6 +66,9 @@
 #     Newline-separated list of files and directories a script under script_root sources or
 #     imports from outside its own directory (OD12). Each entry resolves to a directory and
 #     feeds shellcheck's `-P` search path via SHELLCHECK_OPTS. Empty adds no search path.
+#   mise_version                     (string,  default "2026.9.9")
+#     mise release this template installs. Latest stable patch, measured at write time per
+#     K11/S7 — never carried forward from an earlier revision.
 #   dry_run                          (boolean, default false)
 #     true installs and verifies mise, language-tools and the seven check binaries, then
 #     stops — every check step and extra_steps are skipped. Proves the call contract and the
@@ -101,6 +104,11 @@ on:
         required: false
         type: string
         default: ""
+      mise_version:
+        description: "mise release the template installs. Latest stable patch, measured at write time per K11/S7."
+        required: false
+        type: string
+        default: "2026.9.9"
       dry_run:
         description: "true installs and verifies mise, language-tools and the seven check binaries, then stops; every check step and extra_steps are skipped."
         required: false
@@ -159,9 +167,9 @@ jobs:
       # Verified fetch (SC1 shape): fetch the release's own published checksum manifest,
       # look up this artifact's digest by exact filename match, then fetch the artifact and
       # fail closed on any mismatch. Never pipes a download into a shell.
-      - name: Install mise (verified fetch)
+      - name: Install mise ${{ inputs.mise_version }} (verified fetch)
         env:
-          MISE_VERSION: "2026.9.1"
+          MISE_VERSION: ${{ inputs.mise_version }}
           MISE_OS: ${{ steps.platform.outputs.mise_os }}
           MISE_ARCH: ${{ steps.platform.outputs.mise_arch }}
         run: |
@@ -317,7 +325,7 @@ jobs:
 
       - name: Dry-run summary (installs verified, checks skipped)
         if: ${{ inputs.dry_run }}
-        run: echo "dry-run summary -- mise, language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} and shellcheck/shfmt/bats-core/semgrep/jq/checkbashisms/kcov installed and verified, the checks steps and extra_steps are skipped"
+        run: echo "dry-run summary -- mise ${{ inputs.mise_version }}, language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} and shellcheck/shfmt/bats-core/semgrep/jq/checkbashisms/kcov installed and verified, the checks steps and extra_steps are skipped"
 
       - name: language-tools format
         if: ${{ !inputs.dry_run }}

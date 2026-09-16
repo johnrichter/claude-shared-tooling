@@ -47,7 +47,7 @@
 #   project_dir                      (string,  default ".")
 #     Python project directory language-tools checks, relative to the checked-out repo
 #     (language-tools' `--dir`).
-#   mise_version                     (string,  default "2026.9.1")
+#   mise_version                     (string,  default "2026.9.9")
 #     mise release this template installs. Latest stable patch, measured at write time
 #     per K11/S7 — never carried forward from an earlier revision. Every committed
 #     mise.lock must be re-locked with this version.
@@ -89,7 +89,7 @@ on:
         description: "mise release the template installs. Latest stable patch, measured at write time per K11/S7. Every committed mise.lock must be re-locked with this version."
         required: false
         type: string
-        default: "2026.9.1"
+        default: "2026.9.9"
       dry_run:
         description: "true installs and verifies mise, language-tools, ruff, mypy, bandit and (build-test) playwright, then stops; every check step and extra_steps are skipped."
         required: false

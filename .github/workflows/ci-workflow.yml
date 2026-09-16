@@ -56,6 +56,9 @@
 #     Root the workflow-lint check enumerates from (--dir), relative to the checked-out repo.
 #     Recurses over every tracked workflow body at or below it (both shapes above), so one call
 #     per repository is enough.
+#   mise_version                     (string,  default "2026.9.9")
+#     mise release this template installs. Latest stable patch, measured at write time per
+#     K11/S7 — never carried forward from an earlier revision.
 #   extra_steps                      (string,  default "")
 #     Shell script run after the check, for a repository-specific step language-tools doesn't
 #     cover. Empty runs nothing.
@@ -79,6 +82,11 @@ on:
         required: false
         type: string
         default: "."
+      mise_version:
+        description: "mise release the template installs. Latest stable patch, measured at write time per K11/S7."
+        required: false
+        type: string
+        default: "2026.9.9"
       extra_steps:
         description: "Shell script run after the workflow-lint check, for a repository-specific step this track doesn't cover. Empty runs nothing."
         required: false
@@ -127,9 +135,9 @@ jobs:
       # Verified fetch (SC1 shape): fetch the release's own published checksum manifest,
       # look up this artifact's digest by exact filename match, then fetch the artifact and
       # fail closed on any mismatch. Never pipes a download into a shell.
-      - name: Install mise (verified fetch)
+      - name: Install mise ${{ inputs.mise_version }} (verified fetch)
         env:
-          MISE_VERSION: "2026.9.1"
+          MISE_VERSION: ${{ inputs.mise_version }}
           MISE_OS: ${{ steps.platform.outputs.mise_os }}
           MISE_ARCH: ${{ steps.platform.outputs.mise_arch }}
         run: |

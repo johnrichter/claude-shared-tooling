@@ -48,7 +48,7 @@ on:
         description: "mise release the template installs. Latest stable patch, measured at write time per K11/S7. Every committed mise.lock must be re-locked with this version."
         required: false
         type: string
-        default: "2026.9.1"
+        default: "2026.9.9"
       dry_run:
         description: "Verify only — skip the tag push and the platform release."
         required: false
