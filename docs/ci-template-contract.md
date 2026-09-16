@@ -82,9 +82,16 @@ Each of the three compiled-language CI templates (`ci-go.yml`, `ci-rust.yml`, `c
 
 Source checks run first and on one platform because each reads source text or the dependency graph rather than build output, so a second platform finds nothing new (OD8, OD63); a source-check failure then costs a second rather than a compile. `build` and every `test` subcommand run on all four target platforms (OD9, OD53 keeps `test benchmark` on all four deliberately). The template carries this shape, not the caller (OD9).
 
-**`ci-shell.yml` is out of this population by construction.** A shell script neither compiles nor packages, so it runs no `build` and carries no matrix to gate. It declares one job carrying `format`, `lint`, `security`, `test unit` and `test e2e` (OD3, OD50, OD51 — shell's five pairs in section 4.7).
+**`ci-shell.yml` splits its five pairs the same way, but not into the compiled-language table above (OD3, OD50, OD51 — shell's five pairs in section 4.7).** A shell script neither compiles nor packages, so it runs no `build`, and `source-checks`' platform and `test`'s matrix differ from the compiled-language row:
 
-**`ci-workflow.yml` is out of this population too.** WORKFLOW-PAIR (OD71) carves the workflow track out of the section 4.7 language matrix rather than adding it as a column, so the track owns one pair — `workflow lint` — and no `build`. It declares one job for the same reason `ci-shell.yml` does: the check reads source text, not build output, so a second platform or a build-then-test split would find nothing new.
+| Job | Runner | Checks | `needs` |
+|---|---|---|---|
+| `source-checks` | `ubuntu-24.04-arm` (fixed, OD63) | `format`, `lint`, `security` | — |
+| `test` | 3-platform matrix: `ubuntu-24.04-arm`, `macos-26`, `macos-26-intel` (SC51) | `test unit`, `test e2e` | `source-checks` |
+
+`test`'s matrix is narrower than `build-test`'s four platforms because SC51's layer-0 probe proves only these three reachable for the shell track's two macOS-unmeasured tools (`checkbashisms`, `kcov`); it carries no `ubuntu-24.04` (x64) leg because the track never ran one before this split and the probe named no reason to add it. `kcov`, `test unit`'s coverage tool, resolves through Homebrew normally on `macos-26` (a bottle confirmed current for that image) but not on `macos-26-intel` (the newest x86_64 bottle is unconfirmed against that image) — the `test` job runs a passthrough `kcov` shim on that one leg instead, so coverage collection is scoped down there while `test unit` and `test e2e` still run identically across all three legs (section 5).
+
+**`ci-workflow.yml` is out of this population too.** WORKFLOW-PAIR (OD71) carves the workflow track out of the section 4.7 language matrix rather than adding it as a column, so the track owns one pair — `workflow lint` — and no `build`. It declares one job: the check reads source text, not build output, so a second platform or a build-then-test split would find nothing new — the same reasoning `ci-shell.yml`'s own `source-checks` job rests on, without `ci-shell.yml`'s second, test-carrying job, because `ci-workflow.yml` owns no `test` pair for a second job to carry.
 
 ```yaml
 # Two-job skeleton for a compiled-language CI template (ci-go.yml shown; Rust/Python identical
@@ -374,16 +381,47 @@ Three of the 22 reach no mise backend and install through the system package man
 | Tool | OS | Channel | Source / package | Serves |
 |---|---|---|---|---|
 | `checkbashisms` | Ubuntu | apt | `devscripts` package | Shell track (`source-checks` on `ubuntu-24.04-arm`) |
-| `checkbashisms` | macOS | Homebrew | `checkbashisms` formula | Not installed — source checks run on `ubuntu-24.04-arm` alone (OD63) |
+| `checkbashisms` | macOS | Homebrew | `checkbashisms` formula | Not installed — `source-checks` runs on `ubuntu-24.04-arm` alone (OD63); `test`'s macOS legs run no `lint` |
 | Google Chrome | Ubuntu | apt | Google's own apt repository | Go `test e2e` on both Ubuntu targets |
 | Google Chrome | macOS | Homebrew | `google-chrome` cask | Go `test e2e` on the macOS `build`/`test` legs (OD63) |
-| `kcov` | Ubuntu | apt build-deps + source build | `SimonKagstrom/kcov` pinned to the v43 tag's own commit, built with cmake | Shell track (`source-checks` on `ubuntu-24.04-arm`) |
+| `kcov` | Ubuntu | apt build-deps + source build | `SimonKagstrom/kcov` pinned to the v43 tag's own commit, built with cmake | Shell track (`test` job's `ubuntu-24.04-arm` leg) |
+| `kcov` | macOS arm64 | Homebrew | `kcov` formula (`arm64_tahoe` bottle, confirmed current for `macos-26`) | Shell track (`test` job's `macos-26` leg, SC51) |
+| `kcov` | macOS x86_64 | None — passthrough shim | A `kcov`-named script on PATH that strips kcov's own arguments and execs the wrapped command | Shell track (`test` job's `macos-26-intel` leg, coverage scoped down per SC51 — see below) |
 
 **The Google apt repository (F79).** `dl.google.com/linux/chrome/deb/dists/stable/Release` answers HTTP 200 with an `Architectures` line reading `amd64 arm64`. Both `main/binary-amd64/Packages` and `main/binary-arm64/Packages` answer 200; the counter-probe `main/binary-i386/Packages` answers 404. The arm64 index lists `google-chrome-stable`, so the channel covers both Ubuntu targets.
 
 **`kcov` builds from source (defect 10 correction).** `SimonKagstrom/kcov`'s v43 release ships no downloadable binary for any platform, and Ubuntu noble's own apt archive carries no `kcov` package either, on any architecture. `mise`'s `ubi:` backend, which resolves a tool from its GitHub releases, therefore fails closed with no asset to select — apt carries no fallback package either. The template builds `kcov` from source instead: apt installs the build toolchain and coverage-backend headers (`build-essential`, `cmake`, `pkg-config`, `binutils-dev`, `libelf-dev`, `libdw-dev`, `libiberty-dev`, `libssl-dev`, `libcurl4-openssl-dev`, `zlib1g-dev`), then `cmake`, `cmake --build` and `cmake --install` compile and install the binary. The build pins the v43 tag's own commit rather than the branch tip, so a later commit on the default branch cannot change what the runner installs.
 
-**Split by OS (OD63).** The source checks run on `ubuntu-24.04-arm`, so `checkbashisms` and `kcov` install there and need no macOS build. The Homebrew leg serves the macOS `build` and `test` legs alone — which for Chrome is the Go `test e2e` leg (OD56, OD64).
+**Split by OS (OD63).** `source-checks` runs on `ubuntu-24.04-arm` alone, so `checkbashisms` installs there only and needs no macOS build. `kcov` moved with `test unit` to the `test` job (section 3), which SC51 now runs on three platforms: `ubuntu-24.04-arm` builds `kcov` from source, `macos-26` installs it from Homebrew (a bottle the layer-0 probe finds current for that image), and `macos-26-intel` installs a passthrough shim instead of a real `kcov` — the newest Homebrew bottle for that architecture is unconfirmed against the runner image, so this leg runs `test unit`'s bats suite uninstrumented rather than through an unverified build (see the shim below). The Homebrew leg otherwise serves the macOS `build` and `test` legs alone — which for Chrome is the Go `test e2e` leg (OD56, OD64).
+
+```yaml
+# macOS arm64 — kcov via Homebrew (shell test job, macos-26 leg, SC51). The layer-0 probe
+# finds an arm64_tahoe bottle in the catalog matching this runner image exactly, so the
+# catalog's current default install resolves the right build.
+- name: Provision kcov (macOS arm64, Homebrew — bottle confirmed current)
+  if: ${{ runner.os == 'macOS' && matrix.kcov_coverage }}
+  run: |
+    set -euo pipefail
+    brew install kcov
+    kcov --version   # OD60: print what was installed
+
+# macOS x86_64 — kcov coverage scoped down (shell test job, macos-26-intel leg, SC51). The
+# layer-0 probe finds no tahoe-labeled x86_64 bottle in Homebrew's kcov catalog (its newest
+# x86_64 build is sonoma, macOS 14) against a macos-26 arm64 bottle confirmed current for
+# that image — so this leg runs test unit's bats invocation without kcov's coverage wrap.
+- name: Provision kcov (macOS x86_64 — coverage scoped down, SC51)
+  if: ${{ runner.os == 'macOS' && !matrix.kcov_coverage }}
+  run: |
+    set -euo pipefail
+    cat > "${RUNNER_TEMP}/bin/kcov" <<'SHIM'
+    #!/usr/bin/env bash
+    set -euo pipefail
+    while [[ "$1" == --* ]]; do shift; done
+    shift
+    exec "$@"
+    SHIM
+    chmod +x "${RUNNER_TEMP}/bin/kcov"
+```
 
 **Cache refresh first (OD59).** Every job that installs a system package refreshes its cache before the install: Ubuntu runs `apt update`, macOS runs `brew update`. Homebrew itself is already present on the macOS image (F80: Homebrew 6.0.13), so the refresh makes that copy current and no Homebrew install step is needed.
 
@@ -398,9 +436,10 @@ Three of the 22 reach no mise backend and install through the system package man
     sudo apt-get install -y devscripts
     checkbashisms --version   # OD60: print what was installed
 
-# Ubuntu — kcov via apt build-deps and a pinned from-source build (shell source-checks job,
-# ubuntu-24.04-arm). v43 ships no binary release for any platform, and noble's own apt archive
-# carries no kcov package either, so the template compiles it instead of fetching a binary.
+# Ubuntu — kcov via apt build-deps and a pinned from-source build (shell test job's
+# ubuntu-24.04-arm leg). v43 ships no binary release for any platform, and noble's own apt
+# archive carries no kcov package either, so the template compiles it instead of fetching a
+# binary.
 - name: Install kcov (apt build-deps + source build)
   env:
     KCOV_COMMIT: a39874f938ce13f7a65f253120d1ec946b349ffe # v43, never the branch tip
@@ -629,7 +668,7 @@ A step fails the job on any non-zero exit. A template maps no exit code itself a
 
 **Diagnostic surface.** Every check emits one JSON result record (`schema_version: 1`) carrying `command`, `status`, `exit_code`, and an `errors[]` array. Each error carries `code`, `context` (`check`, `dir`, `language`), `message`, and a `triage` object (`instruction`, `kind`). Each diagnostic names a file; each diagnostic whose tool reports a position also names a line (SC2). Every check step passes an absolute `--log-dir` (`${{ github.workspace }}/.language-tools/log`), so per-check logs land in one known location a reader can collect. Templates surface fatal shell-level problems through GitHub `::error::` annotations (the activation and provisioning steps above); the check records themselves are the binary's own JSON.
 
-**Failure-path capture.** A `gate_negative.toolchain.error` reports only `<tool> exited N with no parsed diagnostics; see log_ref for raw output` in the capped result — the raw tool output the reader needs sits in the per-check record under `--log-dir`, which the run otherwise discards, so the error is untriageable from the run alone. Every CI check job (each of the five CI templates: `source-checks` and `build-test` for the three compiled-language templates, the single `checks` job for `ci-shell.yml` and `ci-workflow.yml`) therefore ends with one artifact-upload step, guarded `if: ${{ !cancelled() }}`, that publishes the whole `--log-dir` tree on the failing path and on the passing path. The failing path carries a `gate_negative.toolchain.error`'s raw output. The passing path carries the `security` check's own capped diagnostics and its overflow entry. That entry's caveat text names `log_ref` and nothing else. So a step that passes at exit 10 under SC41 publishes the findings past the 20-diagnostic cap, rather than name a log no reader can fetch. It exports what a check already wrote — it runs no check, and changes no invocation, target root, subject set or verdict. The artifact name carries the language, the job, a target-root slug, and `matrix.os` on the `build-test` matrix. `upload-artifact@v4` rejects a duplicate name, and a caller makes more than one call to one template in a single run. `ai-shared-lib` makes 27 `ci-go.yml` calls and 5 `ci-rust.yml` calls, and `marketplace` makes 8 `ci-python.yml` calls. The language and the job alone stay unique only inside the self-test, which makes one call per template. So a slug step derives the third component, because an artifact name carries no path separator. Two limits this capture cannot lift, both language-tools-side and not the template's to fix: a multi-tool check routed in-process (Rust `security`, the `test` kinds) writes no sub-tool stdout/stderr into its record, so the captured log names which tool exited non-zero but not why; and a check whose failure is an infra fault before any record is written leaves nothing to upload (`if-no-files-found: ignore`).
+**Failure-path capture.** A `gate_negative.toolchain.error` reports only `<tool> exited N with no parsed diagnostics; see log_ref for raw output` in the capped result — the raw tool output the reader needs sits in the per-check record under `--log-dir`, which the run otherwise discards, so the error is untriageable from the run alone. Every CI check job (each of the five CI templates: `source-checks` and `build-test` for the three compiled-language templates, `source-checks` and `test` for `ci-shell.yml` (SC51), and the single `checks` job for `ci-workflow.yml`) therefore ends with one artifact-upload step, guarded `if: ${{ !cancelled() }}`, that publishes the whole `--log-dir` tree on the failing path and on the passing path. The failing path carries a `gate_negative.toolchain.error`'s raw output. The passing path carries the `security` check's own capped diagnostics and its overflow entry. That entry's caveat text names `log_ref` and nothing else. So a step that passes at exit 10 under SC41 publishes the findings past the 20-diagnostic cap, rather than name a log no reader can fetch. It exports what a check already wrote — it runs no check, and changes no invocation, target root, subject set or verdict. The artifact name carries the language, the job, a target-root slug, and `matrix.os` on any job that runs a matrix — `build-test` for the three compiled-language templates, and now `ci-shell.yml`'s `test` job (SC51's three-platform matrix). `upload-artifact@v4` rejects a duplicate name, and a caller makes more than one call to one template in a single run. `ai-shared-lib` makes 27 `ci-go.yml` calls and 5 `ci-rust.yml` calls, and `marketplace` makes 8 `ci-python.yml` calls. The language and the job alone stay unique only inside the self-test, which makes one call per template. So a slug step derives the third component, because an artifact name carries no path separator. Two limits this capture cannot lift, both language-tools-side and not the template's to fix: a multi-tool check routed in-process (Rust `security`, the `test` kinds) writes no sub-tool stdout/stderr into its record, so the captured log names which tool exited non-zero but not why; and a check whose failure is an infra fault before any record is written leaves nothing to upload (`if-no-files-found: ignore`).
 
 ```yaml
 # ci-go.yml shown. Each other CI template substitutes its own target-root input name,
