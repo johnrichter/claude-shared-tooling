@@ -319,11 +319,11 @@ func TestScanPrivacyEmployeeEmailAllowedDomainIsCaseInsensitive(t *testing.T) {
 }
 
 // TestScanPrivacyEmployeeEmailNoDomainMatchFlags confirms an address whose
-// domain matches neither defaultAllowedEmailDomain nor any caller-configured
+// domain matches neither a default exemption nor any caller-configured
 // AllowedDomains entry is flagged.
 func TestScanPrivacyEmployeeEmailNoDomainMatchFlags(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "doc.md", "contact root@unrelated.example\n")
+	writeFile(t, dir, "doc.md", "contact root@unrelated-vendor.com\n")
 
 	opts := PrivacyOptions{
 		SkipRules:     DefaultSkipRules,

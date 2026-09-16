@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/johnrichter/claude-shared-tooling/go/sysops"
 )
 
 func init() {
@@ -209,31 +211,116 @@ func (a pythonAdapter) RunInProcess(ctx context.Context, target Target) ([]Diagn
 	}
 }
 
-// banditExcludeDirs lists the paths bandit's -x skips: a project's own
-// virtual environment, VCS metadata, build output, the cache directories
-// ruff, mypy and pytest each leave behind, and the test tree itself. Without
-// the first group, -r's recursion walks straight into .venv and reports
-// every installed third-party package's own findings as if they belonged to
-// the project under test. Without the last, bandit's B101 fires on every
-// bare `assert` a pytest suite uses by convention — a false positive on the
-// test framework's own idiom, not a finding about the shipped code security
-// is meant to gate.
-const banditExcludeDirs = "./.venv,./venv,./.git,./build,./dist,./.mypy_cache,./.pytest_cache,./.ruff_cache,./__pycache__,./tests,./test"
+// banditExcludeDirs lists the paths and name globs bandit's -x skips: a
+// project's own virtual environment, VCS metadata, build output, the cache
+// directories ruff, mypy and pytest each leave behind, the top-level test
+// tree, pytest's own two file-naming conventions (test_*.py, *_test.py)
+// wherever they occur, and workflow.go's census-exclusion rule. Without the
+// first group, -r's recursion walks straight into .venv and reports every
+// installed third-party package's own findings as if they belonged to the
+// project under test. The directory entries (./tests, ./test) only reach a
+// test tree that sits at the scan root; a project that nests a test module
+// beside the code it exercises, or under a package subdirectory rather than
+// a top-level tests/ folder, leaves bandit's B101 firing on every bare
+// `assert` there — a false positive on the test framework's own idiom, not a
+// finding about the shipped code security is meant to gate. The trailing
+// test-name globs close that gap: bandit matches -x entries against the full
+// scanned path (always "./"-relative here, since runSecurity scans ".") with
+// fnmatch, whose "*" crosses directory separators, so a leading "*/" reaches
+// a matching base name under any number of parent directories, the root
+// included. The census entries close a third gap the directory list above
+// cannot: a target.Dir at the repository root has bandit's -r walk the
+// filesystem directly, which ignores .gitignore, so a linked worktree or a
+// tracked project directory would otherwise be scanned as if it belonged to
+// the project under test, exactly the tree workflow.go's own
+// census-exclusion rule (censusExcludedPrefixes) already keeps out of its
+// own population.
+var banditExcludeDirs = buildBanditExcludeDirs()
+
+// buildBanditExcludeDirs appends censusExcludedPrefixes to bandit's own
+// fixed exclude list, in the "./"-relative fnmatch shape -x expects, so a
+// change to the shared census-exclusion rule never has to be copied here by
+// hand.
+//
+// Each census prefix ships with its trailing separator kept and a "*" added
+// ("./.dat/*"), which is what makes the entry a glob rather than a bare
+// path. Bandit tests an -x entry two ways (_is_file_included): fnmatch
+// against the scanned path, and raw substring containment. A bare "./.dat"
+// only survives the first way while a ./.dat directory happens to exist —
+// discover_files rewrites an entry that os.path.isdir accepts to
+// "./.dat/*" — and in a repository with no .dat/ the entry falls through to
+// the substring test, which silently drops every top-level path merely
+// beginning ".dat" (./.datadog, ./.database) from the security scan.
+// Carrying the separator makes the entry a glob unconditionally, matching
+// excludedFromTracked's own prefix boundary and never a look-alike sibling.
+func buildBanditExcludeDirs() string {
+	entries := []string{
+		"./.venv", "./venv", "./.git", "./build", "./dist",
+		"./.mypy_cache", "./.pytest_cache", "./.ruff_cache", "./__pycache__",
+		"./tests", "./test", "*/test_*.py", "*/*_test.py",
+	}
+	for _, p := range censusExcludedPrefixes {
+		entries = append(entries, "./"+p+"*")
+	}
+	return strings.Join(entries, ",")
+}
 
 // runSecurity runs bandit against target.Dir and turns its JSON report into
 // diagnostics. -r recurses the project tree (skipping banditExcludeDirs);
 // -f json gives Parse-equivalent structure rather than bandit's
-// human-rendered text.
+// human-rendered text. The result classification itself lives in
+// banditDiagnostics, kept separate so it can be exercised against a
+// synthetic *sysops.Result without spawning bandit.
 func (pythonAdapter) runSecurity(ctx context.Context, target Target) ([]Diagnostic, error) {
 	res, err := runTool(ctx, target.Dir, "bandit", []string{"-r", "-f", "json", "-x", banditExcludeDirs, "."})
 	if err != nil {
 		return nil, err
 	}
-	diags := parseBanditJSON(res.Stdout)
+	return banditDiagnostics(res), nil
+}
+
+// banditDiagnostics classifies one bandit invocation's captured result. A
+// stdout that parses as bandit's JSON report always yields its findings (or
+// none, on a clean run), even over a non-zero exit that mixed real findings
+// with bandit's own advisory status. Unparseable stdout splits two ways:
+// when the runner's own capture limit cut it off (res.StdoutTruncated), that
+// is the toolchain discarding bytes, not bandit reporting anything, so it
+// warns naming the limit and the log rather than raising bandit's usual
+// non-zero-exit fallback (SC43); any other unparseable stdout on a non-zero
+// exit keeps that fallback exactly as before.
+func banditDiagnostics(res *sysops.Result) []Diagnostic {
+	diags, ok := parseBanditJSON(res.Stdout)
+	if !ok {
+		if res.StdoutTruncated {
+			return []Diagnostic{banditTruncatedDiagnostic()}
+		}
+		if res.ExitCode != 0 {
+			return []Diagnostic{fallbackDiagnostic("bandit", res.ExitCode)}
+		}
+		return nil
+	}
 	if len(diags) == 0 && res.ExitCode != 0 {
 		diags = append(diags, fallbackDiagnostic("bandit", res.ExitCode))
 	}
-	return diags, nil
+	return diags
+}
+
+// banditTruncatedDiagnostic is what banditDiagnostics reports when bandit's
+// captured stdout hit sysops.DefaultMaxCaptureBytes before its JSON report
+// could close. That cutoff is the runner's own bound on captured bytes, not
+// a finding bandit reported, so treating it as bandit's ordinary
+// non-zero-exit fallback (SeverityError) would misattribute a toolchain
+// limit as a code problem the tool itself flagged. Severity is warning: a
+// capture-limited run still surfaces as something to look at, but never
+// fails a gate on its own the way a real bandit finding or exit would.
+func banditTruncatedDiagnostic() Diagnostic {
+	return Diagnostic{
+		Severity: SeverityWarning,
+		Message: fmt.Sprintf(
+			"bandit output exceeded the %d-byte capture limit before its JSON report could be parsed; see log_ref for raw output",
+			sysops.DefaultMaxCaptureBytes,
+		),
+	}
 }
 
 // runTest dispatches on target.Test — the one piece of information Command
@@ -258,23 +345,36 @@ const pythonCoverageFile = "coverage.xml"
 
 // pytestNoTestsExitCode is the status pytest returns when a run collects zero
 // tests. Both test pairs treat it as a vacuous pass rather than a failure: a
-// project with no e2e-marked test, or an adopter whose unit suite is empty, has
+// project with no e2e test file, or an adopter whose unit suite is empty, has
 // nothing to fail — the same stance the cargo-nextest pairs take with
 // --no-tests=pass for a crate that ships no tests of the kind being run. It is
-// distinct from pytest's usage-error exit (a missing pytest-cov, say), which is
-// a real failure and still falls through to the exit-code fallback below.
+// distinct from pytest's usage-error exit (an argument pytest itself rejects),
+// which is a real failure and still falls through to the exit-code fallback
+// below.
 const pytestNoTestsExitCode = 5
 
+// pytestE2EKeyword is the `-k` expression that partitions a project's tests
+// between the two test pairs, by path rather than by a custom marker: pytest
+// node IDs carry the collected file's path, so a substring match against
+// "e2e" reaches any test living under a path segment or filename that names
+// it — e.g. tests/test_e2e.py — the same convention Rust's e2e pair reads
+// off `tests/*.rs` and Go's off "*_e2e_test.go", neither of which needs a
+// project to annotate an individual test either. runE2ETest's own `-k` is
+// this expression bare; runUnitTest's is its negation, so the two pairs
+// partition the project's tests with no overlap.
+const pytestE2EKeyword = "e2e"
+
 // runUnitTest runs the unit-test pair through `uv run pytest`, adding
-// coverage in this one invocation rather than a second one (pytest-cov,
-// resolved the same way pytest itself is — a project dev dependency, never a
-// toolchain pin) — mirroring Go's gotestsum wrapper and Rust's cargo-llvm-cov
-// nextest (OD50). `-m "not e2e"` excludes the e2e-marked suite runE2ETest
-// owns, the exact complement of its own `-m e2e`, so the two test pairs
-// partition the project's tests.
+// coverage in this one invocation rather than a second one — mirroring Go's
+// gotestsum wrapper and Rust's cargo-llvm-cov nextest (OD50). pytest-cov is
+// added through `--with`, an ephemeral addition to this one invocation's
+// environment, rather than assumed as a project dev dependency: a project
+// that already depends on it gets the same package from its own resolution,
+// and one that does not still gets a coverage report instead of pytest's own
+// "unrecognized arguments" usage error on an unknown flag.
 func (pythonAdapter) runUnitTest(ctx context.Context, target Target) ([]Diagnostic, error) {
 	res, err := runTool(ctx, target.Dir, "uv", []string{
-		"run", "pytest", "-m", "not e2e",
+		"run", "--with", "pytest-cov", "pytest", "-k", "not " + pytestE2EKeyword,
 		"--cov=.", "--cov-report=xml:" + filepath.Join(target.Dir, pythonCoverageFile),
 	})
 	if err != nil {
@@ -290,15 +390,17 @@ func (pythonAdapter) runUnitTest(ctx context.Context, target Target) ([]Diagnost
 	return diags, nil
 }
 
-// runE2ETest runs the e2e-test pair through `uv run pytest -m e2e`: an
-// e2e-marked test imports pytest-playwright's fixtures, which drive an
-// actual Chromium instance rather than anything this adapter spawns itself.
-// Per OD61, Playwright's Python distribution ships its own Chromium, unlike
-// Go's chromedp (which needs an ambient Chrome the CI template installs
-// separately) — so no browser-install step belongs here or in the caller
-// that invokes this check.
+// runE2ETest runs the e2e-test pair through `uv run pytest -k e2e`: a test
+// under an e2e-named path imports pytest-playwright's fixtures, which drive
+// an actual Chromium instance rather than anything this adapter spawns
+// itself. Per OD61, Playwright's Python distribution ships its own Chromium,
+// unlike Go's chromedp (which needs an ambient Chrome the CI template
+// installs separately) — so no browser-install step belongs here or in the
+// caller that invokes this check. pytest-playwright is added through
+// `--with` for the same reason runUnitTest adds pytest-cov that way: a
+// project need not declare it as its own dev dependency for the check to run.
 func (pythonAdapter) runE2ETest(ctx context.Context, target Target) ([]Diagnostic, error) {
-	res, err := runTool(ctx, target.Dir, "uv", []string{"run", "pytest", "-m", "e2e"})
+	res, err := runTool(ctx, target.Dir, "uv", []string{"run", "--with", "pytest-playwright", "pytest", "-k", pytestE2EKeyword})
 	if err != nil {
 		return nil, err
 	}
@@ -450,13 +552,17 @@ type banditReport struct {
 
 // parseBanditJSON turns one bandit report into diagnostics tagged with its
 // rule ID (e.g. "B101"). MEDIUM and HIGH severity count as errors; LOW counts
-// as a warning, mirroring gosec's own severity split (parseGosecJSON).
-func parseBanditJSON(stdout []byte) []Diagnostic {
+// as a warning, mirroring gosec's own severity split (parseGosecJSON). ok is
+// false when stdout does not parse as bandit's JSON shape at all — a
+// genuinely malformed report and a report the runner's capture limit cut off
+// mid-document look identical here, so banditDiagnostics is what tells them
+// apart using the caller's own res.StdoutTruncated.
+func parseBanditJSON(stdout []byte) (diags []Diagnostic, ok bool) {
 	var report banditReport
 	if err := json.Unmarshal(bytes.TrimSpace(stdout), &report); err != nil {
-		return nil // the caller's exit-code fallback covers an unparseable report
+		return nil, false
 	}
-	diags := make([]Diagnostic, 0, len(report.Results))
+	diags = make([]Diagnostic, 0, len(report.Results))
 	for _, r := range report.Results {
 		severity := SeverityWarning
 		if strings.EqualFold(r.IssueSeverity, "HIGH") || strings.EqualFold(r.IssueSeverity, "MEDIUM") {
@@ -470,7 +576,7 @@ func parseBanditJSON(stdout []byte) []Diagnostic {
 			Line:     r.LineNumber,
 		})
 	}
-	return diags
+	return diags, true
 }
 
 // atoiOrZero parses a decimal string already validated by the caller's own

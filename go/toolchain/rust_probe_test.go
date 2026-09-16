@@ -337,6 +337,81 @@ fn cli_should_fail_but_does_not() {
 	}
 }
 
+// writeBareSecurityCrate lays out a crate with no deny.toml and no
+// `license` manifest field — the shape a crate takes before it has opted
+// into any cargo-deny policy of its own — pinning smallvecVersion and
+// generating a real Cargo.lock for it, so cargo-audit reads a genuinely
+// resolved dependency graph. smallvec 1.6.0 carries RUSTSEC-2021-0003; any
+// other version carries no advisory this suite tracks.
+func writeBareSecurityCrate(t *testing.T, smallvecVersion string) string {
+	t.Helper()
+	if _, err := exec.LookPath("cargo"); err != nil {
+		t.Skip("cargo not on PATH")
+	}
+	dir := t.TempDir()
+	write := func(rel, content string) {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", rel, err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	write("Cargo.toml", "[package]\nname = \"secprobe\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nsmallvec = \"="+smallvecVersion+"\"\n")
+	write("src/lib.rs", "pub fn probe() -> i32 {\n    7\n}\n")
+
+	lock := exec.Command("cargo", "generate-lockfile")
+	lock.Dir = dir
+	if out, err := lock.CombinedOutput(); err != nil {
+		t.Fatalf("cargo generate-lockfile: %v\n%s", err, out)
+	}
+	return dir
+}
+
+// TestE2ERustAdapterSecuritySeparatesOnBareCrateWithoutDenyToml is the
+// counter-probe for rssecp (SC53/SC29's cause read): a crate with no
+// deny.toml and no declared license used to fail cargo-deny's license
+// group on every arm regardless of an actual vulnerability, so the clean
+// arm never reached EXIT 0. With cargo-deny's license group scoped to a
+// crate that opts in via its own deny.toml, a clean dependency graph
+// resolves to EXIT 0 and a graph pinning smallvec 1.6.0 (RUSTSEC-2021-0003)
+// resolves to EXIT 20 with cargo-audit's own advisory attributed.
+func TestE2ERustAdapterSecuritySeparatesOnBareCrateWithoutDenyToml(t *testing.T) {
+	requireCargoTool(t, "cargo-audit")
+	requireCargoTool(t, "cargo-deny")
+	logDir := t.TempDir()
+
+	cleanDir := writeBareSecurityCrate(t, "1.6.1")
+	cleanRes, err := Run(context.Background(), Target{Language: LanguageRust, Check: CheckSecurity, Dir: cleanDir}, Options{LogDir: logDir})
+	if err != nil {
+		t.Fatalf("Run(security) on clean input: unexpected infrastructure error: %v", err)
+	}
+	if cleanRes.Status.ExitCode() != ExitSuccess {
+		t.Fatalf("Run(security) on a bare crate with no advisory = status %s (exit %d), want success (exit %d); diagnostics=%+v",
+			cleanRes.Status, cleanRes.Status.ExitCode(), ExitSuccess, cleanRes.Diagnostics)
+	}
+
+	faultDir := writeBareSecurityCrate(t, "1.6.0")
+	faultRes, err := Run(context.Background(), Target{Language: LanguageRust, Check: CheckSecurity, Dir: faultDir}, Options{LogDir: logDir})
+	if err != nil {
+		t.Fatalf("Run(security) on fault input: unexpected infrastructure error: %v", err)
+	}
+	if faultRes.Status.ExitCode() != ExitCheckFailed {
+		t.Fatalf("Run(security) pinning smallvec 1.6.0 = status %s (exit %d), want gate_negative (exit %d); diagnostics=%+v",
+			faultRes.Status, faultRes.Status.ExitCode(), ExitCheckFailed, faultRes.Diagnostics)
+	}
+	foundAdvisory := false
+	for _, d := range faultRes.Diagnostics {
+		if containsSubstring(d.Message, "RUSTSEC-2021-0003") || containsSubstring(d.Code, "RUSTSEC-2021-0003") {
+			foundAdvisory = true
+		}
+	}
+	if !foundAdvisory {
+		t.Errorf("Run(security) diagnostics = %+v, want RUSTSEC-2021-0003 attributed to cargo-audit's own finding", faultRes.Diagnostics)
+	}
+}
+
 // TestE2ERustAdapterBenchmarkDispatchableOnEveryFleetTarget asserts the
 // benchmark check's dispatch — Route, Tool and the dispatch-table entry, the
 // parts that could hard-code a host assumption — carries no
