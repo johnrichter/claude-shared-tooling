@@ -68,7 +68,10 @@
 #     feeds shellcheck's `-P` search path via SHELLCHECK_OPTS. Empty adds no search path.
 #   mise_version                     (string,  default "2026.9.9")
 #     mise release this template installs. Latest stable patch, measured at write time per
-#     K11/S7 — never carried forward from an earlier revision.
+#     K11/S7 — never carried forward from an earlier revision. Carries no mise.lock re-lock
+#     clause, unlike the five pin-reading templates' own mise_version: this track installs
+#     --locked against a template-owned config alone, never a caller lockfile (Toolchain
+#     activation above), so a bump here re-locks nothing. By construction, not an oversight.
 #   dry_run                          (boolean, default false)
 #     true installs and verifies mise, language-tools and the seven check binaries, then
 #     stops — every check step and extra_steps are skipped. Proves the call contract and the
@@ -105,7 +108,7 @@ on:
         type: string
         default: ""
       mise_version:
-        description: "mise release the template installs. Latest stable patch, measured at write time per K11/S7."
+        description: "mise release the template installs. Latest stable patch, measured at write time per K11/S7. No mise.lock re-lock follows a bump here, unlike the five pin-reading templates: this track installs --locked against a template-owned config alone, never a caller lockfile."
         required: false
         type: string
         default: "2026.9.9"

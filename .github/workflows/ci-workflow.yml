@@ -58,12 +58,15 @@
 #     per repository is enough.
 #   mise_version                     (string,  default "2026.9.9")
 #     mise release this template installs. Latest stable patch, measured at write time per
-#     K11/S7 — never carried forward from an earlier revision.
+#     K11/S7 — never carried forward from an earlier revision. Carries no mise.lock re-lock
+#     clause, unlike the five pin-reading templates' own mise_version: this track runs no
+#     `mise install --locked` at all (Toolchain activation above), so a bump here re-locks
+#     nothing. The omission is by construction, not an oversight.
 #   extra_steps                      (string,  default "")
 #     Shell script run after the check, for a repository-specific step language-tools doesn't
 #     cover. Empty runs nothing.
 #
-# Caller contract: the caller supplies nothing but these three inputs — this template checks out
+# Caller contract: the caller supplies nothing but these inputs — this template checks out
 # the caller's own repo itself, at repo root, once per job. It needs no secret and pushes and
 # publishes nothing.
 
@@ -83,7 +86,7 @@ on:
         type: string
         default: "."
       mise_version:
-        description: "mise release the template installs. Latest stable patch, measured at write time per K11/S7."
+        description: "mise release the template installs. Latest stable patch, measured at write time per K11/S7. No mise.lock re-lock follows a bump here, unlike the five pin-reading templates: this track runs no `mise install --locked` at all."
         required: false
         type: string
         default: "2026.9.9"
