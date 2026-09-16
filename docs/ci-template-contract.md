@@ -397,11 +397,14 @@ Three of the 22 reach no mise backend and install through the system package man
 ```yaml
 # macOS arm64 — kcov via Homebrew (shell test job, macos-26 leg, SC51). The layer-0 probe
 # finds an arm64_tahoe bottle in the catalog matching this runner image exactly, so the
-# catalog's current default install resolves the right build.
+# catalog's current default install resolves the right build. The leg maps the Homebrew
+# prefix onto PATH before this step (section 7) and refreshes the catalog first (OD59), so
+# the bottle the probe measured is the one that resolves.
 - name: Provision kcov (macOS arm64, Homebrew — bottle confirmed current)
   if: ${{ runner.os == 'macOS' && matrix.kcov_coverage }}
   run: |
     set -euo pipefail
+    brew update                      # OD59: refresh the image's own Homebrew first
     brew install kcov
     kcov --version   # OD60: print what was installed
 
@@ -494,7 +497,7 @@ Three of the 22 reach no mise backend and install through the system package man
 
 F80 measures Homebrew 6.0.13 present on the macOS image on 2026-08-26, with its PATH resolution **proven on Intel** through `/usr/local/bin` and **unproven on arm64**, where the prefix is `/opt/homebrew/bin`. No build script writes an `/etc/paths.d` entry for Homebrew, and the image's `bashrc` exports `/usr/local/bin` (the Intel prefix) but never `/opt/homebrew/bin` (the arm64 prefix).
 
-**A macOS job maps the Homebrew prefix onto PATH before its first `brew` step.** The check step that runs `checkbashisms` or Chrome inherits the same mapping, because the binaries Homebrew installs land in that same prefix. Prefix by arch: `/opt/homebrew/bin` on arm64, `/usr/local/bin` on Intel. A **cask** is the exception: it installs an `.app` bundle under `/Applications` and puts nothing on the bin prefix, so the Chrome install step links the bundle's own executable onto the prefix (section 6) — without that link the mapping is inert and the resolution check below resolves an empty path.
+**A macOS job maps the Homebrew prefix onto PATH before its first `brew` step.** The check step that runs `checkbashisms`, `kcov` or Chrome inherits the same mapping, because the binaries Homebrew installs land in that same prefix. Prefix by arch: `/opt/homebrew/bin` on arm64, `/usr/local/bin` on Intel. A matrix leg that runs no `brew` step maps nothing: `ci-shell.yml`'s `macos-26-intel` leg installs its `kcov` shim into `${RUNNER_TEMP}/bin` instead (section 6), and leaving that leg's PATH unmapped keeps the shim ahead of anything the image ships. Where the same job also provisions digest-pinned tools through mise, the mapping sits *before* that provisioning step — `GITHUB_PATH` prepends per step, so `mise bin-paths` written later stays ahead of the prefix and the pinned copy of a tool the image also carries (`jq`) still wins. A **cask** is the exception: it installs an `.app` bundle under `/Applications` and puts nothing on the bin prefix, so the Chrome install step links the bundle's own executable onto the prefix (section 6) — without that link the mapping is inert and the resolution check below resolves an empty path.
 
 **Installed browser wins on PATH (OD64).** The mapping puts the Homebrew prefix **ahead of** the image's own Chrome location, so a check resolves the copy the template installed rather than the one the image shipped. Installing without winning the PATH leaves OD56 unmet. (F77: the images ship Chrome 151.0.7922.137 on `ubuntu-24.04` and 150.0.7871.187 on `macos-26-arm64` on 2026-08-26; the templates use none of them.)
 

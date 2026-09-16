@@ -52,7 +52,11 @@
 # a passthrough shim named `kcov` instead, ahead of the real binary on PATH, which discards
 # kcov's own flags and output-directory argument and execs the wrapped bats invocation
 # unmodified — so that leg's `test unit` step still runs the same suite, just uninstrumented
-# for coverage, and needs no leg-specific branch of its own below the provisioning step.
+# for coverage, and needs no leg-specific branch of its own below the provisioning step. The
+# `macos-26` leg maps the Homebrew prefix onto PATH before its `brew` step (contract section
+# 7, F80) and refreshes the catalog first (OD59, so the bottle the probe measured is the one
+# that resolves); the intel leg does neither, because it runs no `brew` step and its PATH has
+# to keep the shim first.
 #
 # Include list (OD12). `language-tools` has no flag for a file a script sources from outside
 # the directory it is checking, and shellcheck's own `external-sources=true` (baked into
@@ -478,6 +482,25 @@ jobs:
       - name: mise trust
         run: mise trust --all
 
+      # Contract section 7 (F80): the macOS image's own shell exports /usr/local/bin (the
+      # Intel prefix) but never /opt/homebrew/bin (the arm64 one), so a macOS job maps the
+      # Homebrew prefix onto PATH before its first brew step — otherwise the binary that
+      # step installs is unresolved for every step after it. Gated to the one leg that runs
+      # brew: macos-26-intel installs no Homebrew kcov, and leaving its PATH untouched keeps
+      # the shim in RUNNER_TEMP/bin ahead of anything the image ships. Placed before the
+      # provisioning step below rather than after it as ci-go.yml's own copy sits, because
+      # GITHUB_PATH prepends per step: mise's bin-paths land ahead of the prefix this way,
+      # so the digest-pinned bats-core and jq still win over any Homebrew copy on the image.
+      - name: Map Homebrew prefix onto PATH (macOS)
+        if: ${{ runner.os == 'macOS' && matrix.kcov_coverage }}
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            arm64|aarch64) prefix="/opt/homebrew" ;;
+            *)             prefix="/usr/local"    ;;
+          esac
+          echo "${prefix}/bin" >> "$GITHUB_PATH"
+
       # SC7: bats-core and jq resolve through the aqua backend, which records a
       # per-platform digest and is already cross-platform (macOS included) — the same
       # install runs unbranched on every leg of this job's matrix. Installed from a
@@ -530,6 +553,7 @@ jobs:
         if: ${{ runner.os == 'macOS' && matrix.kcov_coverage }}
         run: |
           set -euo pipefail
+          brew update                      # OD59: refresh the image's own Homebrew first
           brew install kcov
           kcov --version
 
