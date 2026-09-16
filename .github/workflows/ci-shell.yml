@@ -1,64 +1,84 @@
 # Reusable CI template — shell track. Implements the fleet CI template contract
-# (docs/ci-template-contract.md) for a language that neither compiles nor packages: one
-# job, no `build`, no matrix to gate (SC8's population excludes this template by
+# (docs/ci-template-contract.md) for a language that neither compiles nor packages: no
+# `build`, no matrix to gate on `source-checks` (SC8's population excludes this template by
 # construction). `vet` is skipped too — the standard records type checking as not
-# applicable for shell — so the job runs the remaining five MATRIX pairs: `format`, `lint`,
-# `security`, `test unit` and `test e2e` (OD3, OD50, OD51). The checkout and verified-fetch
-# steps for mise and language-tools are byte-for-byte shared with ci-go.yml, ci-rust.yml and
+# applicable for shell — so the two jobs below split the remaining five MATRIX pairs (OD3,
+# OD50, OD51) the way the three compiled-language templates split theirs: `source-checks`
+# (`format`, `lint`, `security` — one platform, since those checks read source text rather
+# than build output) and `test` (`test unit`, `test e2e` — needs: source-checks, the
+# three-platform matrix SC51 proves reachable). The checkout and verified-fetch steps for
+# mise and language-tools are byte-for-byte shared with ci-go.yml, ci-rust.yml and
 # ci-python.yml; a change to that shared shape belongs in ci-go.yml first, then copies here.
 #
 # Toolchain activation. Go, Rust and Python each pin a per-repo language version through the
 # caller's own committed mise.toml/mise.lock, so those templates run `mise install --locked`
-# against it. Shell has no such per-repo version to pin — the five check binaries below are
-# themselves the only "toolchain" this track activates, and they install from a
-# template-owned config, never the caller's. `mise trust --all` still runs first: a caller
-# repo can carry its own unrelated mise.toml (for a different language's local dev setup),
-# and mise refuses to read any config it has not trusted, which would break the provisioning
-# step that follows even though that step never touches the caller's file.
+# against it. Shell has no such per-repo version to pin — the check binaries below are
+# themselves the only "toolchain" either job activates, and they install from a
+# template-owned config, never the caller's. `mise trust --all` still runs first in both
+# jobs: a caller repo can carry its own unrelated mise.toml (for a different language's
+# local dev setup), and mise refuses to read any config it has not trusted, which would
+# break the provisioning step that follows even though that step never touches the caller's
+# file.
 #
-# Check-tool provisioning (contract section 5): shellcheck, shfmt, bats-core, semgrep and jq
-# — five of the shell share of F54's 23-binary matrix — install from a template-owned mise
-# config written to RUNNER_TEMP and pointed at via MISE_CONFIG_FILE. Each is pinned at its
-# latest stable version (OD49). shellcheck, shfmt, bats-core and jq resolve through the aqua
-# backend, which records a per-platform digest; semgrep resolves through the pipx backend,
-# which records none (F67 measures 0 entries on that backend) — the digest check is simply
-# not run for it.
+# Check-tool provisioning (contract section 5). `source-checks` provisions shellcheck,
+# shfmt, bats-core, semgrep and jq (five of the shell share of F54's binary matrix) plus
+# checkbashisms; `test` provisions bats-core and jq again (jobs share no filesystem state)
+# plus kcov. Each mise-backed tool is pinned at its latest stable version (OD49). shellcheck,
+# shfmt, bats-core and jq resolve through the aqua backend, which records a per-platform
+# digest and is already cross-platform — installing it identically on every `test` matrix
+# leg needs no OS branch. semgrep resolves through the pipx backend, which records no digest
+# (F67 measures 0 entries on that backend) — the digest check is simply not run for it.
 #
 # checkbashisms and kcov reach the runner through neither mise backend the contract's matrix
-# names for them, for two different reasons. checkbashisms reaches no mise backend at all
-# (F79) — it installs from the `devscripts` apt package, refreshing the apt cache first
-# (OD59). kcov names a `ubi:` backend, but SimonKagstrom/kcov's GitHub releases ship no
-# downloadable asset for any platform as of the latest release (v43) — `mise install` against
-# that backend fails closed with no release to select. apt carries no fallback either: kcov
-# is absent from Ubuntu noble's archive on every architecture, not only arm64, so the same
-# `apt-get install` that provisions checkbashisms cannot also provision kcov. This template
-# builds kcov from source instead, pinned to the v43 tag's own commit (never the branch tip),
-# from apt-installed build dependencies present in noble's archive on every architecture.
-# Both channels put every shell source check on one platform (`ubuntu-24.04-arm`, OD63) — the
-# Homebrew channel serving the other templates' macOS `build`/`test` legs has no counterpart
-# here, because this template has no macOS leg.
+# names for them, for two different reasons, and neither resolves through mise on any
+# platform (F79, F67). checkbashisms installs from Ubuntu's `devscripts` apt package on
+# `source-checks`' one platform, or Homebrew's platform-independent `checkbashisms` bottle
+# were it ever needed on a macOS leg (`test` runs no `lint`, so it never provisions
+# checkbashisms at all). kcov names a `ubi:` backend, but SimonKagstrom/kcov's GitHub
+# releases ship no downloadable asset for any platform as of the latest release (v43) —
+# `mise install` against that backend fails closed with no release to select — and apt
+# carries no kcov package on noble on any architecture either. `test`'s Linux leg builds it
+# from source instead, pinned to the v43 tag's own commit (never the branch tip), from
+# apt-installed build dependencies present in noble's archive on every architecture.
+#
+# The macOS legs (SC51). Homebrew's `checkbashisms` formula carries one
+# architecture-independent bottle, so a macOS `lint` leg (were one ever added) would resolve
+# it identically on `macos-26` and `macos-26-intel`. `kcov`'s formula does not: the layer-0
+# probe (`.dat/fleet-04-adoption/runs/sc51-macos-probe.md`, read 2026-09-14) finds an
+# `arm64_tahoe` bottle matching `macos-26` (arm64) exactly, but the catalog's newest
+# `x86_64` bottle is `sonoma` (macOS 14) — not a build confirmed current for
+# `macos-26-intel`. Per the operator's chosen route (the probe's own "Route 1"), `test`'s
+# `macos-26` leg installs kcov from Homebrew directly; `test`'s `macos-26-intel` leg installs
+# a passthrough shim named `kcov` instead, ahead of the real binary on PATH, which discards
+# kcov's own flags and output-directory argument and execs the wrapped bats invocation
+# unmodified — so that leg's `test unit` step still runs the same suite, just uninstrumented
+# for coverage, and needs no leg-specific branch of its own below the provisioning step. The
+# `macos-26` leg maps the Homebrew prefix onto PATH before its `brew` step (contract section
+# 7, F80) and refreshes the catalog first (OD59, so the bottle the probe measured is the one
+# that resolves); the intel leg does neither, because it runs no `brew` step and its PATH has
+# to keep the shim first.
 #
 # Include list (OD12). `language-tools` has no flag for a file a script sources from outside
 # the directory it is checking, and shellcheck's own `external-sources=true` (baked into
 # language-tools' `.shellcheckrc`) only stops it from failing on a source target it cannot
 # see — it does not make that target visible. `inputs.include` names the files and
-# directories a script sources; the workflow resolves each entry to a directory (a file
+# directories a script sources; `source-checks` resolves each entry to a directory (a file
 # entry resolves to its containing directory) and writes the deduplicated, colon-joined
 # result to `SHELLCHECK_OPTS` as a `-P` search path. shellcheck reads that environment
 # variable itself, and the shell adapter's subprocess inherits the job's environment, so the
 # search path reaches shellcheck without language-tools needing to know about it.
 #
 # Recursion (OD54). `--dir` on the shell track walks every shell file at or below the named
-# root, `.githooks/` included, so one call per repository — this template's whole job — is
-# enough; no adopter needs a per-directory call.
+# root, `.githooks/` included, so one call per repository — per job — is enough; no adopter
+# needs a per-directory call.
 #
 # Inputs:
 #   runs_on                          (string,  default "ubuntu-24.04-arm")
 #     Fully qualified GitHub-hosted runner label, published by actions/runner-images.
 #     Never a floating tag (ubuntu-latest, ...): those move under a caller without notice.
-#     Unused by this template's own job placement — OD63 fixes the checks job's platform in
-#     the template rather than leaving it to a caller — kept for input-naming parity with
-#     the other five templates (section 1).
+#     Unused by this template's own job placement — source-checks fixes its platform and
+#     test fixes its matrix (OD63, SC51) rather than leaving either to a caller — kept for
+#     input-naming parity with the other five templates (section 1).
 #   script_root                      (string,  default ".")
 #     Root language-tools recurses from (`--dir`), relative to the checked-out repo. Covers
 #     every shell file at or below it, `.githooks/` included (OD54).
@@ -73,14 +93,14 @@
 #     --locked against a template-owned config alone, never a caller lockfile (Toolchain
 #     activation above), so a bump here re-locks nothing. By construction, not an oversight.
 #   dry_run                          (boolean, default false)
-#     true installs and verifies mise, language-tools and the seven check binaries, then
-#     stops — every check step and extra_steps are skipped. Proves the call contract and the
-#     installs without needing the caller's scripts to actually pass a check.
-#   test_timeout                     (number,  default 300)
+#     true installs and verifies mise, language-tools and each job's own check binaries,
+#     then stops — every check step and extra_steps are skipped. Proves the call contract and
+#     the installs without needing the caller's scripts to actually pass a check.
+#   test_timeout                     (number, default 300)
 #     Wall-clock bound per test subcommand, in seconds. Applied to each `test` subcommand
 #     step as `--timeout <n>s`. Default is language-tools' own binary default (300 s).
 #   extra_steps                      (string,  default "")
-#     Shell script run after the checks, for a repository-specific check language-tools
+#     Shell script run after test's checks, for a repository-specific check language-tools
 #     doesn't cover. Empty runs nothing.
 #
 # Caller contract: the caller supplies nothing but these inputs — this template checks out
@@ -93,7 +113,7 @@ on:
   workflow_call:
     inputs:
       runs_on:
-        description: "Fully qualified GitHub-hosted runner label (actions/runner-images). Never a floating tag. Unused for this template's own job placement (OD63 fixes it in the template); kept for input-naming parity with the other five templates."
+        description: "Fully qualified GitHub-hosted runner label (actions/runner-images). Never a floating tag. Unused for this template's own job placement (source-checks fixes its platform, test fixes its matrix per OD63/SC51); kept for input-naming parity with the other five templates."
         required: false
         type: string
         default: "ubuntu-24.04-arm"
@@ -108,12 +128,12 @@ on:
         type: string
         default: ""
       mise_version:
-        description: "mise release the template installs. Latest stable patch, measured at write time per K11/S7. No mise.lock re-lock follows a bump here, unlike the five pin-reading templates: this track installs --locked against a template-owned config alone, never a caller lockfile."
+        description: "mise release the template installs. Latest stable patch, measured at write time per K11/S7. No mise.lock re-lock clause follows a bump here, unlike the five pin-reading templates: this track installs --locked against a template-owned config alone, never a caller lockfile."
         required: false
         type: string
         default: "2026.9.9"
       dry_run:
-        description: "true installs and verifies mise, language-tools and the seven check binaries, then stops; every check step and extra_steps are skipped."
+        description: "true installs and verifies mise, language-tools and each job's own check binaries, then stops; every check step and extra_steps are skipped."
         required: false
         type: boolean
         default: false
@@ -123,7 +143,7 @@ on:
         type: number
         default: 300
       extra_steps:
-        description: "Shell script run after the checks, for a repository-specific check language-tools doesn't cover. Empty runs nothing."
+        description: "Shell script run after test's checks, for a repository-specific check language-tools doesn't cover. Empty runs nothing."
         required: false
         type: string
         default: ""
@@ -137,8 +157,8 @@ permissions:
   contents: read
 
 jobs:
-  checks:
-    name: checks
+  source-checks:
+    name: source-checks
     runs-on: ubuntu-24.04-arm        # OD63: one platform, a script neither compiles nor packages
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -217,7 +237,7 @@ jobs:
           # aqua:/ubi: metadata resolves through api.github.com; the job token buys the
           # authenticated per-repo quota instead of the shared-IP 60/hr anonymous one (F-T12-1).
           GITHUB_TOKEN: ${{ github.token }}
-          MISE_CONFIG_FILE: ${{ runner.temp }}/shell-check-tools.toml
+          MISE_CONFIG_FILE: ${{ runner.temp }}/shell-source-check-tools.toml
         run: |
           set -euo pipefail
           cat > "${MISE_CONFIG_FILE}" <<'EOF'
@@ -233,26 +253,13 @@ jobs:
           mise bin-paths >> "$GITHUB_PATH"
 
       # checkbashisms reaches no mise backend (F79) — installs from the devscripts package.
-      # kcov names a ubi: backend in the contract's matrix, but that backend's upstream
-      # release ships no downloadable asset for any platform, and apt carries no kcov package
-      # on noble either — so this builds kcov from source, pinned to the v43 tag's own commit,
-      # from apt-installed build dependencies. Cache refreshes first (OD59).
-      - name: Provision shell check binaries (checkbashisms, kcov)
-        env:
-          KCOV_COMMIT: a39874f938ce13f7a65f253120d1ec946b349ffe # v43
+      # kcov is a test-only tool (test unit wraps bats in it); source-checks runs no test and
+      # provisions none. Cache refreshes first (OD59).
+      - name: Provision shell check binaries (checkbashisms)
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y devscripts build-essential cmake pkg-config \
-            binutils-dev libelf-dev libdw-dev libiberty-dev libssl-dev \
-            libcurl4-openssl-dev zlib1g-dev
-          tmp="$(mktemp -d)"
-          git clone --quiet https://github.com/SimonKagstrom/kcov.git "${tmp}/kcov"
-          git -C "${tmp}/kcov" checkout --quiet "${KCOV_COMMIT}"
-          cmake -S "${tmp}/kcov" -B "${tmp}/kcov/build"
-          cmake --build "${tmp}/kcov/build" --parallel "$(nproc)"
-          sudo cmake --install "${tmp}/kcov/build"
-          rm -rf "${tmp}"
+          sudo apt-get install -y devscripts
 
       - name: Installed check-tool versions (OD60)
         run: |
@@ -263,7 +270,6 @@ jobs:
           semgrep --version
           jq --version
           checkbashisms --version
-          kcov --version
 
       - name: Install language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} (verified fetch)
         env:
@@ -328,7 +334,7 @@ jobs:
 
       - name: Dry-run summary (installs verified, checks skipped)
         if: ${{ inputs.dry_run }}
-        run: echo "dry-run summary -- mise ${{ inputs.mise_version }}, language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} and shellcheck/shfmt/bats-core/semgrep/jq/checkbashisms/kcov installed and verified, the checks steps and extra_steps are skipped"
+        run: echo "dry-run summary -- mise ${{ inputs.mise_version }}, language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} and shellcheck/shfmt/bats-core/semgrep/jq/checkbashisms installed and verified, the source-checks steps are skipped"
 
       - name: language-tools format
         if: ${{ !inputs.dry_run }}
@@ -370,6 +376,253 @@ jobs:
             exit "${exit_code}"
           fi
 
+      # Contract section 10: derive the artifact-name slug from script_root once, so the
+      # capture step below can scope its name without a path separator. A shell call is
+      # rooted at the repository root (default "."), so this exercises the fallback
+      # value rather than a non-empty slug.
+      - name: Derive a log-artifact slug
+        id: log_slug
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          raw="${{ inputs.script_root }}"
+          slug="$(printf '%s' "${raw}" | tr -c '[:alnum:]_-' '-' | sed -e 's/^-*//' -e 's/-*$//')"
+          printf 'value=%s\n' "${slug:-root}" >> "$GITHUB_OUTPUT"
+
+      # Failure-path capture (contract section 10, SECADV clause (d)): every check
+      # writes its raw tool output to a per-check record under .language-tools/log
+      # that the run otherwise discards. Guarded on !cancelled() rather than
+      # failure() so the security step's own passing-at-exit-10 run also publishes
+      # its capped diagnostics and overflow entry, instead of naming a log_ref no
+      # reader can fetch. Runs no check and changes no invocation, target root,
+      # subject set or verdict — it only exports what a check already wrote. Name
+      # scoped by language + job + the script_root slug; this job runs on one
+      # platform and no matrix, so there is no matrix.os component.
+      - name: Capture language-tools logs
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: language-tools-logs-shell-source-checks-${{ steps.log_slug.outputs.value }}
+          path: ${{ github.workspace }}/.language-tools/log/
+          if-no-files-found: ignore
+
+  test:
+    name: test
+    needs: source-checks
+    strategy:
+      fail-fast: false
+      matrix:
+        # SC51: the layer-0 probe (.dat/fleet-04-adoption/runs/sc51-macos-probe.md, read
+        # 2026-09-14) proves this three-platform set reachable and settles which of them
+        # carries kcov coverage. kcov_coverage is false only on macos-26-intel — see the
+        # kcov provisioning steps below for the reading behind that one exception.
+        include:
+          - os: ubuntu-24.04-arm
+            kcov_coverage: true
+          - os: macos-26
+            kcov_coverage: true
+          - os: macos-26-intel
+            kcov_coverage: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Resolve runner platform
+        id: platform
+        run: |
+          mkdir -p "${RUNNER_TEMP}/bin"
+          echo "${RUNNER_TEMP}/bin" >> "$GITHUB_PATH"
+          case "$(uname -s)" in
+            Linux)  mise_os=linux;  lt_os=linux  ;;
+            Darwin) mise_os=macos;  lt_os=darwin ;;
+            *) echo "::error::unsupported runner OS $(uname -s)"; exit 1 ;;
+          esac
+          case "$(uname -m)" in
+            x86_64|amd64)  mise_arch=x64;   lt_arch=amd64 ;;
+            arm64|aarch64) mise_arch=arm64; lt_arch=arm64 ;;
+            *) echo "::error::unsupported runner arch $(uname -m)"; exit 1 ;;
+          esac
+          {
+            echo "mise_os=${mise_os}"
+            echo "mise_arch=${mise_arch}"
+            echo "lt_os=${lt_os}"
+            echo "lt_arch=${lt_arch}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install mise ${{ inputs.mise_version }} (verified fetch)
+        env:
+          MISE_VERSION: ${{ inputs.mise_version }}
+          MISE_OS: ${{ steps.platform.outputs.mise_os }}
+          MISE_ARCH: ${{ steps.platform.outputs.mise_arch }}
+        run: |
+          set -euo pipefail
+          bin="mise-v${MISE_VERSION}-${MISE_OS}-${MISE_ARCH}"
+          base="https://github.com/jdx/mise/releases/download/v${MISE_VERSION}"
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "${tmp}/SHASUMS256.txt" "${base}/SHASUMS256.txt"
+          curl -fsSL -o "${tmp}/${bin}" "${base}/${bin}"
+          expected="$(awk -v want="./${bin}" '$2 == want { print $1; exit }' "${tmp}/SHASUMS256.txt")"
+          if [ -z "${expected}" ]; then
+            echo "::error::${bin} not listed in SHASUMS256.txt for mise v${MISE_VERSION}"
+            exit 1
+          fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "${tmp}/${bin}" | awk '{print $1}')"
+          else
+            actual="$(shasum -a 256 "${tmp}/${bin}" | awk '{print $1}')"
+          fi
+          if [ "${expected}" != "${actual}" ]; then
+            echo "::error::sha256 mismatch for ${bin} -- expected ${expected}, got ${actual}"
+            exit 1
+          fi
+          install -m 0755 "${tmp}/${bin}" "${RUNNER_TEMP}/bin/mise"
+          rm -rf "${tmp}"
+
+      - name: mise trust
+        run: mise trust --all
+
+      # Contract section 7 (F80): the macOS image's own shell exports /usr/local/bin (the
+      # Intel prefix) but never /opt/homebrew/bin (the arm64 one), so a macOS job maps the
+      # Homebrew prefix onto PATH before its first brew step — otherwise the binary that
+      # step installs is unresolved for every step after it. Gated to the one leg that runs
+      # brew: macos-26-intel installs no Homebrew kcov, and leaving its PATH untouched keeps
+      # the shim in RUNNER_TEMP/bin ahead of anything the image ships. Placed before the
+      # provisioning step below rather than after it as ci-go.yml's own copy sits, because
+      # GITHUB_PATH prepends per step: mise's bin-paths land ahead of the prefix this way,
+      # so the digest-pinned bats-core and jq still win over any Homebrew copy on the image.
+      - name: Map Homebrew prefix onto PATH (macOS)
+        if: ${{ runner.os == 'macOS' && matrix.kcov_coverage }}
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            arm64|aarch64) prefix="/opt/homebrew" ;;
+            *)             prefix="/usr/local"    ;;
+          esac
+          echo "${prefix}/bin" >> "$GITHUB_PATH"
+
+      # SC7: bats-core and jq resolve through the aqua backend, which records a
+      # per-platform digest and is already cross-platform (macOS included) — the same
+      # install runs unbranched on every leg of this job's matrix. Installed from a
+      # template-owned config so the caller's own committed mise.toml/mise.lock is never
+      # touched. jq serves two consumers off this one row: the test unit check here, and
+      # source-checks' own security-guard use of the same pin.
+      - name: Provision shell check binaries (bats-core, jq)
+        env:
+          # aqua:/ubi: metadata resolves through api.github.com; the job token buys the
+          # authenticated per-repo quota instead of the shared-IP 60/hr anonymous one (F-T12-1).
+          GITHUB_TOKEN: ${{ github.token }}
+          MISE_CONFIG_FILE: ${{ runner.temp }}/shell-test-tools.toml
+        run: |
+          set -euo pipefail
+          cat > "${MISE_CONFIG_FILE}" <<'EOF'
+          [tools]
+          "aqua:bats-core/bats-core" = "1.14.0"
+          "aqua:jqlang/jq" = "1.8.2"
+          EOF
+          mise trust "${MISE_CONFIG_FILE}"
+          mise install
+          mise bin-paths >> "$GITHUB_PATH"
+
+      # kcov names a ubi: backend in the contract's matrix, but that backend's upstream
+      # release ships no downloadable asset for any platform, and apt carries no kcov
+      # package on noble either — this builds it from source, pinned to the v43 tag's own
+      # commit, from apt-installed build dependencies. Cache refreshes first (OD59).
+      - name: Provision kcov (Linux, build from source)
+        if: runner.os == 'Linux'
+        env:
+          KCOV_COMMIT: a39874f938ce13f7a65f253120d1ec946b349ffe # v43
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config \
+            binutils-dev libelf-dev libdw-dev libiberty-dev libssl-dev \
+            libcurl4-openssl-dev zlib1g-dev
+          tmp="$(mktemp -d)"
+          git clone --quiet https://github.com/SimonKagstrom/kcov.git "${tmp}/kcov"
+          git -C "${tmp}/kcov" checkout --quiet "${KCOV_COMMIT}"
+          cmake -S "${tmp}/kcov" -B "${tmp}/kcov/build"
+          cmake --build "${tmp}/kcov/build" --parallel "$(nproc)"
+          sudo cmake --install "${tmp}/kcov/build"
+          rm -rf "${tmp}"
+
+      # SC51: the layer-0 probe finds Homebrew's kcov formula carries an arm64_tahoe
+      # bottle -- a macOS 26 arm64 build -- matching this leg's own runner image exactly,
+      # so the catalog's current default install resolves the right build here.
+      - name: Provision kcov (macOS arm64, Homebrew — bottle confirmed current)
+        if: ${{ runner.os == 'macOS' && matrix.kcov_coverage }}
+        run: |
+          set -euo pipefail
+          brew update                      # OD59: refresh the image's own Homebrew first
+          brew install kcov
+          kcov --version
+
+      # SC51: the same probe finds no tahoe-labeled x86_64 bottle in Homebrew's kcov
+      # catalog -- its newest x86_64 build is sonoma (macOS 14), unconfirmed against this
+      # leg's actual macos-26-intel image, unlike macos-26's exact arm64_tahoe match above.
+      # Per the operator's chosen route (the probe's own "Route 1"), this leg runs test
+      # unit's bats suite without kcov's coverage wrap rather than instrument it through an
+      # unconfirmed build: a shim named kcov, placed on PATH ahead of any real binary,
+      # strips kcov's own flags and its output-directory argument and execs the wrapped
+      # bats invocation directly. language-tools test unit (below) runs the identical
+      # command on every leg; only this shim changes what actually executes.
+      - name: Provision kcov (macOS x86_64 — coverage scoped down, SC51)
+        if: ${{ runner.os == 'macOS' && !matrix.kcov_coverage }}
+        run: |
+          set -euo pipefail
+          cat > "${RUNNER_TEMP}/bin/kcov" <<'SHIM'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          while [[ "$1" == --* ]]; do shift; done
+          shift
+          exec "$@"
+          SHIM
+          chmod +x "${RUNNER_TEMP}/bin/kcov"
+
+      - name: Installed check-tool versions (OD60)
+        run: |
+          set -euo pipefail
+          bats --version
+          jq --version
+          if [ "${{ matrix.kcov_coverage }}" = "true" ]; then
+            kcov --version
+          else
+            echo "kcov coverage scoped down on this leg (SC51); a passthrough shim runs in its place"
+          fi
+
+      - name: Install language-tools ${{ env.LANGUAGE_TOOLS_VERSION }} (verified fetch)
+        env:
+          LT_OS: ${{ steps.platform.outputs.lt_os }}
+          LT_ARCH: ${{ steps.platform.outputs.lt_arch }}
+        run: |
+          set -euo pipefail
+          archive="language-tools_${LANGUAGE_TOOLS_VERSION}_${LT_OS}_${LT_ARCH}.tar.gz"
+          base="https://github.com/johnrichter/language-tools/releases/download/v${LANGUAGE_TOOLS_VERSION}"
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "${tmp}/checksums.txt" "${base}/checksums.txt"
+          curl -fsSL -o "${tmp}/${archive}" "${base}/${archive}"
+          expected="$(awk -v want="${archive}" '$2 == want { print $1; exit }' "${tmp}/checksums.txt")"
+          if [ -z "${expected}" ]; then
+            echo "::error::${archive} not listed in checksums.txt for language-tools v${LANGUAGE_TOOLS_VERSION}"
+            exit 1
+          fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "${tmp}/${archive}" | awk '{print $1}')"
+          else
+            actual="$(shasum -a 256 "${tmp}/${archive}" | awk '{print $1}')"
+          fi
+          if [ "${expected}" != "${actual}" ]; then
+            echo "::error::sha256 mismatch for ${archive} -- expected ${expected}, got ${actual}"
+            exit 1
+          fi
+          tar -xzf "${tmp}/${archive}" -C "${tmp}"
+          install -m 0755 "${tmp}/language-tools" "${RUNNER_TEMP}/bin/language-tools"
+          rm -rf "${tmp}"
+
+      - name: Dry-run summary (installs verified, checks skipped)
+        if: ${{ inputs.dry_run }}
+        run: echo "dry-run summary -- mise ${{ inputs.mise_version }}, language-tools ${{ env.LANGUAGE_TOOLS_VERSION }}, bats-core, jq and kcov (or its scoped-down shim) installed and verified, the test steps and extra_steps are skipped"
+
       - name: language-tools test unit
         if: ${{ !inputs.dry_run }}
         run: language-tools test unit --language shell --dir "${{ inputs.script_root }}" --log-dir "${{ github.workspace }}/.language-tools/log" --timeout "${{ inputs.test_timeout }}s"
@@ -395,20 +648,16 @@ jobs:
           slug="$(printf '%s' "${raw}" | tr -c '[:alnum:]_-' '-' | sed -e 's/^-*//' -e 's/-*$//')"
           printf 'value=%s\n' "${slug:-root}" >> "$GITHUB_OUTPUT"
 
-      # Failure-path capture (contract section 10, SECADV clause (d)): every check
-      # writes its raw tool output to a per-check record under .language-tools/log
-      # that the run otherwise discards. Guarded on !cancelled() rather than
-      # failure() so the security step's own passing-at-exit-10 run also publishes
-      # its capped diagnostics and overflow entry, instead of naming a log_ref no
-      # reader can fetch. Runs no check and changes no invocation, target root,
-      # subject set or verdict — it only exports what a check already wrote. Name
-      # scoped by language + job + the script_root slug; this template declares one
-      # job and no matrix, so there is no matrix.os component.
+      # Failure-path capture (contract section 10, SECADV clause (d)). Guarded on
+      # !cancelled() for the same reason as source-checks: runs no check, changes no
+      # invocation, target root, subject set or verdict. Name scoped by language + job +
+      # the script_root slug + matrix.os, because this job now runs on three platforms and
+      # upload-artifact rejects a duplicate name across them.
       - name: Capture language-tools logs
         if: ${{ !cancelled() }}
         continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: language-tools-logs-shell-checks-${{ steps.log_slug.outputs.value }}
+          name: language-tools-logs-shell-test-${{ steps.log_slug.outputs.value }}-${{ matrix.os }}
           path: ${{ github.workspace }}/.language-tools/log/
           if-no-files-found: ignore
