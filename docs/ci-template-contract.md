@@ -10,7 +10,7 @@ tags:
   - owner:public
 links:
   - project:fleet-04-adoption:design
-updated: 2026-09-10T12:00:00Z
+updated: 2026-09-16T00:00:00Z
 ---
 
 # CI template contract
@@ -46,22 +46,25 @@ The fleet uses four fully qualified runner images, selected per operating system
 
 Defect 7: every template hardcodes a `language-tools` version (F9 measures 18 loci at `2.1.0` — five template `env:` blocks, twelve caller assignments, one plugin JSON file).
 
-**Rule.** Each template declares exactly **one** `LANGUAGE_TOOLS_VERSION` env locus, seven in total (the sixth was `ci-shell.yml`; the seventh is the new `ci-workflow.yml`). Its value is `3.0.3` — a patch bump over `3.0.2` (both patch the `3.0.0` OD69 first set, whose major bump made `--language` a required selector on an existing verb, SC5). `3.0.3` adds a third `go/toolchain` fix the binary reaches CI with only through a module retag: the python pytest vacuous-pass fix (a zero-collection unit or e2e run is a pass, not a failure), atop `3.0.2`'s rust unit/e2e test-filterset correction (a `binary()` name matcher that matched no binary failed every crate before a test ran) and in-process failure-path output capture. The `governance-code` plugin JSON must carry the same `3.0.3`. **No caller pins a version**: the twelve caller assignments leave with the jobs SC16 replaces (OD7).
+**Rule.** Each template declares exactly **one** `LANGUAGE_TOOLS_VERSION` env locus, seven in total (the sixth was `ci-shell.yml`; the seventh is the new `ci-workflow.yml`). Its value is `3.0.4` — a patch bump over `3.0.3` carrying layer 1's adapter repairs, atop `3.0.3`'s prior fixes (the python pytest vacuous-pass fix atop `3.0.2`'s rust unit/e2e test-filterset correction and in-process failure-path output capture, `3.0.2`/`3.0.3` both patching the `3.0.0` OD69 first set whose major bump made `--language` a required selector on an existing verb, SC5). Those repairs are SC19's sixteenth banned-command member, SC43's truncation warning and its bandit test-file exclude, the shell/python census-exclusion rule, and five probe-arm repairs split by the criterion that owns each: SC53's three (rust `security`, python `test unit`, python `test e2e`) and SC29's two (shell `test unit`, shell `test e2e`). The cause read's other four arms land outside this binary — python `lint` and `workflow lint` are module-side repairs in `marketplace`, and shell `lint` and go `test e2e` need a host where their own tool resolves. The `governance-code` plugin JSON must carry the same `3.0.4`. **No caller pins a version**: the twelve caller assignments leave with the jobs SC16 replaces (OD7).
 
 | Locus | Count after | Value |
 |---|---|---|
-| Template `env:` block | 7 (one per template) | `3.0.3` |
-| `governance-code` plugin JSON | 1 | `3.0.3` |
+| Template `env:` block | 7 (one per template) | `3.0.4` |
+| `governance-code` plugin JSON | 1 | `3.0.4` |
 | Caller assignments | 0 | — (removed with the replaced jobs, OD7) |
 
 ```yaml
 env:
   # Named once per template; every step reads this instead of restating the version.
-  # 3.0.3 patch-bumps 3.0.2 (both patch the 3.0.0 OD69 first set, whose major
-  # bump made --language a required selector on `release build`, SC5); it adds the
-  # go/toolchain python pytest vacuous-pass fix atop 3.0.2's rust test-filterset
+  # 3.0.4 patch-bumps 3.0.3 with layer 1's adapter repairs: SC19's sixteenth
+  # banned-command member, SC43's truncation warning and bandit test-file
+  # exclude, the shell/python census-exclusion rule, and five probe-arm repairs
+  # split by owner -- SC53's three (rust security, python test unit, python
+  # test e2e) and SC29's two (shell test unit, shell test e2e). All atop
+  # 3.0.3's own python pytest vacuous-pass fix and 3.0.2's rust test-filterset
   # and in-process failure-path capture fixes.
-  LANGUAGE_TOOLS_VERSION: "3.0.3"
+  LANGUAGE_TOOLS_VERSION: "3.0.4"
 ```
 
 ---
@@ -149,7 +152,9 @@ jobs:
 
 **The unit pair anchors `--dir` absolute.** `language-tools test unit` wraps `go test` in gotestsum and writes `junit.xml` and `coverage.out` at `<dir>/<name>`, while the check already runs with its working directory set to `<dir>`. A relative `--dir` (e.g. `go/agentcontract`) therefore doubles into `<dir>/<dir>/<name>`, whose parent does not exist, and gotestsum exits 1 in ~30 ms having run zero tests. `ci-go.yml` passes this one step `--dir "${{ github.workspace }}/${{ inputs.module_dir }}"` so the write path resolves absolute against the real directory. The target root and subject set are unchanged — only the path is anchored. `build` and `test e2e` write no `<dir>`-relative output and keep the plain relative `--dir`. The dir-relative write is a `language-tools` behavior, not the template's; the anchoring is the template-side remedy the pinned binary needs, and the rust unit pair (which writes `lcov.info` the same way) carries the same latent shape behind its own source-checks gate.
 
-**A Python adopter declares its own test runner.** Where Go (gotestsum) and Rust (cargo-nextest/cargo-llvm-cov) reach the runner as toolchain pins, Python's `test unit`/`test e2e` run `uv run pytest --cov`, which resolves pytest and pytest-cov from the project's own environment. A Python caller must therefore declare **pytest** and **pytest-cov** in a `[dependency-groups]` block (uv's default `dev` group) in its `pyproject.toml` and regenerate `uv.lock`, or the unit pair exits 4 on the unrecognized `--cov` argument. ruff and mypy remain toolchain pins and are not declared. A project that ships no e2e-marked test needs nothing more: a zero-collection run — `test e2e` with every test deselected, or `test unit` on an empty suite — is a vacuous pass, not a failure.
+**A Python adopter's test-runner plugins ride the invocation, not its lockfile.** Where Go (gotestsum) and Rust (cargo-nextest/cargo-llvm-cov) reach the runner as toolchain pins, Python's `test unit`/`test e2e` run `uv run --with <plugin> pytest`, which adds the pair's own plugin — pytest-cov for `test unit`, pytest-playwright for `test e2e` — to that one invocation's environment. So neither plugin has to appear in the caller's `pyproject.toml`, and the unit pair no longer exits 4 on an unrecognized `--cov` argument when pytest-cov is undeclared. An adopter that wants to pin the runner version still declares **pytest** in a `[dependency-groups]` block (uv's default `dev` group) and regenerates `uv.lock`; the project's own pin wins over the version `--with` would otherwise resolve. ruff and mypy remain toolchain pins and are not declared.
+
+**The two pairs partition by path, not by a marker.** `test unit` runs `pytest -k "not e2e"` and `test e2e` runs `pytest -k e2e`, so a test lands in the e2e pair when `e2e` appears anywhere in its node ID — a directory segment (`tests/e2e/test_login.py`), a file name (`tests/test_e2e.py`) or the test function's own name — and in the unit pair otherwise. A `@pytest.mark.e2e` marker no longer selects anything on its own, and a unit test whose name happens to contain `e2e` runs in the e2e pair instead: an adopter names its e2e tests on an `e2e` path and keeps the substring out of unit test names. A project that ships no e2e test needs nothing more: a zero-collection run — `test e2e` with every test deselected, or `test unit` on an empty suite — is a vacuous pass, not a failure.
 
 ---
 
