@@ -10,7 +10,7 @@ tags:
   - owner:public
 links:
   - project:fleet-04-adoption:design
-updated: 2026-09-10T12:00:00Z
+updated: 2026-09-16T00:00:00Z
 ---
 
 # CI template contract
@@ -46,7 +46,7 @@ The fleet uses four fully qualified runner images, selected per operating system
 
 Defect 7: every template hardcodes a `language-tools` version (F9 measures 18 loci at `2.1.0` — five template `env:` blocks, twelve caller assignments, one plugin JSON file).
 
-**Rule.** Each template declares exactly **one** `LANGUAGE_TOOLS_VERSION` env locus, seven in total (the sixth was `ci-shell.yml`; the seventh is the new `ci-workflow.yml`). Its value is `3.0.4` — a patch bump over `3.0.3` carrying layer 1's adapter repairs: SC19's banned-command member addition, SC43's adapter repair and truncation-warning fix, SC53's five adapter-side probe repairs across rust/python/shell, and the shell/python census-exclusion rule, atop `3.0.3`'s prior fixes (the python pytest vacuous-pass fix atop `3.0.2`'s rust unit/e2e test-filterset correction and in-process failure-path output capture, `3.0.2`/`3.0.3` both patching the `3.0.0` OD69 first set whose major bump made `--language` a required selector on an existing verb, SC5). The `governance-code` plugin JSON must carry the same `3.0.4`. **No caller pins a version**: the twelve caller assignments leave with the jobs SC16 replaces (OD7).
+**Rule.** Each template declares exactly **one** `LANGUAGE_TOOLS_VERSION` env locus, seven in total (the sixth was `ci-shell.yml`; the seventh is the new `ci-workflow.yml`). Its value is `3.0.4` — a patch bump over `3.0.3` carrying layer 1's adapter repairs, atop `3.0.3`'s prior fixes (the python pytest vacuous-pass fix atop `3.0.2`'s rust unit/e2e test-filterset correction and in-process failure-path output capture, `3.0.2`/`3.0.3` both patching the `3.0.0` OD69 first set whose major bump made `--language` a required selector on an existing verb, SC5). Those repairs are SC19's sixteenth banned-command member, SC43's truncation warning and its bandit test-file exclude, the shell/python census-exclusion rule, and five probe-arm repairs split by the criterion that owns each: SC53's three (rust `security`, python `test unit`, python `test e2e`) and SC29's two (shell `test unit`, shell `test e2e`). The cause read's other four arms land outside this binary — python `lint` and `workflow lint` are module-side repairs in `marketplace`, and shell `lint` and go `test e2e` need a host where their own tool resolves. The `governance-code` plugin JSON must carry the same `3.0.4`. **No caller pins a version**: the twelve caller assignments leave with the jobs SC16 replaces (OD7).
 
 | Locus | Count after | Value |
 |---|---|---|
@@ -57,11 +57,13 @@ Defect 7: every template hardcodes a `language-tools` version (F9 measures 18 lo
 ```yaml
 env:
   # Named once per template; every step reads this instead of restating the version.
-  # 3.0.4 patch-bumps 3.0.3 with layer 1's adapter repairs: SC19's banned-command
-  # member addition, SC43's adapter repair and truncation-warning fix, SC53's five
-  # adapter-side probe repairs across rust/python/shell, and the shell/python
-  # census-exclusion rule, atop 3.0.3's own python pytest vacuous-pass fix and
-  # 3.0.2's rust test-filterset and in-process failure-path capture fixes.
+  # 3.0.4 patch-bumps 3.0.3 with layer 1's adapter repairs: SC19's sixteenth
+  # banned-command member, SC43's truncation warning and bandit test-file
+  # exclude, the shell/python census-exclusion rule, and five probe-arm repairs
+  # split by owner -- SC53's three (rust security, python test unit, python
+  # test e2e) and SC29's two (shell test unit, shell test e2e). All atop
+  # 3.0.3's own python pytest vacuous-pass fix and 3.0.2's rust test-filterset
+  # and in-process failure-path capture fixes.
   LANGUAGE_TOOLS_VERSION: "3.0.4"
 ```
 
