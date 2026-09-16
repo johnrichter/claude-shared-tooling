@@ -66,7 +66,7 @@
 #   runs_on                          (string,  default "ubuntu-24.04")
 #     Fully qualified GitHub-hosted runner label, published by actions/runner-images. Never
 #     a floating tag (ubuntu-latest, ...): those move under a caller without notice.
-#   mise_version                     (string,  default "2026.9.1")
+#   mise_version                     (string,  default "2026.9.9")
 #     mise release this template installs. Latest stable patch, measured at write time
 #     per K11/S7 — never carried forward from an earlier revision. Every committed
 #     mise.lock must be re-locked with this version.
@@ -122,7 +122,7 @@ on:
         description: "mise release the template installs. Latest stable patch, measured at write time per K11/S7. Every committed mise.lock must be re-locked with this version."
         required: false
         type: string
-        default: "2026.9.1"
+        default: "2026.9.9"
       dry_run:
         description: "Build archives/wheels/source-distributions, checksums.txt, and (go/rust) binary-checksums.txt as usual; skip the tag push and the platform release."
         required: false
