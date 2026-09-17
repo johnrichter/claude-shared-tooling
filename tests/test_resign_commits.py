@@ -378,12 +378,12 @@ class TestTopologyCheckReachabilityVsCount(SigningTestCase):
     """LED-033: `verify()` used to gate the rewrite on raw commit-count comparisons.
 
     It compared `rev-list --count` totals of the old tip versus the new one. The rebuild
-    does NOT preserve graph shape -- `commit-tree`
-    rebuilds each commit from scratch and drops headers it did not generate, so commits
-    that differed only in being signed collapse into one and a merge's now-duplicate parent
-    edges dedup away. Counts fall, nothing is lost, and the old check refused a safe
-    rewrite. These tests pin both halves: the collapse the old check false-flagged, and the
-    unrelated merge-time elision that must keep passing.
+    does NOT preserve graph shape -- `commit-tree` rebuilds each commit from scratch and
+    drops headers it did not generate, so commits that differed only in being signed
+    collapse into one and a merge's now-duplicate parent edges dedup away. Counts fall,
+    nothing is lost, and the old check refused a safe rewrite. These tests pin both halves:
+    the collapse the old check false-flagged, and the unrelated merge-time elision that
+    must keep passing.
 
     `test_rebuild_collapse_...` is the reproduction: it asserts the removed count checks
     would refuse this rewrite while the reachability check and the rest of `verify()` pass.
