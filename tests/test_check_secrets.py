@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for scripts/check_secrets.py — the security-critical secret-scanner.
+r"""Unit tests for scripts/check_secrets.py — the security-critical secret-scanner.
 
 The checker is a standalone script (not part of the installed package), so it is loaded
 by path via importlib. Tests scan throwaway temp trees, never the real repo.
@@ -26,6 +26,7 @@ from pathlib import Path
 
 _CHECKER = Path(__file__).resolve().parent.parent / "scripts" / "check_secrets.py"
 _spec = importlib.util.spec_from_file_location("check_secrets", _CHECKER)
+assert _spec is not None and _spec.loader is not None, f"failed to load spec for {_CHECKER}"
 cs = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cs)
 
@@ -44,6 +45,8 @@ _SLACK_NEAR_MISS = "xoxb-ab59" + "EXAMPLETOKEM"  # one char off the placeholder 
 
 
 class ScanTests(unittest.TestCase):
+    """Exercises `check_secrets.scan` against throwaway temp trees built per test."""
+
     def _scan(self, files: dict[str, str]):
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
@@ -56,32 +59,39 @@ class ScanTests(unittest.TestCase):
         return cs.scan(root, _CHECKER)
 
     def test_clean_tree_passes(self):
+        """A tree with no secret-shaped content reports zero failures."""
         failures = self._scan({"code.py": "print('hello world')\n", "doc.md": "# hi\n"})
         self.assertEqual(failures, [])
 
     def test_private_key_secret_fails(self):
+        """An embedded private-key header fails, and the reported reason names it."""
         failures = self._scan({"leak.txt": f"{_KEY}\nabc\n"})
         self.assertTrue(any("private key" in f for f in failures))
 
     def test_aws_key_secret_fails(self):
+        """A real-shaped AWS access key fails, and the reported reason names it."""
         failures = self._scan({"leak.env": f"AWS_KEY={_AWS}\n"})
         self.assertTrue(any("AWS" in f for f in failures))
 
     def test_slack_token_secret_fails(self):
+        """A real-shaped Slack bot token fails, and the reported reason names it."""
         failures = self._scan({"leak.txt": f"token={_SLACK}\n"})
         self.assertTrue(any("Slack" in f for f in failures))
 
     def test_github_token_secret_fails(self):
+        """A real-shaped GitHub token fails, and the reported reason names it."""
         failures = self._scan({"leak.txt": f"token={_GHP}\n"})
         self.assertTrue(any("GitHub" in f for f in failures))
 
     def test_aws_doc_placeholder_key_is_exempt(self):
+        """AWS's reserved doc placeholder is allowlisted, not flagged as a real key."""
         # AWS's own permanently-reserved doc placeholder cannot be a real key,
         # so quoting AWS docs/examples must never fail the build.
         failures = self._scan({"docs/example.md": f"aws_access_key_id = {_AWS_DOC}\n"})
         self.assertEqual(failures, [])
 
     def test_aws_placeholder_exemption_is_exact_not_fuzzy(self):
+        """A one-char near-miss of the placeholder is not exempt; a real key still fails."""
         # A one-character near-miss of the placeholder is not allowlisted, and a
         # real-shaped key in the same tree still fails: the exemption is exact.
         failures = self._scan(
@@ -94,12 +104,14 @@ class ScanTests(unittest.TestCase):
         self.assertTrue(any(f.startswith("real.env") for f in failures), msg=str(failures))
 
     def test_real_key_alongside_placeholder_in_one_file_still_fails(self):
+        """A file quoting the placeholder AND leaking a real key is still flagged."""
         # Per-occurrence check, not per-file: a file that quotes the placeholder
         # AND leaks a real-shaped key is still flagged.
         failures = self._scan({"mixed.md": f"example: {_AWS_DOC}\nreal: {_AWS}\n"})
         self.assertTrue(any("AWS" in f for f in failures), msg=str(failures))
 
     def test_slack_doc_placeholder_token_is_exempt(self):
+        """A third-party scanner's own documented Slack-token example is exempt."""
         # A third-party scanner tool's own documented Slack-token example format
         # cannot be a real bot token, so ingesting that tool's rule file must
         # never fail the build. Mirrors the Go side's slackExampleTokens.
@@ -107,6 +119,7 @@ class ScanTests(unittest.TestCase):
         self.assertEqual(failures, [])
 
     def test_slack_placeholder_exemption_is_exact_not_fuzzy(self):
+        """A one-char near-miss of the placeholder is not exempt; a real token still fails."""
         # A one-character near-miss of the placeholder is not allowlisted, and a
         # real-shaped token in the same tree still fails: the exemption is exact.
         failures = self._scan(
@@ -119,6 +132,7 @@ class ScanTests(unittest.TestCase):
         self.assertTrue(any(f.startswith("real.txt") for f in failures), msg=str(failures))
 
     def test_slack_placeholder_with_appended_token_chars_still_fails(self):
+        """A token that merely starts with the placeholder still fails (greedy match)."""
         # Slack-specific boundary case the AWS tests cannot cover: the Slack
         # regex has no trailing \b, so a longer token that merely STARTS with the
         # placeholder must still fail. Greedy matching consumes the whole
@@ -127,6 +141,7 @@ class ScanTests(unittest.TestCase):
         self.assertTrue(any("Slack" in f for f in failures), msg=str(failures))
 
     def test_binary_and_skip_dirs_ignored(self):
+        """Binary-suffixed files and skip-listed directories are never scanned."""
         failures = self._scan(
             {
                 "img.png": _AWS,  # binary suffix -> not scanned
@@ -136,6 +151,7 @@ class ScanTests(unittest.TestCase):
         self.assertEqual(failures, [])
 
     def test_git_worktrees_skipped_but_real_leak_still_caught(self):
+        """`.git-worktrees` content is skipped, but a real leak elsewhere still fails."""
         # .git-worktrees holds transient full checkouts (mirrors .gitignore) --
         # a leak inside one must not be scanned, but a real leak elsewhere must
         # still fail. Regression guard for the enumerator/.gitignore drift.
@@ -149,6 +165,7 @@ class ScanTests(unittest.TestCase):
         self.assertTrue(any(f.startswith("leak.env") for f in failures), msg=str(failures))
 
     def test_secret_scanned_regardless_of_extension(self):
+        """Secrets are caught in code, config, and extensionless files alike."""
         failures = self._scan(
             {
                 "src/lib.rs": f'const KEY: &str = "{_AWS}";\n',
@@ -164,11 +181,13 @@ class ScanTests(unittest.TestCase):
         self.assertTrue(any(f.startswith("leak:") for f in failures), msg=str(failures))
 
     def test_secret_in_markdown_body_fails(self):
+        """A secret in a markdown file's body (not just frontmatter) still fails."""
         content = f"# doc\n\n{_AWS}\n"
         failures = self._scan({"doc.md": content})
         self.assertTrue(any("AWS" in f for f in failures), msg=str(failures))
 
     def test_secret_mid_file_surrounded_by_many_lines_still_caught(self):
+        """A secret buried deep in a large file is still caught."""
         # Boundary/adversarial: secret buried on line 51 of a 100-line file,
         # not at file start/end where a naive line-count-limited scan might look.
         filler = "\n".join(f"line {i} of filler text, nothing to see here" for i in range(50))
@@ -177,6 +196,7 @@ class ScanTests(unittest.TestCase):
         self.assertTrue(any("AWS" in f for f in failures), msg=str(failures))
 
     def test_private_key_block_spanning_multiple_lines_caught(self):
+        """A private-key header still fires with a multi-line key body following it."""
         # The regex only matches the BEGIN header line itself, not the body --
         # confirm that still fires even when real key body lines follow across
         # many lines (the header is what the pattern keys off of).
@@ -186,6 +206,7 @@ class ScanTests(unittest.TestCase):
         self.assertTrue(any("private key" in f for f in failures), msg=str(failures))
 
     def test_all_github_token_prefixes_caught(self):
+        """Every `gh[pousr]_` GitHub token prefix is caught, not just `ghp_`."""
         # SE claims "ghp_/gho_/token" coverage broadly -- the pattern is
         # gh[pousr]_, i.e. ghp_/gho_/ghu_/ghs_/ghr_. Prove each fires.
         for prefix in ("ghp_", "gho_", "ghu_", "ghs_", "ghr_"):
@@ -194,6 +215,7 @@ class ScanTests(unittest.TestCase):
             self.assertTrue(any("GitHub" in f for f in failures), msg=f"{prefix}: {failures}")
 
     def test_clean_dir_with_only_skip_dir_secrets_passes_overall(self):
+        """A tree whose only secret-shaped content lives under skipped dirs reports zero."""
         # Confirms SKIP_DIRS suppression isn't accidentally partial: a repo
         # whose ONLY secret-shaped content lives entirely under skipped dirs
         # (.git, node_modules) reports zero findings, not just zero for those paths.
