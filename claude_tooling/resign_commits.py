@@ -131,9 +131,11 @@ def compute_base(unsigned: list[str], *, cwd: str) -> str | None:
 
 
 def rebuild(base: str | None, tip: str, *, cwd: str, sign: bool = True):
-    """Rebuild every commit in ``base..tip`` (or all of ``tip`` if base is None) via
-    ``git commit-tree``, reusing each original tree and remapping parents. Returns
-    ``(new_tip, mapping)`` where mapping is ``{old_sha: new_sha}``. Does NOT move any ref.
+    """Rebuild every commit in ``base..tip`` via ``git commit-tree``.
+
+    Rebuilds all of ``tip`` if base is None, reusing each original tree and remapping
+    parents. Returns ``(new_tip, mapping)`` where mapping is ``{old_sha: new_sha}``. Does
+    NOT move any ref.
     """
     rev_args = ["rev-list", "--topo-order", "--reverse"]
     rev_args.append(tip if base is None else f"{base}..{tip}")
@@ -249,6 +251,11 @@ def _sanitize(ref: str) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point: detect, rebuild, verify, and (with ``--apply``) move the ref.
+
+    Returns 0 on a clean dry run or successful apply, 1 on verification failure or a
+    refused/skipped apply.
+    """
     ap = argparse.ArgumentParser(
         description="Re-sign unsigned commits on a git ref (conflict-proof)."
     )
@@ -319,12 +326,14 @@ def main(argv: list[str] | None = None) -> int:
         # added in between). git update-ref with an expected old value is atomic.
         if not git_ok(["update-ref", f"refs/heads/{args.ref}", new_tip, tip], cwd=cwd):
             print(
-                f"--apply aborted: {args.ref} moved since detection (expected {tip[:12]}); nothing changed. Re-run.",
+                f"--apply aborted: {args.ref} moved since detection (expected {tip[:12]}); "
+                "nothing changed. Re-run.",
                 file=sys.stderr,
             )
             return 1
         print(
-            f"Applied: refs/heads/{args.ref} -> {new_tip[:12]}  (working tree unchanged; trees identical)"
+            f"Applied: refs/heads/{args.ref} -> {new_tip[:12]}  "
+            "(working tree unchanged; trees identical)"
         )
     else:
         print(f"Dry run — ref not moved. To apply:  git update-ref refs/heads/{args.ref} {new_tip}")

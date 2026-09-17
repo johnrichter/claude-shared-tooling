@@ -375,19 +375,22 @@ class TestOctopusBuildBranch(SigningTestCase):
 
 
 class TestTopologyCheckReachabilityVsCount(SigningTestCase):
-    """LED-033: `verify()` used to gate the rewrite on raw `rev-list --count` totals of the
-    old tip versus the new one. The rebuild does NOT preserve graph shape -- `commit-tree`
-    rebuilds each commit from scratch and drops headers it did not generate, so commits
-    that differed only in being signed collapse into one and a merge's now-duplicate parent
-    edges dedup away. Counts fall, nothing is lost, and the old check refused a safe
-    rewrite. These tests pin both halves: the collapse the old check false-flagged, and the
-    unrelated merge-time elision that must keep passing.
+    """LED-033: `verify()` used to gate the rewrite on raw commit-count comparisons.
+
+    It compared `rev-list --count` totals of the old tip versus the new one. The rebuild
+    does NOT preserve graph shape -- `commit-tree` rebuilds each commit from scratch and
+    drops headers it did not generate, so commits that differed only in being signed
+    collapse into one and a merge's now-duplicate parent edges dedup away. Counts fall,
+    nothing is lost, and the old check refused a safe rewrite. These tests pin both halves:
+    the collapse the old check false-flagged, and the unrelated merge-time elision that
+    must keep passing.
 
     `test_rebuild_collapse_...` is the reproduction: it asserts the removed count checks
     would refuse this rewrite while the reachability check and the rest of `verify()` pass.
     """
 
     def test_rebuild_collapse_refused_by_the_old_count_check_not_by_reachability(self):
+        """The removed count checks would refuse a safe collapse; reachability does not."""
         r = self.repo
         c0 = r.commit("base.txt", "0\n", "c0 root", sign=True)
 
@@ -434,14 +437,17 @@ class TestTopologyCheckReachabilityVsCount(SigningTestCase):
         self.assertNotIn("N", r.flags(new_tip))
 
     def test_genuine_unreachability_is_refused_and_reports_both_counts(self):
-        """The check must still refuse real loss, and name the numbers when it does --
-        LED-033's operator cost was a refusal that reported neither."""
+        """The check must still refuse real loss, and name the numbers when it does.
+
+        LED-033's operator cost was a refusal that reported neither.
+        """
         r = self.repo
         r.commit("base.txt", "0\n", "c0 root", sign=True)
         r.commit("a.txt", "a\n", "a1 (UNSIGNED)", sign=False)
         old_tip = r.sha()
         unsigned = resign_commits.find_unsigned("main", cwd=self.cwd)
         base = resign_commits.compute_base(unsigned, cwd=self.cwd)
+        assert base is not None, "a1 has a signed parent, so compute_base must find a boundary"
         new_tip, mapping = resign_commits.rebuild(base, old_tip, cwd=self.cwd)
         self.assertEqual(resign_commits._lost_commits(new_tip, mapping, cwd=self.cwd), [])
 
@@ -464,6 +470,7 @@ class TestTopologyCheckReachabilityVsCount(SigningTestCase):
         self.assertIn(base[:12], detail[reach])
 
     def test_elided_parent_stays_reachable_after_resign(self):
+        """A merge parent git elided as already-reachable must not read as loss."""
         r = self.repo
         r.commit("main.txt", "0\n", "main base", sign=True)
         r.git("checkout", "-q", "-b", "build")
