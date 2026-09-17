@@ -16,6 +16,7 @@ Coverage (mirrors the guardrail's stated contract):
     4. Each enumerated doc placeholder (AWS key, Slack token) is exempt,
        exactly and only it.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -28,14 +29,18 @@ _spec = importlib.util.spec_from_file_location("check_secrets", _CHECKER)
 cs = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cs)
 
-_AWS = "AKIA" + "JXNH2K3LQZ" + "ABCDEF"             # AKIA + exactly 16 -> matches AWS key pattern
-_AWS_DOC = "AKIAIOSFODNN7" + "EXAMPLE"              # AWS's reserved doc placeholder -> allowlisted, never a finding
-_AWS_NEAR_MISS = "AKIAIOSFODNN7EXAMPL" + "F"        # one char off the placeholder -> not allowlisted
+_AWS = "AKIA" + "JXNH2K3LQZ" + "ABCDEF"  # AKIA + exactly 16 -> matches AWS key pattern
+_AWS_DOC = (
+    "AKIAIOSFODNN7" + "EXAMPLE"
+)  # AWS's reserved doc placeholder -> allowlisted, never a finding
+_AWS_NEAR_MISS = "AKIAIOSFODNN7EXAMPL" + "F"  # one char off the placeholder -> not allowlisted
 _KEY = "-----BEGIN " + "OPENSSH PRIVATE " + "KEY-----"
-_GHP = "ghp_" + "A" * 36                            # ghp_ + 36 alnum -> matches GitHub token pattern
-_SLACK = "xoxb-" + "1234567890" + "-abcdefghij"     # xoxb- + 10+ alnum/dash -> matches Slack token pattern
-_SLACK_DOC = "xoxb-ab59" + "EXAMPLETOKEN"           # a scanner tool's own documented example -> allowlisted
-_SLACK_NEAR_MISS = "xoxb-ab59" + "EXAMPLETOKEM"     # one char off the placeholder -> not allowlisted
+_GHP = "ghp_" + "A" * 36  # ghp_ + 36 alnum -> matches GitHub token pattern
+_SLACK = (
+    "xoxb-" + "1234567890" + "-abcdefghij"
+)  # xoxb- + 10+ alnum/dash -> matches Slack token pattern
+_SLACK_DOC = "xoxb-ab59" + "EXAMPLETOKEN"  # a scanner tool's own documented example -> allowlisted
+_SLACK_NEAR_MISS = "xoxb-ab59" + "EXAMPLETOKEM"  # one char off the placeholder -> not allowlisted
 
 
 class ScanTests(unittest.TestCase):
@@ -79,10 +84,12 @@ class ScanTests(unittest.TestCase):
     def test_aws_placeholder_exemption_is_exact_not_fuzzy(self):
         # A one-character near-miss of the placeholder is not allowlisted, and a
         # real-shaped key in the same tree still fails: the exemption is exact.
-        failures = self._scan({
-            "near.env": f"AWS_KEY={_AWS_NEAR_MISS}\n",
-            "real.env": f"AWS_KEY={_AWS}\n",
-        })
+        failures = self._scan(
+            {
+                "near.env": f"AWS_KEY={_AWS_NEAR_MISS}\n",
+                "real.env": f"AWS_KEY={_AWS}\n",
+            }
+        )
         self.assertTrue(any(f.startswith("near.env") for f in failures), msg=str(failures))
         self.assertTrue(any(f.startswith("real.env") for f in failures), msg=str(failures))
 
@@ -102,10 +109,12 @@ class ScanTests(unittest.TestCase):
     def test_slack_placeholder_exemption_is_exact_not_fuzzy(self):
         # A one-character near-miss of the placeholder is not allowlisted, and a
         # real-shaped token in the same tree still fails: the exemption is exact.
-        failures = self._scan({
-            "near.txt": f"token={_SLACK_NEAR_MISS}\n",
-            "real.txt": f"token={_SLACK}\n",
-        })
+        failures = self._scan(
+            {
+                "near.txt": f"token={_SLACK_NEAR_MISS}\n",
+                "real.txt": f"token={_SLACK}\n",
+            }
+        )
         self.assertTrue(any(f.startswith("near.txt") for f in failures), msg=str(failures))
         self.assertTrue(any(f.startswith("real.txt") for f in failures), msg=str(failures))
 
@@ -118,30 +127,36 @@ class ScanTests(unittest.TestCase):
         self.assertTrue(any("Slack" in f for f in failures), msg=str(failures))
 
     def test_binary_and_skip_dirs_ignored(self):
-        failures = self._scan({
-            "img.png": _AWS,            # binary suffix -> not scanned
-            ".git/config": _AWS,        # skip dir -> not scanned
-        })
+        failures = self._scan(
+            {
+                "img.png": _AWS,  # binary suffix -> not scanned
+                ".git/config": _AWS,  # skip dir -> not scanned
+            }
+        )
         self.assertEqual(failures, [])
 
     def test_git_worktrees_skipped_but_real_leak_still_caught(self):
         # .git-worktrees holds transient full checkouts (mirrors .gitignore) --
         # a leak inside one must not be scanned, but a real leak elsewhere must
         # still fail. Regression guard for the enumerator/.gitignore drift.
-        failures = self._scan({
-            ".git-worktrees/claude/wt/some.env": f"AWS_KEY={_AWS}\n",
-            "leak.env": f"AWS_KEY={_AWS}\n",
-        })
+        failures = self._scan(
+            {
+                ".git-worktrees/claude/wt/some.env": f"AWS_KEY={_AWS}\n",
+                "leak.env": f"AWS_KEY={_AWS}\n",
+            }
+        )
         self.assertFalse(any(".git-worktrees" in f for f in failures), msg=str(failures))
         self.assertTrue(any(f.startswith("leak.env") for f in failures), msg=str(failures))
 
     def test_secret_scanned_regardless_of_extension(self):
-        failures = self._scan({
-            "src/lib.rs": f"const KEY: &str = \"{_AWS}\";\n",
-            "config.json": f'{{"token": "{_GHP}"}}\n',
-            "tool.py": f"TOKEN = '{_GHP}'\n",
-            "leak": f"{_AWS}\n",  # no extension at all
-        })
+        failures = self._scan(
+            {
+                "src/lib.rs": f'const KEY: &str = "{_AWS}";\n',
+                "config.json": f'{{"token": "{_GHP}"}}\n',
+                "tool.py": f"TOKEN = '{_GHP}'\n",
+                "leak": f"{_AWS}\n",  # no extension at all
+            }
+        )
         self.assertEqual(len(failures), 4, msg=str(failures))
         self.assertTrue(any("lib.rs" in f for f in failures), msg=str(failures))
         self.assertTrue(any("config.json" in f for f in failures), msg=str(failures))
@@ -182,11 +197,13 @@ class ScanTests(unittest.TestCase):
         # Confirms SKIP_DIRS suppression isn't accidentally partial: a repo
         # whose ONLY secret-shaped content lives entirely under skipped dirs
         # (.git, node_modules) reports zero findings, not just zero for those paths.
-        failures = self._scan({
-            ".git/COMMIT_EDITMSG": _AWS,
-            "node_modules/pkg/leak.js": f"const k = '{_GHP}';",
-            "README.md": "nothing sensitive here\n",
-        })
+        failures = self._scan(
+            {
+                ".git/COMMIT_EDITMSG": _AWS,
+                "node_modules/pkg/leak.js": f"const k = '{_GHP}';",
+                "README.md": "nothing sensitive here\n",
+            }
+        )
         self.assertEqual(failures, [])
 
 

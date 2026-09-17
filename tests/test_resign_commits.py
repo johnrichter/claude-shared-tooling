@@ -404,8 +404,11 @@ class TestTopologyCheckReachabilityVsCount(SigningTestCase):
         self.assertEqual(r.tree(signed), r.tree(twin))
 
         r.git("checkout", "-q", "t1")
-        _run(["merge", "-S", "--no-ff", "-m", "merge the checkpoint twin", "t2"],
-             r.path, env=_env("2026-02-03T00:00:00"))
+        _run(
+            ["merge", "-S", "--no-ff", "-m", "merge the checkpoint twin", "t2"],
+            r.path,
+            env=_env("2026-02-03T00:00:00"),
+        )
         old_tip = r.sha()
         self.assertEqual(len(resign_commits.parents(old_tip, cwd=self.cwd)), 2)
 
@@ -447,9 +450,7 @@ class TestTopologyCheckReachabilityVsCount(SigningTestCase):
         r.git("checkout", "-q", "-b", "sidetrack", base)
         orphan = r.commit("orphan.txt", "o\n", "not reachable from new_tip", sign=True)
         stranded = dict(mapping, **{base: orphan})
-        self.assertEqual(
-            resign_commits._lost_commits(new_tip, stranded, cwd=self.cwd), [base]
-        )
+        self.assertEqual(resign_commits._lost_commits(new_tip, stranded, cwd=self.cwd), [base])
         detail = {
             name: text
             for name, ok, text in resign_commits.verify(
@@ -476,8 +477,11 @@ class TestTopologyCheckReachabilityVsCount(SigningTestCase):
         r.commit("t2.txt", "x\n", "t2 checkpoint (UNSIGNED)", sign=False)
         r.git("checkout", "-q", "build")
 
-        _run(["merge", "-S", "--no-ff", "-m", "octopus merge t1 t2 t3", "t1", "t2", "t3"],
-             r.path, env=_env("2026-03-03T00:00:00"))
+        _run(
+            ["merge", "-S", "--no-ff", "-m", "octopus merge t1 t2 t3", "t1", "t2", "t3"],
+            r.path,
+            env=_env("2026-03-03T00:00:00"),
+        )
         old_tip = r.sha()
 
         # git elided t1: it merged 3 branches but recorded only 3 parents (HEAD + t2 + t3),
@@ -485,7 +489,9 @@ class TestTopologyCheckReachabilityVsCount(SigningTestCase):
         # still an ancestor of old_tip via t3.
         recorded_parents = resign_commits.parents(old_tip, cwd=self.cwd)
         self.assertEqual(len(recorded_parents), 3)
-        self.assertTrue(resign_commits.git_ok(["merge-base", "--is-ancestor", t1, old_tip], cwd=self.cwd))
+        self.assertTrue(
+            resign_commits.git_ok(["merge-base", "--is-ancestor", t1, old_tip], cwd=self.cwd)
+        )
 
         # This elision happened at merge time, before the tool ever saw the history, so
         # the rebuild reproduces it verbatim and the old count check would have passed
@@ -538,9 +544,7 @@ class TestCli(SigningTestCase):
         self.assertNotIn("N", r.flags("main"))
         self.assertEqual(r.git("status", "--porcelain").stdout, "")
         # The backup marker is a plain ref under refs/backup/, not a tag object.
-        self.assertTrue(
-            r.git("for-each-ref", "--format=%(refname)", "refs/backup/").stdout.strip()
-        )
+        self.assertTrue(r.git("for-each-ref", "--format=%(refname)", "refs/backup/").stdout.strip())
         self.assertEqual(r.git("tag", "-l").stdout.strip(), "")
         out2 = io.StringIO()
         with contextlib.redirect_stdout(out2):
