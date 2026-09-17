@@ -10,7 +10,7 @@ tags:
   - owner:public
 links:
   - project:fleet-04-adoption:design
-updated: 2026-09-10T12:00:00Z
+updated: 2026-09-16T00:00:00Z
 ---
 
 # CI template contract
@@ -46,22 +46,25 @@ The fleet uses four fully qualified runner images, selected per operating system
 
 Defect 7: every template hardcodes a `language-tools` version (F9 measures 18 loci at `2.1.0` — five template `env:` blocks, twelve caller assignments, one plugin JSON file).
 
-**Rule.** Each template declares exactly **one** `LANGUAGE_TOOLS_VERSION` env locus, seven in total (the sixth was `ci-shell.yml`; the seventh is the new `ci-workflow.yml`). Its value is `3.0.3` — a patch bump over `3.0.2` (both patch the `3.0.0` OD69 first set, whose major bump made `--language` a required selector on an existing verb, SC5). `3.0.3` adds a third `go/toolchain` fix the binary reaches CI with only through a module retag: the python pytest vacuous-pass fix (a zero-collection unit or e2e run is a pass, not a failure), atop `3.0.2`'s rust unit/e2e test-filterset correction (a `binary()` name matcher that matched no binary failed every crate before a test ran) and in-process failure-path output capture. The `governance-code` plugin JSON must carry the same `3.0.3`. **No caller pins a version**: the twelve caller assignments leave with the jobs SC16 replaces (OD7).
+**Rule.** Each template declares exactly **one** `LANGUAGE_TOOLS_VERSION` env locus, seven in total (the sixth was `ci-shell.yml`; the seventh is the new `ci-workflow.yml`). Its value is `3.0.4` — a patch bump over `3.0.3` carrying layer 1's adapter repairs, atop `3.0.3`'s prior fixes (the python pytest vacuous-pass fix atop `3.0.2`'s rust unit/e2e test-filterset correction and in-process failure-path output capture, `3.0.2`/`3.0.3` both patching the `3.0.0` OD69 first set whose major bump made `--language` a required selector on an existing verb, SC5). Those repairs are SC19's sixteenth banned-command member, SC43's truncation warning and its bandit test-file exclude, the shell/python census-exclusion rule, and five probe-arm repairs split by the criterion that owns each: SC53's three (rust `security`, python `test unit`, python `test e2e`) and SC29's two (shell `test unit`, shell `test e2e`). The cause read's other four arms land outside this binary — python `lint` and `workflow lint` are module-side repairs in `marketplace`, and shell `lint` and go `test e2e` need a host where their own tool resolves. The `governance-code` plugin JSON must carry the same `3.0.4`. **No caller pins a version**: the twelve caller assignments leave with the jobs SC16 replaces (OD7).
 
 | Locus | Count after | Value |
 |---|---|---|
-| Template `env:` block | 7 (one per template) | `3.0.3` |
-| `governance-code` plugin JSON | 1 | `3.0.3` |
+| Template `env:` block | 7 (one per template) | `3.0.4` |
+| `governance-code` plugin JSON | 1 | `3.0.4` |
 | Caller assignments | 0 | — (removed with the replaced jobs, OD7) |
 
 ```yaml
 env:
   # Named once per template; every step reads this instead of restating the version.
-  # 3.0.3 patch-bumps 3.0.2 (both patch the 3.0.0 OD69 first set, whose major
-  # bump made --language a required selector on `release build`, SC5); it adds the
-  # go/toolchain python pytest vacuous-pass fix atop 3.0.2's rust test-filterset
+  # 3.0.4 patch-bumps 3.0.3 with layer 1's adapter repairs: SC19's sixteenth
+  # banned-command member, SC43's truncation warning and bandit test-file
+  # exclude, the shell/python census-exclusion rule, and five probe-arm repairs
+  # split by owner -- SC53's three (rust security, python test unit, python
+  # test e2e) and SC29's two (shell test unit, shell test e2e). All atop
+  # 3.0.3's own python pytest vacuous-pass fix and 3.0.2's rust test-filterset
   # and in-process failure-path capture fixes.
-  LANGUAGE_TOOLS_VERSION: "3.0.3"
+  LANGUAGE_TOOLS_VERSION: "3.0.4"
 ```
 
 ---
@@ -79,9 +82,16 @@ Each of the three compiled-language CI templates (`ci-go.yml`, `ci-rust.yml`, `c
 
 Source checks run first and on one platform because each reads source text or the dependency graph rather than build output, so a second platform finds nothing new (OD8, OD63); a source-check failure then costs a second rather than a compile. `build` and every `test` subcommand run on all four target platforms (OD9, OD53 keeps `test benchmark` on all four deliberately). The template carries this shape, not the caller (OD9).
 
-**`ci-shell.yml` is out of this population by construction.** A shell script neither compiles nor packages, so it runs no `build` and carries no matrix to gate. It declares one job carrying `format`, `lint`, `security`, `test unit` and `test e2e` (OD3, OD50, OD51 — shell's five pairs in section 4.7).
+**`ci-shell.yml` splits its five pairs the same way, but not into the compiled-language table above (OD3, OD50, OD51 — shell's five pairs in section 4.7).** A shell script neither compiles nor packages, so it runs no `build`, and `source-checks`' platform and `test`'s matrix differ from the compiled-language row:
 
-**`ci-workflow.yml` is out of this population too.** WORKFLOW-PAIR (OD71) carves the workflow track out of the section 4.7 language matrix rather than adding it as a column, so the track owns one pair — `workflow lint` — and no `build`. It declares one job for the same reason `ci-shell.yml` does: the check reads source text, not build output, so a second platform or a build-then-test split would find nothing new.
+| Job | Runner | Checks | `needs` |
+|---|---|---|---|
+| `source-checks` | `ubuntu-24.04-arm` (fixed, OD63) | `format`, `lint`, `security` | — |
+| `test` | 3-platform matrix: `ubuntu-24.04-arm`, `macos-26`, `macos-26-intel` (SC51) | `test unit`, `test e2e` | `source-checks` |
+
+`test`'s matrix is narrower than `build-test`'s four platforms because SC51's layer-0 probe proves only these three reachable for the shell track's two macOS-unmeasured tools (`checkbashisms`, `kcov`); it carries no `ubuntu-24.04` (x64) leg because the track never ran one before this split and the probe named no reason to add it. `kcov`, `test unit`'s coverage tool, resolves through Homebrew normally on `macos-26` (a bottle confirmed current for that image) but not on `macos-26-intel` (the newest x86_64 bottle is unconfirmed against that image) — the `test` job runs a passthrough `kcov` shim on that one leg instead, so coverage collection is scoped down there while `test unit` and `test e2e` still run identically across all three legs (section 5).
+
+**`ci-workflow.yml` is out of this population too.** WORKFLOW-PAIR (OD71) carves the workflow track out of the section 4.7 language matrix rather than adding it as a column, so the track owns one pair — `workflow lint` — and no `build`. It declares one job: the check reads source text, not build output, so a second platform or a build-then-test split would find nothing new — the same reasoning `ci-shell.yml`'s own `source-checks` job rests on, without `ci-shell.yml`'s second, test-carrying job, because `ci-workflow.yml` owns no `test` pair for a second job to carry.
 
 ```yaml
 # Two-job skeleton for a compiled-language CI template (ci-go.yml shown; Rust/Python identical
@@ -149,7 +159,9 @@ jobs:
 
 **The unit pair anchors `--dir` absolute.** `language-tools test unit` wraps `go test` in gotestsum and writes `junit.xml` and `coverage.out` at `<dir>/<name>`, while the check already runs with its working directory set to `<dir>`. A relative `--dir` (e.g. `go/agentcontract`) therefore doubles into `<dir>/<dir>/<name>`, whose parent does not exist, and gotestsum exits 1 in ~30 ms having run zero tests. `ci-go.yml` passes this one step `--dir "${{ github.workspace }}/${{ inputs.module_dir }}"` so the write path resolves absolute against the real directory. The target root and subject set are unchanged — only the path is anchored. `build` and `test e2e` write no `<dir>`-relative output and keep the plain relative `--dir`. The dir-relative write is a `language-tools` behavior, not the template's; the anchoring is the template-side remedy the pinned binary needs, and the rust unit pair (which writes `lcov.info` the same way) carries the same latent shape behind its own source-checks gate.
 
-**A Python adopter declares its own test runner.** Where Go (gotestsum) and Rust (cargo-nextest/cargo-llvm-cov) reach the runner as toolchain pins, Python's `test unit`/`test e2e` run `uv run pytest --cov`, which resolves pytest and pytest-cov from the project's own environment. A Python caller must therefore declare **pytest** and **pytest-cov** in a `[dependency-groups]` block (uv's default `dev` group) in its `pyproject.toml` and regenerate `uv.lock`, or the unit pair exits 4 on the unrecognized `--cov` argument. ruff and mypy remain toolchain pins and are not declared. A project that ships no e2e-marked test needs nothing more: a zero-collection run — `test e2e` with every test deselected, or `test unit` on an empty suite — is a vacuous pass, not a failure.
+**A Python adopter's test-runner plugins ride the invocation, not its lockfile.** Where Go (gotestsum) and Rust (cargo-nextest/cargo-llvm-cov) reach the runner as toolchain pins, Python's `test unit`/`test e2e` run `uv run --with <plugin> pytest`, which adds the pair's own plugin — pytest-cov for `test unit`, pytest-playwright for `test e2e` — to that one invocation's environment. So neither plugin has to appear in the caller's `pyproject.toml`, and the unit pair no longer exits 4 on an unrecognized `--cov` argument when pytest-cov is undeclared. An adopter that wants to pin the runner version still declares **pytest** in a `[dependency-groups]` block (uv's default `dev` group) and regenerates `uv.lock`; the project's own pin wins over the version `--with` would otherwise resolve. ruff and mypy remain toolchain pins and are not declared.
+
+**The two pairs partition by path, not by a marker.** `test unit` runs `pytest -k "not e2e"` and `test e2e` runs `pytest -k e2e`, so a test lands in the e2e pair when `e2e` appears anywhere in its node ID — a directory segment (`tests/e2e/test_login.py`), a file name (`tests/test_e2e.py`) or the test function's own name — and in the unit pair otherwise. A `@pytest.mark.e2e` marker no longer selects anything on its own, and a unit test whose name happens to contain `e2e` runs in the e2e pair instead: an adopter names its e2e tests on an `e2e` path and keeps the substring out of unit test names. A project that ships no e2e test needs nothing more: a zero-collection run — `test e2e` with every test deselected, or `test unit` on an empty suite — is a vacuous pass, not a failure.
 
 ---
 
@@ -369,16 +381,50 @@ Three of the 22 reach no mise backend and install through the system package man
 | Tool | OS | Channel | Source / package | Serves |
 |---|---|---|---|---|
 | `checkbashisms` | Ubuntu | apt | `devscripts` package | Shell track (`source-checks` on `ubuntu-24.04-arm`) |
-| `checkbashisms` | macOS | Homebrew | `checkbashisms` formula | Not installed — source checks run on `ubuntu-24.04-arm` alone (OD63) |
+| `checkbashisms` | macOS | Homebrew | `checkbashisms` formula | Not installed — `source-checks` runs on `ubuntu-24.04-arm` alone (OD63); `test`'s macOS legs run no `lint` |
 | Google Chrome | Ubuntu | apt | Google's own apt repository | Go `test e2e` on both Ubuntu targets |
 | Google Chrome | macOS | Homebrew | `google-chrome` cask | Go `test e2e` on the macOS `build`/`test` legs (OD63) |
-| `kcov` | Ubuntu | apt build-deps + source build | `SimonKagstrom/kcov` pinned to the v43 tag's own commit, built with cmake | Shell track (`source-checks` on `ubuntu-24.04-arm`) |
+| `kcov` | Ubuntu | apt build-deps + source build | `SimonKagstrom/kcov` pinned to the v43 tag's own commit, built with cmake | Shell track (`test` job's `ubuntu-24.04-arm` leg) |
+| `kcov` | macOS arm64 | Homebrew | `kcov` formula (`arm64_tahoe` bottle, confirmed current for `macos-26`) | Shell track (`test` job's `macos-26` leg, SC51) |
+| `kcov` | macOS x86_64 | None — passthrough shim | A `kcov`-named script on PATH that strips kcov's own arguments and execs the wrapped command | Shell track (`test` job's `macos-26-intel` leg, coverage scoped down per SC51 — see below) |
 
 **The Google apt repository (F79).** `dl.google.com/linux/chrome/deb/dists/stable/Release` answers HTTP 200 with an `Architectures` line reading `amd64 arm64`. Both `main/binary-amd64/Packages` and `main/binary-arm64/Packages` answer 200; the counter-probe `main/binary-i386/Packages` answers 404. The arm64 index lists `google-chrome-stable`, so the channel covers both Ubuntu targets.
 
 **`kcov` builds from source (defect 10 correction).** `SimonKagstrom/kcov`'s v43 release ships no downloadable binary for any platform, and Ubuntu noble's own apt archive carries no `kcov` package either, on any architecture. `mise`'s `ubi:` backend, which resolves a tool from its GitHub releases, therefore fails closed with no asset to select — apt carries no fallback package either. The template builds `kcov` from source instead: apt installs the build toolchain and coverage-backend headers (`build-essential`, `cmake`, `pkg-config`, `binutils-dev`, `libelf-dev`, `libdw-dev`, `libiberty-dev`, `libssl-dev`, `libcurl4-openssl-dev`, `zlib1g-dev`), then `cmake`, `cmake --build` and `cmake --install` compile and install the binary. The build pins the v43 tag's own commit rather than the branch tip, so a later commit on the default branch cannot change what the runner installs.
 
-**Split by OS (OD63).** The source checks run on `ubuntu-24.04-arm`, so `checkbashisms` and `kcov` install there and need no macOS build. The Homebrew leg serves the macOS `build` and `test` legs alone — which for Chrome is the Go `test e2e` leg (OD56, OD64).
+**Split by OS (OD63).** `source-checks` runs on `ubuntu-24.04-arm` alone, so `checkbashisms` installs there only and needs no macOS build. `kcov` moved with `test unit` to the `test` job (section 3), which SC51 now runs on three platforms: `ubuntu-24.04-arm` builds `kcov` from source, `macos-26` installs it from Homebrew (a bottle the layer-0 probe finds current for that image), and `macos-26-intel` installs a passthrough shim instead of a real `kcov` — the newest Homebrew bottle for that architecture is unconfirmed against the runner image, so this leg runs `test unit`'s bats suite uninstrumented rather than through an unverified build (see the shim below). The Homebrew leg otherwise serves the macOS `build` and `test` legs alone — which for Chrome is the Go `test e2e` leg (OD56, OD64).
+
+```yaml
+# macOS arm64 — kcov via Homebrew (shell test job, macos-26 leg, SC51). The layer-0 probe
+# finds an arm64_tahoe bottle in the catalog matching this runner image exactly, so the
+# catalog's current default install resolves the right build. The leg maps the Homebrew
+# prefix onto PATH before this step (section 7) and refreshes the catalog first (OD59), so
+# the bottle the probe measured is the one that resolves.
+- name: Provision kcov (macOS arm64, Homebrew — bottle confirmed current)
+  if: ${{ runner.os == 'macOS' && matrix.kcov_coverage }}
+  run: |
+    set -euo pipefail
+    brew update                      # OD59: refresh the image's own Homebrew first
+    brew install kcov
+    kcov --version   # OD60: print what was installed
+
+# macOS x86_64 — kcov coverage scoped down (shell test job, macos-26-intel leg, SC51). The
+# layer-0 probe finds no tahoe-labeled x86_64 bottle in Homebrew's kcov catalog (its newest
+# x86_64 build is sonoma, macOS 14) against a macos-26 arm64 bottle confirmed current for
+# that image — so this leg runs test unit's bats invocation without kcov's coverage wrap.
+- name: Provision kcov (macOS x86_64 — coverage scoped down, SC51)
+  if: ${{ runner.os == 'macOS' && !matrix.kcov_coverage }}
+  run: |
+    set -euo pipefail
+    cat > "${RUNNER_TEMP}/bin/kcov" <<'SHIM'
+    #!/usr/bin/env bash
+    set -euo pipefail
+    while [[ "$1" == --* ]]; do shift; done
+    shift
+    exec "$@"
+    SHIM
+    chmod +x "${RUNNER_TEMP}/bin/kcov"
+```
 
 **Cache refresh first (OD59).** Every job that installs a system package refreshes its cache before the install: Ubuntu runs `apt update`, macOS runs `brew update`. Homebrew itself is already present on the macOS image (F80: Homebrew 6.0.13), so the refresh makes that copy current and no Homebrew install step is needed.
 
@@ -393,9 +439,10 @@ Three of the 22 reach no mise backend and install through the system package man
     sudo apt-get install -y devscripts
     checkbashisms --version   # OD60: print what was installed
 
-# Ubuntu — kcov via apt build-deps and a pinned from-source build (shell source-checks job,
-# ubuntu-24.04-arm). v43 ships no binary release for any platform, and noble's own apt archive
-# carries no kcov package either, so the template compiles it instead of fetching a binary.
+# Ubuntu — kcov via apt build-deps and a pinned from-source build (shell test job's
+# ubuntu-24.04-arm leg). v43 ships no binary release for any platform, and noble's own apt
+# archive carries no kcov package either, so the template compiles it instead of fetching a
+# binary.
 - name: Install kcov (apt build-deps + source build)
   env:
     KCOV_COMMIT: a39874f938ce13f7a65f253120d1ec946b349ffe # v43, never the branch tip
@@ -450,7 +497,7 @@ Three of the 22 reach no mise backend and install through the system package man
 
 F80 measures Homebrew 6.0.13 present on the macOS image on 2026-08-26, with its PATH resolution **proven on Intel** through `/usr/local/bin` and **unproven on arm64**, where the prefix is `/opt/homebrew/bin`. No build script writes an `/etc/paths.d` entry for Homebrew, and the image's `bashrc` exports `/usr/local/bin` (the Intel prefix) but never `/opt/homebrew/bin` (the arm64 prefix).
 
-**A macOS job maps the Homebrew prefix onto PATH before its first `brew` step.** The check step that runs `checkbashisms` or Chrome inherits the same mapping, because the binaries Homebrew installs land in that same prefix. Prefix by arch: `/opt/homebrew/bin` on arm64, `/usr/local/bin` on Intel. A **cask** is the exception: it installs an `.app` bundle under `/Applications` and puts nothing on the bin prefix, so the Chrome install step links the bundle's own executable onto the prefix (section 6) — without that link the mapping is inert and the resolution check below resolves an empty path.
+**A macOS job maps the Homebrew prefix onto PATH before its first `brew` step.** The check step that runs `checkbashisms`, `kcov` or Chrome inherits the same mapping, because the binaries Homebrew installs land in that same prefix. Prefix by arch: `/opt/homebrew/bin` on arm64, `/usr/local/bin` on Intel. A matrix leg that runs no `brew` step maps nothing: `ci-shell.yml`'s `macos-26-intel` leg installs its `kcov` shim into `${RUNNER_TEMP}/bin` instead (section 6), and leaving that leg's PATH unmapped keeps the shim ahead of anything the image ships. Where the same job also provisions digest-pinned tools through mise, the mapping sits *before* that provisioning step — `GITHUB_PATH` prepends per step, so `mise bin-paths` written later stays ahead of the prefix and the pinned copy of a tool the image also carries (`jq`) still wins. A **cask** is the exception: it installs an `.app` bundle under `/Applications` and puts nothing on the bin prefix, so the Chrome install step links the bundle's own executable onto the prefix (section 6) — without that link the mapping is inert and the resolution check below resolves an empty path.
 
 **Installed browser wins on PATH (OD64).** The mapping puts the Homebrew prefix **ahead of** the image's own Chrome location, so a check resolves the copy the template installed rather than the one the image shipped. Installing without winning the PATH leaves OD56 unmet. (F77: the images ship Chrome 151.0.7922.137 on `ubuntu-24.04` and 150.0.7871.187 on `macos-26-arm64` on 2026-08-26; the templates use none of them.)
 
@@ -496,7 +543,7 @@ Shared inputs across the seven templates. A common role takes a common name; onl
 |---|---|---|---|---|
 | `runs_on` | string | `"ubuntu-24.04"`* | all seven | Fully qualified runner label (section 1); never floating. |
 | `module_dir` / `crate_dir` / `project_dir` / `script_root` / `target_root` | string | `"."` | Go / Rust / Python / shell / workflow | Target root `language-tools` checks, relative to the checked-out repo (`--dir`), except the Go unit pair, which passes it absolute as `${{ github.workspace }}/<input>` (section 1 note). Shell recurses from its root (OD54); workflow's adapter enumerates every tracked body at or below it (WFRULES clause (a)). |
-| `mise_version` | string | measured latest stable patch (section 9) | five of seven | mise release the template installs. `ci-shell.yml` and `ci-workflow.yml` pin a step-scoped env var instead (section 9). |
+| `mise_version` | string | measured latest stable patch (section 9) | all seven | mise release the template installs. `ci-shell.yml` and `ci-workflow.yml` read theirs into a step-scoped `MISE_VERSION` env var and carry no `mise.lock` re-lock clause, because neither track installs against a caller lockfile (section 9). |
 | `dry_run` | boolean | `false` | six of seven | `true` installs and verifies mise + language-tools and stops; check steps and `extra_steps` are skipped. `ci-workflow.yml` carries none (below). |
 | `test_timeout` | number | `300` | four CI templates | Seconds; defect 3 (below). |
 | `extra_steps` | string | `""` | all seven | Shell script run after the checks, for a repository-specific check `language-tools` does not cover. Empty runs nothing. |
@@ -504,7 +551,7 @@ Shared inputs across the seven templates. A common role takes a common name; onl
 
 \* `ci-shell.yml` and `ci-workflow.yml` default to `"ubuntu-24.04-arm"` instead (section 1).
 
-**`ci-workflow.yml`'s narrower input set.** It declares only `runs_on`, `target_root` and `extra_steps` — no `mise_version` (mise pins as a step-scoped env var, matching `ci-shell.yml`'s own precedent), no `dry_run`, and no `test_timeout` (defect 3 ties that input to a `test` subcommand, and this track's one pair is `lint`).
+**`ci-workflow.yml`'s narrower input set.** It declares only `runs_on`, `target_root`, `mise_version` and `extra_steps` — no `dry_run`, and no `test_timeout` (defect 3 ties that input to a `test` subcommand, and this track's one pair is `lint`).
 
 **Deleted (SC38, OD39).** `ci-go.yml` and `ci-rust.yml` drop `checkout_ai_shared_lib_sibling`, `set_ai_shared_lib_goprivate` and the `sibling_repo_token` secret — the module repository is public, so a tagged dependency resolves through the public proxy (F78). `ci-python.yml`'s single comment recording its absence stays (OD55).
 
@@ -579,11 +626,11 @@ inputs:
 
 ## 9. The mise version
 
-Defect 13: every template pins mise below the latest stable patch (K11). Each template pins mise at the **latest stable patch**, measured at write time per K11 and S7, recorded here and **never carried forward** from an earlier revision.
+Defect 13 (closed 2026-09-16): every template pinned mise below the latest stable patch (K11). Each template pins mise at the **latest stable patch**, measured at write time per K11 and S7, recorded here and **never carried forward** from an earlier revision.
 
 | Measurement | Value | Method | Date |
 |---|---|---|---|
-| Latest stable mise patch | `2026.9.1` | mise's own update check (installed `2026.8.10` reports `2026.9.1` available); the GitHub releases API probe returned HTTP 403 (unauthenticated rate limit), so the self-reported value is the instrument. | 2026-09-05 |
+| Latest stable mise patch | `2026.9.9` | GitHub releases API: `GET https://api.github.com/repos/jdx/mise/releases/latest` returned `tag_name` `v2026.9.9` with `prerelease` and `draft` both false; mise's own update check reported the same version available. | 2026-09-16 |
 
 ```yaml
 inputs:
@@ -591,12 +638,12 @@ inputs:
     description: "mise release the template installs. Latest stable patch, measured at write time per K11/S7. Every committed mise.lock must be re-locked with this version."
     required: false
     type: string
-    default: "2026.9.1"
+    default: "2026.9.9"
 ```
 
 **Re-measure on every revision (K11).** A version is never carried forward. Any revision that touches the templates re-measures the latest stable patch and records the new value and date here. Bumping the pin requires re-locking every committed `mise.lock` with the new mise (the fleet's committed locks were written by `2026.8.10`).
 
-**Two templates hardcode `MISE_VERSION` instead of exposing `mise_version`.** `ci-shell.yml` and `ci-workflow.yml` pin it as a step-scoped env var: neither track coordinates a per-repo toolchain pin, so there is no caller-visible dial to expose. Both still carry this section's own measured value. Re-confirmed unchanged for `ci-workflow.yml`'s 2026-09-06 edit date.
+**All seven templates expose `mise_version`.** `ci-shell.yml` and `ci-workflow.yml` hard-coded a step-scoped `MISE_VERSION` env var and declared no input until 2026-09-16; both now declare the same input the other five carry, and each reads it into that env var at its install step. Their input descriptions carry no `mise.lock` re-lock clause, unlike the five pin-reading templates': `ci-shell.yml` installs `--locked` against a template-owned config alone, and `ci-workflow.yml` runs no `mise install --locked` at all, so a bump re-locks nothing on either track. That omission is by construction, not an oversight.
 
 ---
 
@@ -624,7 +671,7 @@ A step fails the job on any non-zero exit. A template maps no exit code itself a
 
 **Diagnostic surface.** Every check emits one JSON result record (`schema_version: 1`) carrying `command`, `status`, `exit_code`, and an `errors[]` array. Each error carries `code`, `context` (`check`, `dir`, `language`), `message`, and a `triage` object (`instruction`, `kind`). Each diagnostic names a file; each diagnostic whose tool reports a position also names a line (SC2). Every check step passes an absolute `--log-dir` (`${{ github.workspace }}/.language-tools/log`), so per-check logs land in one known location a reader can collect. Templates surface fatal shell-level problems through GitHub `::error::` annotations (the activation and provisioning steps above); the check records themselves are the binary's own JSON.
 
-**Failure-path capture.** A `gate_negative.toolchain.error` reports only `<tool> exited N with no parsed diagnostics; see log_ref for raw output` in the capped result — the raw tool output the reader needs sits in the per-check record under `--log-dir`, which the run otherwise discards, so the error is untriageable from the run alone. Every CI check job (each of the five CI templates: `source-checks` and `build-test` for the three compiled-language templates, the single `checks` job for `ci-shell.yml` and `ci-workflow.yml`) therefore ends with one artifact-upload step, guarded `if: ${{ !cancelled() }}`, that publishes the whole `--log-dir` tree on the failing path and on the passing path. The failing path carries a `gate_negative.toolchain.error`'s raw output. The passing path carries the `security` check's own capped diagnostics and its overflow entry. That entry's caveat text names `log_ref` and nothing else. So a step that passes at exit 10 under SC41 publishes the findings past the 20-diagnostic cap, rather than name a log no reader can fetch. It exports what a check already wrote — it runs no check, and changes no invocation, target root, subject set or verdict. The artifact name carries the language, the job, a target-root slug, and `matrix.os` on the `build-test` matrix. `upload-artifact@v4` rejects a duplicate name, and a caller makes more than one call to one template in a single run. `ai-shared-lib` makes 27 `ci-go.yml` calls and 5 `ci-rust.yml` calls, and `marketplace` makes 8 `ci-python.yml` calls. The language and the job alone stay unique only inside the self-test, which makes one call per template. So a slug step derives the third component, because an artifact name carries no path separator. Two limits this capture cannot lift, both language-tools-side and not the template's to fix: a multi-tool check routed in-process (Rust `security`, the `test` kinds) writes no sub-tool stdout/stderr into its record, so the captured log names which tool exited non-zero but not why; and a check whose failure is an infra fault before any record is written leaves nothing to upload (`if-no-files-found: ignore`).
+**Failure-path capture.** A `gate_negative.toolchain.error` reports only `<tool> exited N with no parsed diagnostics; see log_ref for raw output` in the capped result — the raw tool output the reader needs sits in the per-check record under `--log-dir`, which the run otherwise discards, so the error is untriageable from the run alone. Every CI check job (each of the five CI templates: `source-checks` and `build-test` for the three compiled-language templates, `source-checks` and `test` for `ci-shell.yml` (SC51), and the single `checks` job for `ci-workflow.yml`) therefore ends with one artifact-upload step, guarded `if: ${{ !cancelled() }}`, that publishes the whole `--log-dir` tree on the failing path and on the passing path. The failing path carries a `gate_negative.toolchain.error`'s raw output. The passing path carries the `security` check's own capped diagnostics and its overflow entry. That entry's caveat text names `log_ref` and nothing else. So a step that passes at exit 10 under SC41 publishes the findings past the 20-diagnostic cap, rather than name a log no reader can fetch. It exports what a check already wrote — it runs no check, and changes no invocation, target root, subject set or verdict. The artifact name carries the language, the job, a target-root slug, and `matrix.os` on any job that runs a matrix — `build-test` for the three compiled-language templates, and now `ci-shell.yml`'s `test` job (SC51's three-platform matrix). `upload-artifact@v4` rejects a duplicate name, and a caller makes more than one call to one template in a single run. `ai-shared-lib` makes 27 `ci-go.yml` calls and 5 `ci-rust.yml` calls, and `marketplace` makes 8 `ci-python.yml` calls. The language and the job alone stay unique only inside the self-test, which makes one call per template. So a slug step derives the third component, because an artifact name carries no path separator. Two limits this capture cannot lift, both language-tools-side and not the template's to fix: a multi-tool check routed in-process (Rust `security`, the `test` kinds) writes no sub-tool stdout/stderr into its record, so the captured log names which tool exited non-zero but not why; and a check whose failure is an infra fault before any record is written leaves nothing to upload (`if-no-files-found: ignore`).
 
 ```yaml
 # ci-go.yml shown. Each other CI template substitutes its own target-root input name,

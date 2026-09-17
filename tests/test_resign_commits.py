@@ -375,19 +375,22 @@ class TestOctopusBuildBranch(SigningTestCase):
 
 
 class TestTopologyCheckReachabilityVsCount(SigningTestCase):
-    """LED-033: `verify()` used to gate the rewrite on raw `rev-list --count` totals of the
-    old tip versus the new one. The rebuild does NOT preserve graph shape -- `commit-tree`
-    rebuilds each commit from scratch and drops headers it did not generate, so commits
-    that differed only in being signed collapse into one and a merge's now-duplicate parent
-    edges dedup away. Counts fall, nothing is lost, and the old check refused a safe
-    rewrite. These tests pin both halves: the collapse the old check false-flagged, and the
-    unrelated merge-time elision that must keep passing.
+    """LED-033: `verify()` used to gate the rewrite on raw commit-count comparisons.
+
+    It compared `rev-list --count` totals of the old tip versus the new one. The rebuild
+    does NOT preserve graph shape -- `commit-tree` rebuilds each commit from scratch and
+    drops headers it did not generate, so commits that differed only in being signed
+    collapse into one and a merge's now-duplicate parent edges dedup away. Counts fall,
+    nothing is lost, and the old check refused a safe rewrite. These tests pin both halves:
+    the collapse the old check false-flagged, and the unrelated merge-time elision that
+    must keep passing.
 
     `test_rebuild_collapse_...` is the reproduction: it asserts the removed count checks
     would refuse this rewrite while the reachability check and the rest of `verify()` pass.
     """
 
     def test_rebuild_collapse_refused_by_the_old_count_check_not_by_reachability(self):
+        """The removed count checks would refuse a safe collapse; reachability does not."""
         r = self.repo
         c0 = r.commit("base.txt", "0\n", "c0 root", sign=True)
 
@@ -404,8 +407,11 @@ class TestTopologyCheckReachabilityVsCount(SigningTestCase):
         self.assertEqual(r.tree(signed), r.tree(twin))
 
         r.git("checkout", "-q", "t1")
-        _run(["merge", "-S", "--no-ff", "-m", "merge the checkpoint twin", "t2"],
-             r.path, env=_env("2026-02-03T00:00:00"))
+        _run(
+            ["merge", "-S", "--no-ff", "-m", "merge the checkpoint twin", "t2"],
+            r.path,
+            env=_env("2026-02-03T00:00:00"),
+        )
         old_tip = r.sha()
         self.assertEqual(len(resign_commits.parents(old_tip, cwd=self.cwd)), 2)
 
@@ -431,14 +437,17 @@ class TestTopologyCheckReachabilityVsCount(SigningTestCase):
         self.assertNotIn("N", r.flags(new_tip))
 
     def test_genuine_unreachability_is_refused_and_reports_both_counts(self):
-        """The check must still refuse real loss, and name the numbers when it does --
-        LED-033's operator cost was a refusal that reported neither."""
+        """The check must still refuse real loss, and name the numbers when it does.
+
+        LED-033's operator cost was a refusal that reported neither.
+        """
         r = self.repo
         r.commit("base.txt", "0\n", "c0 root", sign=True)
         r.commit("a.txt", "a\n", "a1 (UNSIGNED)", sign=False)
         old_tip = r.sha()
         unsigned = resign_commits.find_unsigned("main", cwd=self.cwd)
         base = resign_commits.compute_base(unsigned, cwd=self.cwd)
+        assert base is not None, "a1 has a signed parent, so compute_base must find a boundary"
         new_tip, mapping = resign_commits.rebuild(base, old_tip, cwd=self.cwd)
         self.assertEqual(resign_commits._lost_commits(new_tip, mapping, cwd=self.cwd), [])
 
@@ -447,9 +456,7 @@ class TestTopologyCheckReachabilityVsCount(SigningTestCase):
         r.git("checkout", "-q", "-b", "sidetrack", base)
         orphan = r.commit("orphan.txt", "o\n", "not reachable from new_tip", sign=True)
         stranded = dict(mapping, **{base: orphan})
-        self.assertEqual(
-            resign_commits._lost_commits(new_tip, stranded, cwd=self.cwd), [base]
-        )
+        self.assertEqual(resign_commits._lost_commits(new_tip, stranded, cwd=self.cwd), [base])
         detail = {
             name: text
             for name, ok, text in resign_commits.verify(
@@ -463,6 +470,7 @@ class TestTopologyCheckReachabilityVsCount(SigningTestCase):
         self.assertIn(base[:12], detail[reach])
 
     def test_elided_parent_stays_reachable_after_resign(self):
+        """A merge parent git elided as already-reachable must not read as loss."""
         r = self.repo
         r.commit("main.txt", "0\n", "main base", sign=True)
         r.git("checkout", "-q", "-b", "build")
@@ -476,8 +484,11 @@ class TestTopologyCheckReachabilityVsCount(SigningTestCase):
         r.commit("t2.txt", "x\n", "t2 checkpoint (UNSIGNED)", sign=False)
         r.git("checkout", "-q", "build")
 
-        _run(["merge", "-S", "--no-ff", "-m", "octopus merge t1 t2 t3", "t1", "t2", "t3"],
-             r.path, env=_env("2026-03-03T00:00:00"))
+        _run(
+            ["merge", "-S", "--no-ff", "-m", "octopus merge t1 t2 t3", "t1", "t2", "t3"],
+            r.path,
+            env=_env("2026-03-03T00:00:00"),
+        )
         old_tip = r.sha()
 
         # git elided t1: it merged 3 branches but recorded only 3 parents (HEAD + t2 + t3),
@@ -485,7 +496,9 @@ class TestTopologyCheckReachabilityVsCount(SigningTestCase):
         # still an ancestor of old_tip via t3.
         recorded_parents = resign_commits.parents(old_tip, cwd=self.cwd)
         self.assertEqual(len(recorded_parents), 3)
-        self.assertTrue(resign_commits.git_ok(["merge-base", "--is-ancestor", t1, old_tip], cwd=self.cwd))
+        self.assertTrue(
+            resign_commits.git_ok(["merge-base", "--is-ancestor", t1, old_tip], cwd=self.cwd)
+        )
 
         # This elision happened at merge time, before the tool ever saw the history, so
         # the rebuild reproduces it verbatim and the old count check would have passed
@@ -538,9 +551,7 @@ class TestCli(SigningTestCase):
         self.assertNotIn("N", r.flags("main"))
         self.assertEqual(r.git("status", "--porcelain").stdout, "")
         # The backup marker is a plain ref under refs/backup/, not a tag object.
-        self.assertTrue(
-            r.git("for-each-ref", "--format=%(refname)", "refs/backup/").stdout.strip()
-        )
+        self.assertTrue(r.git("for-each-ref", "--format=%(refname)", "refs/backup/").stdout.strip())
         self.assertEqual(r.git("tag", "-l").stdout.strip(), "")
         out2 = io.StringIO()
         with contextlib.redirect_stdout(out2):

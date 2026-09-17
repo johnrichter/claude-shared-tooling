@@ -56,11 +56,17 @@
 #     Root the workflow-lint check enumerates from (--dir), relative to the checked-out repo.
 #     Recurses over every tracked workflow body at or below it (both shapes above), so one call
 #     per repository is enough.
+#   mise_version                     (string,  default "2026.9.9")
+#     mise release this template installs. Latest stable patch, measured at write time per
+#     K11/S7 — never carried forward from an earlier revision. Carries no mise.lock re-lock
+#     clause, unlike the five pin-reading templates' own mise_version: this track runs no
+#     `mise install --locked` at all (Toolchain activation above), so a bump here re-locks
+#     nothing. The omission is by construction, not an oversight.
 #   extra_steps                      (string,  default "")
 #     Shell script run after the check, for a repository-specific step language-tools doesn't
 #     cover. Empty runs nothing.
 #
-# Caller contract: the caller supplies nothing but these three inputs — this template checks out
+# Caller contract: the caller supplies nothing but these inputs — this template checks out
 # the caller's own repo itself, at repo root, once per job. It needs no secret and pushes and
 # publishes nothing.
 
@@ -79,6 +85,11 @@ on:
         required: false
         type: string
         default: "."
+      mise_version:
+        description: "mise release the template installs. Latest stable patch, measured at write time per K11/S7. No mise.lock re-lock follows a bump here, unlike the five pin-reading templates: this track runs no `mise install --locked` at all."
+        required: false
+        type: string
+        default: "2026.9.9"
       extra_steps:
         description: "Shell script run after the workflow-lint check, for a repository-specific step this track doesn't cover. Empty runs nothing."
         required: false
@@ -87,8 +98,8 @@ on:
 
 env:
   # Named once; the check step reads this instead of restating the version.
-  # 3.0.3 patch-bumps 3.0.2 (both patch OD69's 3.0.0 major bump, SC5: --language became a required selector on `release build`); 3.0.3 adds the go/toolchain python pytest vacuous-pass fix (a zero-collection run passes) atop 3.0.2's rust test-filterset and in-process failure-path capture fixes.
-  LANGUAGE_TOOLS_VERSION: "3.0.3"
+  # 3.0.4 patch-bumps 3.0.3 with layer 1's adapter repairs (SC19's banned-command member addition, SC43's adapter repair and truncation-warning fix, SC53's five adapter-side probe repairs, and the shell/python census-exclusion rule) atop 3.0.3's own python pytest vacuous-pass fix and 3.0.2's rust test-filterset and in-process failure-path capture fixes.
+  LANGUAGE_TOOLS_VERSION: "3.0.4"
 
 permissions:
   contents: read
@@ -127,9 +138,9 @@ jobs:
       # Verified fetch (SC1 shape): fetch the release's own published checksum manifest,
       # look up this artifact's digest by exact filename match, then fetch the artifact and
       # fail closed on any mismatch. Never pipes a download into a shell.
-      - name: Install mise (verified fetch)
+      - name: Install mise ${{ inputs.mise_version }} (verified fetch)
         env:
-          MISE_VERSION: "2026.9.1"
+          MISE_VERSION: ${{ inputs.mise_version }}
           MISE_OS: ${{ steps.platform.outputs.mise_os }}
           MISE_ARCH: ${{ steps.platform.outputs.mise_arch }}
         run: |
